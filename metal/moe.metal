@@ -4491,6 +4491,162 @@ template [[host_name("kernel_mul_mm_id_q2_K_f16")]]         kernel mul_mm_id_f16
 template [[host_name("kernel_mul_mm_id_q4_K_f16")]]         kernel mul_mm_id_f16_rhs kernel_mul_mm_id<32, half, half4x4, simdgroup_half8x8, half, half2x4, simdgroup_half8x8, block_q4_K,    QK_NL, dequantize_q4_K,    half, half4x4, half, half2x4>;
 template [[host_name("kernel_mul_mm_id_iq2_xxs_f16")]]      kernel mul_mm_id_f16_rhs kernel_mul_mm_id<32, half, half4x4, simdgroup_half8x8, half, half2x4, simdgroup_half8x8, block_iq2_xxs, QK_NL, dequantize_iq2_xxs, half, half4x4, half, half2x4>;
 
+// DS4 routed I8 + F8_E8M0 expert weights. The production entry points below
+// fuse dequant with the routed matvec/matmul work; the standalone BF16 dump is a
+// proof seam only, and calls the exact same decode helper.
+struct ds4_metal_args_i8_e8m0_pair_swiglu_f32 {
+    uint32_t in_features;
+    uint32_t out_features;
+    uint32_t pairs;
+    uint32_t pad0;
+    uint64_t gate_expert_stride;
+    uint64_t gate_scale_expert_stride;
+    uint64_t up_expert_stride;
+    uint64_t up_scale_expert_stride;
+    uint64_t src_pair_stride;
+    uint64_t mid_pair_stride;
+    uint64_t weight_stride;
+    float clamp_value;
+};
+
+struct ds4_metal_args_i8_e8m0_mm_f32 {
+    uint32_t in_features;
+    uint32_t out_features;
+    uint32_t tokens;
+    uint32_t pad0;
+    uint64_t expert_stride;
+    uint64_t scale_expert_stride;
+    uint64_t src_token_stride;
+    uint64_t dst_token_stride;
+};
+
+struct ds4_metal_args_dsv4_routed_dequant_i8_e8m0 {
+    uint32_t rows;
+    uint32_t cols;
+    uint32_t out_stride;
+    uint32_t pad0;
+};
+
+// Decode a single routed-expert I8 weight element against its shared E8M0 scale.
+//
+// Math authority: OCP Microscaling Formats (MX) Specification v1.0 (Final),
+//   E8M0 shared scale: scale = 2^(e - 127); e=255 -> NaN (whole block);
+//   e=0 -> subnormal scale 2^(-127) (NOT zero); NO infinity encoding.
+//   https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+//   Peer-reviewed backing: Darvish Rouhani et al., arXiv:2310.10537.
+// Block geometry (NOT the OCP default k=32): block_size=16, axis=1, derived
+//   header-only from the real safetensors header per ADR 0007 (I8 [2048,2048]
+//   + F8_E8M0 [2048,128] implies ratio 16 on axis 1).
+// DeepSeek-V4 omits the MXINT8 implicit 2^(-6) fixed-point factor, so the
+// decoded value is signed_int8 * 2^(e - 127).
+inline float ds4_e8m0_decode_i8(
+        device const int8_t  *w,
+        device const uint8_t *scales,
+        uint row, uint col, uint in_features) {
+    const uint block_size = 16;                // header-derived routed geometry
+    const uint scale_idx = col / block_size;   // axis=1 broadcast
+    const uint scale_cols = in_features / block_size;
+    const uint8_t e = scales[row * scale_cols + scale_idx];
+    if (e == 255) {
+        return as_type<float>(0x7fc00000u);
+    }
+    const float scale = exp2((float)e - 127.0f);
+    return (float)((int32_t)w[row * in_features + col]) * scale;
+}
+
+inline ushort ds4_f32_to_bf16_bits(float value) {
+    const uint bits = as_type<uint>(value);
+    if ((bits & 0x7fffffffu) > 0x7f800000u) {
+        return (ushort)((bits >> 16) | 0x0040u); // keep NaNs quiet in BF16 form
+    }
+    const uint round = 0x00007fffu + ((bits >> 16) & 1u);
+    return (ushort)((bits + round) >> 16);
+}
+
+kernel void kernel_mul_mv_id_i8_e8m0_pair_swiglu_f32(
+        constant ds4_metal_args_i8_e8m0_pair_swiglu_f32 &args,
+        device const int8_t  *gate_weights,
+        device const uint8_t *gate_scales,
+        device const int8_t  *up_weights,
+        device const uint8_t *up_scales,
+        device const float   *src,
+        device const int32_t *ids,
+        device const float   *route_weights,
+        device       float   *mid,
+        uint2 gid [[thread_position_in_grid]]) {
+    const uint row = gid.x;
+    const uint pair = gid.y;
+    if (row >= args.out_features || pair >= args.pairs) return;
+
+    const int32_t expert = ids[pair];
+    if (expert < 0) return;
+
+    device const int8_t  *gate_w = gate_weights + (uint64_t)expert * args.gate_expert_stride;
+    device const uint8_t *gate_s = gate_scales  + (uint64_t)expert * args.gate_scale_expert_stride;
+    device const int8_t  *up_w   = up_weights   + (uint64_t)expert * args.up_expert_stride;
+    device const uint8_t *up_s   = up_scales    + (uint64_t)expert * args.up_scale_expert_stride;
+    device const float *x = (device const float *)((device const char *)src + (uint64_t)pair * args.src_pair_stride);
+
+    float gate = 0.0f;
+    float up = 0.0f;
+    for (uint col = 0; col < args.in_features; ++col) {
+        const float xv = x[col];
+        gate += ds4_e8m0_decode_i8(gate_w, gate_s, row, col, args.in_features) * xv;
+        up   += ds4_e8m0_decode_i8(up_w,   up_s,   row, col, args.in_features) * xv;
+    }
+
+    const float c = args.clamp_value;
+    if (c > 1.0e-6f) {
+        gate = min(gate, c);
+        up = clamp(up, -c, c);
+    }
+    const float silu = gate / (1.0f + exp(-gate));
+    const float route = *((device const float *)((device const char *)route_weights + (uint64_t)pair * args.weight_stride));
+    device float *dst = (device float *)((device char *)mid + (uint64_t)pair * args.mid_pair_stride);
+    dst[row] = silu * up * route;
+}
+
+kernel void kernel_mul_mm_id_i8_e8m0_f32(
+        constant ds4_metal_args_i8_e8m0_mm_f32 &args,
+        device const int8_t  *weights,
+        device const uint8_t *scales,
+        device const float   *src,
+        device const int32_t *ids,
+        device       float   *dst,
+        uint2 gid [[thread_position_in_grid]]) {
+    const uint row = gid.x;
+    const uint token = gid.y;
+    if (row >= args.out_features || token >= args.tokens) return;
+
+    const int32_t expert = ids[token];
+    if (expert < 0) return;
+
+    device const int8_t  *w = weights + (uint64_t)expert * args.expert_stride;
+    device const uint8_t *s = scales  + (uint64_t)expert * args.scale_expert_stride;
+    device const float *x = (device const float *)((device const char *)src + (uint64_t)token * args.src_token_stride);
+    float sum = 0.0f;
+    for (uint col = 0; col < args.in_features; ++col) {
+        sum += ds4_e8m0_decode_i8(w, s, row, col, args.in_features) * x[col];
+    }
+    device float *out = (device float *)((device char *)dst + (uint64_t)token * args.dst_token_stride);
+    out[row] = sum;
+}
+
+kernel void kernel_dsv4_routed_dequant_i8_e8m0_to_bf16(
+        constant ds4_metal_args_dsv4_routed_dequant_i8_e8m0 &args,
+        device const int8_t  *weights,
+        device const uint8_t *scales,
+        device       ushort  *out,
+        uint gid [[thread_position_in_grid]]) {
+    const uint cols = args.cols;
+    const uint total = args.rows * cols;
+    if (gid >= total) return;
+    const uint row = gid / cols;
+    const uint col = gid - row * cols;
+    out[row * args.out_stride + col] = ds4_f32_to_bf16_bits(
+        ds4_e8m0_decode_i8(weights, scales, row, col, cols));
+}
+
 #ifdef DS4_METAL_HAS_TENSOR
 // Attention-output low-rank projection retained for Metal4 prefill.  It uses
 // the same direct-RHS idea as dense matmul: dequantize the Q8_0 low projection

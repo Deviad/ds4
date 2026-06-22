@@ -1594,6 +1594,7 @@ enum {
     DS4_TENSOR_Q4_K     = 12,
     DS4_TENSOR_IQ2_XXS  = 16,
     DS4_TENSOR_I32      = 26,
+    DS4_TENSOR_I8_E8M0  = 64, /* DS4-specific paired I8+F8_E8M0 routed-expert dispatch; mirrors ds4_metal.m L40. Loader synthesis deferred to 11.49. */
 };
 
 typedef struct {

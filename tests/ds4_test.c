@@ -492,6 +492,8 @@ static void test_metal_kernel_group(void) {
     test_metal_q8_0_prefill_matmul();
 }
 
+#include "test_ds4_metal_i8_e8m0_host_dispatch.c"
+
 static void test_metal_short_prefill_ratio4(void) {
     ds4_engine *engine = test_get_engine(false);
     if (!engine) return;
@@ -2199,6 +2201,7 @@ static const ds4_test_entry test_entries[] = {
     {"--local-golden-vectors", "local-golden-vectors", "local top-k/logit drift regression for long Metal prefill", test_local_golden_vectors},
     {"--metal-short-prefill", "metal-short-prefill", "Metal ratio-4 short prefill regression", test_metal_short_prefill_ratio4},
     {"--metal-kernels", "metal-kernels", "isolated Metal kernel numeric regressions", test_metal_kernel_group},
+    {"--metal-i8-e8m0-dispatch", "metal-i8-e8m0-dispatch", "wired-host dispatch routing and tiny-buffer I8+E8M0 routed-expert smoke", test_metal_i8_e8m0_dispatch},
     {"--metal-tensor-equivalence", "metal-tensor-equivalence", "fast/quality Metal prompt-logit and greedy equivalence", test_metal_mpp_equivalence},
     {"--streaming-decode-prefill-correctness", "streaming-decode-prefill-correctness", "streaming decode-style cold prefill drift and repeatability", test_streaming_decode_prefill_correctness},
     {"--mtp-verify-depth", "mtp-verify-depth", "MTP speculative verify commits autoregressive-identical tokens at draft depth > 2", test_mtp_verify_depth},
