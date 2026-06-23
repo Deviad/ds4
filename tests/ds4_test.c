@@ -493,7 +493,11 @@ static void test_metal_kernel_group(void) {
 }
 
 #include "test_ds4_metal_i8_e8m0_host_dispatch.c"
+#endif
 
+#include "test_ds4_routed_i8_e8m0_synthesis.c"
+
+#ifndef DS4_NO_GPU
 static void test_metal_short_prefill_ratio4(void) {
     ds4_engine *engine = test_get_engine(false);
     if (!engine) return;
@@ -2206,6 +2210,7 @@ static const ds4_test_entry test_entries[] = {
     {"--streaming-decode-prefill-correctness", "streaming-decode-prefill-correctness", "streaming decode-style cold prefill drift and repeatability", test_streaming_decode_prefill_correctness},
     {"--mtp-verify-depth", "mtp-verify-depth", "MTP speculative verify commits autoregressive-identical tokens at draft depth > 2", test_mtp_verify_depth},
 #endif
+    {"--routed-i8-e8m0-synthesis", "routed-i8-e8m0-synthesis", "ADR 0021 loader paired-tensor synthesis: i8(24)->I8_E8M0(64) + helper values + fail-closed on missing .scale sibling", test_routed_i8_e8m0_synthesis},
     {"--server", "server", "server parser/rendering/cache unit tests", test_server_unit_group},
 };
 

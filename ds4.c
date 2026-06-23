@@ -1593,8 +1593,9 @@ enum {
     DS4_TENSOR_Q2_K     = 10,
     DS4_TENSOR_Q4_K     = 12,
     DS4_TENSOR_IQ2_XXS  = 16,
+    DS4_TENSOR_I8       = 24, /* raw int8 GGUF type (gguf_types[24]="i8"); the routed-expert weight half of an I8+F8_E8M0 pair loads as this until ADR 0021 synthesis flips it to DS4_TENSOR_I8_E8M0. */
     DS4_TENSOR_I32      = 26,
-    DS4_TENSOR_I8_E8M0  = 64, /* DS4-specific paired I8+F8_E8M0 routed-expert dispatch; mirrors ds4_metal.m L40. Loader synthesis deferred to 11.49. */
+    DS4_TENSOR_I8_E8M0  = 64, /* DS4-specific paired I8+F8_E8M0 routed-expert dispatch; mirrors ds4_metal.m L40. Loader synthesis: ADR 0021 (Story 11.49). */
 };
 
 typedef struct {
@@ -3228,7 +3229,8 @@ static void tensor_expect_f16_or_q8_0_layout(
 static bool tensor_is_routed_expert_type(uint32_t type) {
     return type == DS4_TENSOR_IQ2_XXS ||
            type == DS4_TENSOR_Q2_K ||
-           type == DS4_TENSOR_Q4_K;
+           type == DS4_TENSOR_Q4_K ||
+           type == DS4_TENSOR_I8_E8M0; /* routed I8+F8_E8M0 paired expert (ADR 0021); scale sibling resolved by name at dispatch. */
 }
 
 static DS4_MAYBE_UNUSED uint64_t routed_expert_block_bytes(uint32_t type) {
@@ -3236,14 +3238,156 @@ static DS4_MAYBE_UNUSED uint64_t routed_expert_block_bytes(uint32_t type) {
     case DS4_TENSOR_IQ2_XXS: return sizeof(block_iq2_xxs);
     case DS4_TENSOR_Q2_K:    return sizeof(block_q2_K);
     case DS4_TENSOR_Q4_K:    return sizeof(block_q4_K);
+    /* Routed I8_E8M0 weight is raw int8 (1 byte/elem); the per-row /16 E8M0
+     * scale lives in a SEPARATE sibling tensor (ADR 0021 + ADR 0007). There is
+     * no packed C block struct for I8_E8M0; the weight "block" is a single
+     * element (block_elems=1, block_bytes=1). */
+    case DS4_TENSOR_I8_E8M0: return 1;
     default:                 ds4_die("unsupported routed expert tensor type");
     }
     return 0;
 }
 
 static DS4_MAYBE_UNUSED uint64_t routed_expert_row_bytes(const ds4_tensor *t) {
+    /* I8_E8M0 routed weight is unblocked int8 (1 byte/elem). One contiguous
+     * dim[0] (in-dim) span is dim[0] bytes; the /16 E8M0 scale grouping applies
+     * to the separate sibling tensor (ADR 0021 + ADR 0007), NOT to this weight
+     * stride. QK_K (256) alignment does not apply; the scale alignment
+     * (dim[0] % 16 == 0) is enforced on the sibling's shape, not here. */
+    if (t->type == DS4_TENSOR_I8_E8M0) return t->dim[0];
     if ((t->dim[0] % QK_K) != 0) ds4_die("routed expert row is not QK_K aligned");
     return (t->dim[0] / QK_K) * routed_expert_block_bytes(t->type);
+}
+
+/* Post-load paired-tensor synthesis for routed I8_E8M0 experts (ADR 0021 + ADR 0007).
+ *
+ * The GGUF reader loads routed-expert weight tensors as raw i8 (gguf_type "i8"=24,
+ * gguf_types[] max [30]="bf16"; type 64 is OUTSIDE ggml_type range, so the reader
+ * cannot decode type 64 directly). Each weight is paired with a sibling F8_E8M0
+ * scale tensor named <weight_stem>.scale (mirrors deepseek4-quantize.c L1185). This
+ * pass detects the pair by tensor NAME (no reader refactor), confirms the sibling
+ * exists, and flips the weight type 24->64 so downstream routed-expert helpers +
+ * dispatch treat it as DS4_TENSOR_I8_E8M0.
+ *
+ * Geometry (authoritative, ADR 0007 + metal/moe.metal ds4_e8m0_decode_i8):
+ *   weight [out,in] int8  +  scale [out,in/16] E8M0, 1-D block_size=16 on axis 1.
+ * The weight->bytes / weight->abs_offset are already correct from the GGUF load
+ * (raw int8); the sibling keeps its own abs_offset/bytes and stays resolvable by
+ * name at dispatch time (Q3 option (iii)+: no struct mutation).
+ *
+ * Additive + fail-closed: only raw-i8 routed-WEIGHT tensors are candidates. Existing
+ * Q2_K / Q4_K / IQ2_XXS routed-expert GGUFs (weight type != 24) are byte-untouched
+ * (this fn is a no-op). A raw-i8 weight WITHOUT a .scale sibling dies (malformed).
+ *
+ * MUST run BEFORE weights_validate_layout: tensor_expect_routed_expert hard-enforces
+ * tensor_is_routed_expert_type(t->type), which would die on type 24.
+ */
+static void synthesize_routed_i8_e8m0_pair(const ds4_model *m, ds4_tensor *weight) {
+    if (weight == NULL) return;
+    if (weight->type != DS4_TENSOR_I8 /* 24 -- only raw-i8 routed weights are candidates */) return;
+    /* Sibling scale name = <weight name minus ".weight"> + ".scale". */
+    const uint64_t wlen = weight->name.len;
+    const char suffix[] = ".weight";
+    const uint64_t suffix_len = (uint64_t)(sizeof(suffix) - 1);
+    if (wlen < suffix_len ||
+        memcmp(weight->name.ptr + (size_t)(wlen - suffix_len), suffix, (size_t)suffix_len) != 0) {
+        return; /* not a *.weight tensor -- not a routed-expert candidate; skip. */
+    }
+    char scale_name[320];
+    const uint64_t stem_len = wlen - suffix_len;
+    const char scale_suffix[] = ".scale"; /* 7 bytes incl. NUL */
+    if (stem_len + sizeof(scale_suffix) > sizeof(scale_name)) {
+        ds4_die("ds4: routed I8 expert tensor name too long for .scale sibling (ADR 0021)");
+    }
+    memcpy(scale_name, weight->name.ptr, (size_t)stem_len);
+    memcpy(scale_name + stem_len, scale_suffix, sizeof(scale_suffix)); /* includes NUL */
+    const ds4_tensor *scale = model_find_tensor(m, scale_name);
+    if (scale == NULL) {
+        fprintf(stderr, "ds4: routed I8 expert %.*s has no sibling %s scale tensor (ADR 0021)\n",
+                (int)wlen, weight->name.ptr, scale_name);
+        ds4_die("routed I8 expert weight is missing its sibling F8_E8M0 scale tensor");
+        return; /* unreachable; ds4_die exits */
+    }
+    weight->type = DS4_TENSOR_I8_E8M0;
+}
+
+/* ---- ADR 0021 loader-synthesis test hooks (out-of-TU unit access) ----
+ * ds4_model/ds4_tensor are defined in this TU only; the unit test
+ * (tests/test_ds4_routed_i8_e8m0_synthesis.c, compiled in the ds4_test.c TU
+ * which sees only ds4.h) cannot build them, so these non-static hooks exercise
+ * the synthesis pass + routed-expert helpers here (mirrors the Story 11.47
+ * ds4_gpu_test_i8_e8m0_host_dispatch_routing convention in ds4_metal.m). */
+int ds4_test_routed_i8_e8m0_synthesis(void) {
+    /* (b) the routed-expert type predicate accepts the synthesized paired type. */
+    if (!tensor_is_routed_expert_type(DS4_TENSOR_I8_E8M0)) return -1;
+    /* (c) the unblocked int8 weight block size is 1 byte. */
+    if (routed_expert_block_bytes(DS4_TENSOR_I8_E8M0) != 1) return -2;
+    /* (d) row bytes = dim[0] via the type-64 early-return, NOT the QK_K path
+     *     (2048/256*1 = 8 would be the wrong, pre-D1.3 value). */
+    ds4_tensor rowt;
+    memset(&rowt, 0, sizeof(rowt));
+    rowt.ndim = 2;
+    rowt.dim[0] = 2048;
+    rowt.dim[1] = 1408;
+    rowt.type = DS4_TENSOR_I8_E8M0;
+    if (routed_expert_row_bytes(&rowt) != 2048) return -3;
+
+    /* (a) synth flips a raw-i8 weight WITH a .scale sibling: 24 -> 64. */
+    static const char wname[] = "blk.0.ffn_gate_exps.weight";
+    static const char sname[] = "blk.0.ffn_gate_exps.scale";
+    ds4_tensor tensors[2];
+    memset(tensors, 0, sizeof(tensors));
+    tensors[0].name.ptr = wname;
+    tensors[0].name.len = sizeof(wname) - 1;
+    tensors[0].ndim = 2;
+    tensors[0].dim[0] = 2048;
+    tensors[0].dim[1] = 1408;
+    tensors[0].type = DS4_TENSOR_I8;
+    tensors[1].name.ptr = sname;
+    tensors[1].name.len = sizeof(sname) - 1;
+    tensors[1].ndim = 2;
+    tensors[1].dim[0] = 2048 / 16;
+    tensors[1].dim[1] = 1408;
+    tensors[1].type = DS4_TENSOR_I8;
+    ds4_model m;
+    memset(&m, 0, sizeof(m));
+    m.n_tensors = 2;
+    m.tensors = tensors;
+    synthesize_routed_i8_e8m0_pair(&m, &tensors[0]);
+    if (tensors[0].type != DS4_TENSOR_I8_E8M0) return -4;
+
+    /* (f) no-op on a non-raw-i8 routed weight (Q4_K), even with a sibling present. */
+    ds4_tensor q4k;
+    memset(&q4k, 0, sizeof(q4k));
+    q4k.name.ptr = wname;
+    q4k.name.len = sizeof(wname) - 1;
+    q4k.ndim = 2;
+    q4k.dim[0] = 2048;
+    q4k.type = DS4_TENSOR_Q4_K;
+    synthesize_routed_i8_e8m0_pair(&m, &q4k);
+    if (q4k.type != DS4_TENSOR_Q4_K) return -5;
+
+    return 0;
+}
+
+/* (e) fail-closed: a raw-i8 routed weight WITHOUT a .scale sibling must ds4_die.
+ * Called only from a forked child in the unit test so the intended exit(1) does
+ * not abort the parent test process. */
+void ds4_test_routed_i8_e8m0_missing_sibling(void) {
+    static const char wname[] = "blk.0.ffn_up_exps.weight";
+    ds4_tensor weight;
+    memset(&weight, 0, sizeof(weight));
+    weight.name.ptr = wname;
+    weight.name.len = sizeof(wname) - 1;
+    weight.ndim = 2;
+    weight.dim[0] = 2048;
+    weight.dim[1] = 1408;
+    weight.type = DS4_TENSOR_I8;
+    ds4_model m;
+    memset(&m, 0, sizeof(m));
+    m.n_tensors = 1;
+    m.tensors = &weight; /* only the weight; no .scale sibling -> fail-closed die. */
+    synthesize_routed_i8_e8m0_pair(&m, &weight);
 }
 
 static bool streaming_layer_routed_expert_bytes(
@@ -4057,6 +4201,13 @@ static void weights_bind_layer(ds4_layer_weights *l, const ds4_model *m, uint32_
     l->ffn_gate_exps   = required_tensorf(m, "blk.%u.ffn_gate_exps.weight", il);
     l->ffn_up_exps     = required_tensorf(m, "blk.%u.ffn_up_exps.weight", il);
     l->ffn_down_exps   = required_tensorf(m, "blk.%u.ffn_down_exps.weight", il);
+    /* ADR 0021: post-load paired-tensor synthesis for routed I8_E8M0 experts.
+     * Flips i8 (24) -> 64 when a sibling .scale tensor exists; no-op otherwise.
+     * MUST run before weights_validate_layout (tensor_expect_routed_expert
+     * hard-enforces routed-expert type on the layer tensors). */
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_gate_exps);
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_up_exps);
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_down_exps);
     l->ffn_gate_shexp  = required_tensorf(m, "blk.%u.ffn_gate_shexp.weight", il);
     l->ffn_up_shexp    = required_tensorf(m, "blk.%u.ffn_up_shexp.weight", il);
     l->ffn_down_shexp  = required_tensorf(m, "blk.%u.ffn_down_shexp.weight", il);
@@ -4468,6 +4619,10 @@ static void mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m) {
     l->ffn_gate_exps   = required_tensor(m, "mtp.0.ffn_gate_exps.weight");
     l->ffn_up_exps     = required_tensor(m, "mtp.0.ffn_up_exps.weight");
     l->ffn_down_exps   = required_tensor(m, "mtp.0.ffn_down_exps.weight");
+    /* ADR 0021: routed I8_E8M0 paired-tensor synthesis for the mtp block. */
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_gate_exps);
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_up_exps);
+    synthesize_routed_i8_e8m0_pair(m, l->ffn_down_exps);
     l->ffn_gate_shexp  = required_tensor(m, "mtp.0.ffn_gate_shexp.weight");
     l->ffn_up_shexp    = required_tensor(m, "mtp.0.ffn_up_shexp.weight");
     l->ffn_down_shexp  = required_tensor(m, "mtp.0.ffn_down_shexp.weight");
