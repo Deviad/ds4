@@ -493,6 +493,7 @@ static void test_metal_kernel_group(void) {
 }
 
 #include "test_ds4_metal_i8_e8m0_host_dispatch.c"
+#include "test_ds4_i8_e8m0_single_token_numeric.c"
 #endif
 
 #include "test_ds4_routed_i8_e8m0_synthesis.c"
@@ -2206,6 +2207,7 @@ static const ds4_test_entry test_entries[] = {
     {"--metal-short-prefill", "metal-short-prefill", "Metal ratio-4 short prefill regression", test_metal_short_prefill_ratio4},
     {"--metal-kernels", "metal-kernels", "isolated Metal kernel numeric regressions", test_metal_kernel_group},
     {"--metal-i8-e8m0-dispatch", "metal-i8-e8m0-dispatch", "wired-host dispatch routing and tiny-buffer I8+E8M0 routed-expert smoke", test_metal_i8_e8m0_dispatch},
+    {"--metal-i8-e8m0-single-token-numeric", "metal-i8-e8m0-single-token-numeric", "Story 11.51 numeric correctness: new fused single-token I8_E8M0 encoder + D2.5 down GEMM vs 11.47 batched-matmul reference (L2_REL ≤ 5e-3)", test_metal_i8_e8m0_single_token_numeric},
     {"--metal-tensor-equivalence", "metal-tensor-equivalence", "fast/quality Metal prompt-logit and greedy equivalence", test_metal_mpp_equivalence},
     {"--streaming-decode-prefill-correctness", "streaming-decode-prefill-correctness", "streaming decode-style cold prefill drift and repeatability", test_streaming_decode_prefill_correctness},
     {"--mtp-verify-depth", "mtp-verify-depth", "MTP speculative verify commits autoregressive-identical tokens at draft depth > 2", test_mtp_verify_depth},
