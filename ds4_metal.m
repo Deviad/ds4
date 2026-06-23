@@ -4026,6 +4026,28 @@ typedef struct {
     uint64_t dst_token_stride;
 } ds4_metal_args_i8_e8m0_mm_f32;
 
+/* Host mirror of metal/moe.metal `ds4_metal_args_i8_e8m0_pair_swiglu_f32` (L4497-4510).
+ * Declared LOCAL to ds4_metal.m per Story 11.50 §0 Q1 — NOT in ds4.h (Architect ruling:
+ * matmul mirror L4015-4023 already follows this local pattern; mirror the precedent).
+ * Field order + layout byte-match the FROZEN MSL struct (12 fields). Scales are bound as
+ * SEPARATE sibling buffers (gate_scales/up_scales) — NOT packed into the weight buffer; this
+ * is the AC2 anti-silent-numerics fix for the 11.48 FACT 2 root cause. */
+typedef struct {
+    uint32_t in_features;
+    uint32_t out_features;
+    uint32_t pairs;
+    uint32_t pad0;
+    uint64_t gate_expert_stride;
+    uint64_t gate_scale_expert_stride;
+    uint64_t up_expert_stride;
+    uint64_t up_scale_expert_stride;
+    uint64_t src_pair_stride;
+    uint64_t mid_pair_stride;
+    uint64_t weight_stride;
+    float    clamp_value;
+} ds4_metal_args_i8_e8m0_pair_swiglu_f32;
+
+
 static int ds4_gpu_encode_mul_mv_id(
         id<MTLCommandBuffer>        cb,
         id<MTLComputePipelineState> pipeline,
@@ -4122,6 +4144,35 @@ static int ds4_gpu_encode_mul_mm_id_i8_e8m0_f32(
         NSUInteger                  ids_off,
         id<MTLBuffer>               dst,
         NSUInteger                  dst_off);
+
+/* Story 11.50 D2.b — single-token fused gate+up encoder for the I8+E8M0 routed
+ * path. Binds the FROZEN kernel `kernel_mul_mv_id_i8_e8m0_pair_swiglu_f32`
+ * (metal/moe.metal L4566-4606) at EXACT MSL arg-index 0 for the args struct and
+ * binds gate_scales (idx 2) + up_scales (idx 4) as SEPARATE sibling buffers — never
+ * packed inside the weight buffer (that was the 11.48 FACT 2/FACT 3 silent-numerics
+ * root cause). Replaces the generic `ds4_gpu_encode_mul_mv_id` + pair_swiglu
+ * pipeline for the I8_E8M0 single-token gate+up arm (AC1/AC2/AC3). */
+static int ds4_gpu_encode_mul_mv_id_i8_e8m0_pair_swiglu(
+        id<MTLCommandBuffer>        cb,
+        id<MTLComputePipelineState> pipeline,
+        const ds4_metal_args_i8_e8m0_pair_swiglu_f32 *args,
+        id<MTLBuffer>               gate_weights,
+        NSUInteger                  gate_weights_off,
+        id<MTLBuffer>               gate_scales,
+        NSUInteger                  gate_scales_off,
+        id<MTLBuffer>               up_weights,
+        NSUInteger                  up_weights_off,
+        id<MTLBuffer>               up_scales,
+        NSUInteger                  up_scales_off,
+        id<MTLBuffer>               src,
+        NSUInteger                  src_off,
+        id<MTLBuffer>               mid,
+        NSUInteger                  mid_off,
+        id<MTLBuffer>               ids,
+        NSUInteger                  ids_off,
+        id<MTLBuffer>               route_weights,
+        NSUInteger                  route_weights_off);
+
 
 static int ds4_gpu_encode_mul_mm_id_map(
         id<MTLCommandBuffer>        cb,
@@ -20043,7 +20094,7 @@ static id<MTLComputePipelineState> ds4_gpu_routed_mv_pipeline(uint32_t type) {
     case DS4_METAL_TENSOR_IQ2_XXS: return g_moe_mul_mv_id_iq2_xxs_pipeline;
     case DS4_METAL_TENSOR_Q2_K:    return g_moe_mul_mv_id_q2_k_pipeline;
     case DS4_METAL_TENSOR_Q4_K:    return g_moe_mul_mv_id_q4_k_pipeline;
-    case DS4_METAL_TENSOR_I8_E8M0: return nil;  /* Matmul-only host dispatch in 11.47; fused decode path deferred. */
+    case DS4_METAL_TENSOR_I8_E8M0: return g_moe_mul_mv_id_i8_e8m0_pair_swiglu_pipeline;  /* D2.2 ACTIVE 11.50: fused single-token pair_swiglu pipeline; down arm consumed by §6 GEMM via mm_pipeline, NOT by this mv fallback. */
     default:                       return nil;
     }
 }
@@ -21404,6 +21455,67 @@ static int ds4_gpu_encode_mul_mm_id_i8_e8m0_f32(
     return 1;
 }
 
+/* Story 11.50 D2.b — single-token fused gate+up encoder for the routed I8+E8M0
+ * path. Binds the FROZEN MSL kernel `kernel_mul_mv_id_i8_e8m0_pair_swiglu_f32`
+ * (metal/moe.metal L4566-4606) at the EXACT MSL arg-indices the kernel expects:
+ *   idx0 args  idx1 gate_weights  idx2 gate_scales  idx3 up_weights
+ *   idx4 up_scales  idx5 src  idx6 ids  idx7 route_weights  idx8 mid
+ * Gate/up scales are bound as SEPARATE sibling buffers (AC2) — never packed
+ * inside the weight buffers (11.48 FACT 2/FACT 3 silent-numerics root cause).
+ * The grid is (out_features, pairs, 1) — one thread per (mid row, pair) — covering
+ * the single-token gate+up pair set (pairs = n_tokens * n_expert). */
+static int ds4_gpu_encode_mul_mv_id_i8_e8m0_pair_swiglu(
+        id<MTLCommandBuffer>        cb,
+        id<MTLComputePipelineState> pipeline,
+        const ds4_metal_args_i8_e8m0_pair_swiglu_f32 *args,
+        id<MTLBuffer>               gate_weights,
+        NSUInteger                  gate_weights_off,
+        id<MTLBuffer>               gate_scales,
+        NSUInteger                  gate_scales_off,
+        id<MTLBuffer>               up_weights,
+        NSUInteger                  up_weights_off,
+        id<MTLBuffer>               up_scales,
+        NSUInteger                  up_scales_off,
+        id<MTLBuffer>               src,
+        NSUInteger                  src_off,
+        id<MTLBuffer>               mid,
+        NSUInteger                  mid_off,
+        id<MTLBuffer>               ids,
+        NSUInteger                  ids_off,
+        id<MTLBuffer>               route_weights,
+        NSUInteger                  route_weights_off) {
+    if (!cb || !pipeline || !args ||
+        !gate_weights || !gate_scales || !up_weights || !up_scales ||
+        !src || !mid || !ids || !route_weights ||
+        args->in_features == 0 || args->out_features == 0 || args->pairs == 0 ||
+        args->gate_expert_stride == 0 || args->gate_scale_expert_stride == 0 ||
+        args->up_expert_stride == 0 || args->up_scale_expert_stride == 0 ||
+        args->src_pair_stride == 0 || args->mid_pair_stride == 0 ||
+        args->weight_stride == 0) {
+        return 0;
+    }
+
+    const NSUInteger tg_x = 32u;
+    const NSUInteger tg_y = 32u;
+    id<MTLComputeCommandEncoder> enc = ds4_gpu_compute_encoder(cb);
+    [enc setComputePipelineState:pipeline];
+    [enc setBytes:args length:sizeof(*args) atIndex:0];
+    [enc setBuffer:gate_weights offset:gate_weights_off atIndex:1];
+    [enc setBuffer:gate_scales offset:gate_scales_off atIndex:2];
+    [enc setBuffer:up_weights offset:up_weights_off atIndex:3];
+    [enc setBuffer:up_scales offset:up_scales_off atIndex:4];
+    [enc setBuffer:src offset:src_off atIndex:5];
+    [enc setBuffer:ids offset:ids_off atIndex:6];
+    [enc setBuffer:route_weights offset:route_weights_off atIndex:7];
+    [enc setBuffer:mid offset:mid_off atIndex:8];
+    [enc dispatchThreadgroups:MTLSizeMake(((NSUInteger)args->out_features + tg_x - 1u) / tg_x,
+                                          ((NSUInteger)args->pairs + tg_y - 1u) / tg_y,
+                                          1)
+         threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
+    ds4_gpu_end_compute_encoder(cb, enc);
+    return 1;
+}
+
 static int ds4_gpu_encode_mul_mm_id_map(
         id<MTLCommandBuffer>        cb,
         id<MTLComputePipelineState> map_pipeline,
@@ -22536,6 +22648,19 @@ int ds4_gpu_routed_moe_one_tensor(
         id<MTLBuffer> gate_buf = nil;
         id<MTLBuffer> up_buf = nil;
         id<MTLBuffer> down_buf = nil;
+        /* Story 11.50 D2.f — I8_E8M0 scale sibling buffers (gate/up/down) bound
+         * SEPARATELY from the weight buffers at offset = *_offset + *_tensor_bytes.
+         * Only populated when i8_e8m0_routing (scale-wrap block below). */
+        id<MTLBuffer> gate_scale_buf = nil;
+        id<MTLBuffer> up_scale_buf = nil;
+        id<MTLBuffer> down_scale_buf = nil;
+        uint64_t gate_scale_inner = 0;
+        uint64_t up_scale_inner = 0;
+        uint64_t down_scale_inner = 0;
+        uint64_t gate_scale_expert_bytes = 0;
+        uint64_t down_scale_expert_bytes = 0;
+        uint64_t gate_scale_tensor_bytes = 0;
+        uint64_t down_scale_tensor_bytes = 0;
         __unsafe_unretained id<MTLBuffer> gate_slot_bufs[6] = { nil, nil, nil, nil, nil, nil };
         __unsafe_unretained id<MTLBuffer> up_slot_bufs[6] = { nil, nil, nil, nil, nil, nil };
         __unsafe_unretained id<MTLBuffer> down_slot_bufs[6] = { nil, nil, nil, nil, nil, nil };
@@ -22620,15 +22745,27 @@ int ds4_gpu_routed_moe_one_tensor(
         const bool write_clamped_moe =
             getenv("DS4_METAL_MOE_WRITE_CLAMPED_ACT") != NULL;
         id<MTLComputePipelineState> pair_swiglu_pipeline = nil;
+        const bool i8_e8m0_routing = (gate_type == DS4_METAL_TENSOR_I8_E8M0) ||
+                                     (down_type == DS4_METAL_TENSOR_I8_E8M0);
         if (gate_type == DS4_METAL_TENSOR_IQ2_XXS) {
             pair_swiglu_pipeline = g_moe_mul_mv_id_iq2_xxs_pair_swiglu_pipeline;
         } else if (gate_type == DS4_METAL_TENSOR_Q4_K) {
             pair_swiglu_pipeline = g_moe_mul_mv_id_q4_k_pair_swiglu_pipeline;
+        } else if (gate_type == DS4_METAL_TENSOR_I8_E8M0) {
+            /* D2.3 (AC5) selector arm: I8_E8M0 single-token gate+up routes to the
+             * FROZEN pair_swiglu kernel via the new D2.b encoder (not the q4_k/
+             * iq2_xxs packed-buffer pair_swiglu path). */
+            pair_swiglu_pipeline = g_moe_mul_mv_id_i8_e8m0_pair_swiglu_pipeline;
         }
+        /* D2.4 (AC6) fuse override: I8_E8M0 single-token MUST use the fused
+         * pair_swiglu encoder so the gate+up arm does NOT fall through to the
+         * generic `ds4_gpu_encode_mul_mv_id` fallback (which would bind the
+         * pair_swiglu kernel as a plain mv — the FACT 5 silent-numerics path). */
         const bool fuse_pair_swiglu =
-            !g_quality_mode &&
-            !write_clamped_moe &&
-            getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") == NULL &&
+            (i8_e8m0_routing ||
+             (!g_quality_mode &&
+              !write_clamped_moe &&
+              getenv("DS4_METAL_DISABLE_ROUTED_PAIR_SWIGLU_FUSION") == NULL)) &&
             pair_swiglu_pipeline != nil;
         id<MTLComputePipelineState> down_sum6_pipeline = nil;
         if (down_type == DS4_METAL_TENSOR_Q2_K) {
@@ -23650,6 +23787,52 @@ int ds4_gpu_routed_moe_one_tensor(
             down_buf = ds4_gpu_wrap_model_range(model_map, model_size, down_offset, down_tensor_bytes, &down_inner);
             if (!gate_buf || !up_buf || !down_buf) return 0;
         }
+        /* Story 11.50 D2.f/D2.g/D2.h — I8_E8M0 single-token scale geometry +
+         * scale-sibling buffer wraps (mirror batched L24937-24966 + DOWN wrap at
+         * batched L25275-25279). ADR 0007 block_size=16: scale shape [out, in/16]
+         * per expert. Gate/up share shape (both mid×in/16); down is out×mid/16.
+         * Scales live contiguously AFTER the weights within the same model tensor
+         * (offset = *_offset + *_tensor_bytes) so each has its own sibling view. */
+        if (i8_e8m0_routing) {
+            if ((expert_in_dim % 16u) != 0 || (expert_mid_dim % 16u) != 0) {
+                fprintf(stderr, "ds4: I8_E8M0 routed one_tensor MoE dims must be multiples of 16\n");
+                return 0;
+            }
+            const uint64_t gate_scale_cols = expert_in_dim / 16u;
+            const uint64_t down_scale_cols = expert_mid_dim / 16u;
+            if ((uint64_t)expert_mid_dim > UINT64_MAX / gate_scale_cols ||
+                (uint64_t)out_dim > UINT64_MAX / down_scale_cols) {
+                fprintf(stderr, "ds4: I8_E8M0 one_tensor routed MoE scale byte size overflow\n");
+                return 0;
+            }
+            gate_scale_expert_bytes = (uint64_t)expert_mid_dim * gate_scale_cols;
+            down_scale_expert_bytes = (uint64_t)out_dim * down_scale_cols;
+            if ((uint64_t)n_total_expert > UINT64_MAX / gate_scale_expert_bytes ||
+                (uint64_t)n_total_expert > UINT64_MAX / down_scale_expert_bytes) {
+                fprintf(stderr, "ds4: I8_E8M0 one_tensor routed MoE scale tensor byte size overflow\n");
+                return 0;
+            }
+            gate_scale_tensor_bytes = (uint64_t)n_total_expert * gate_scale_expert_bytes;
+            down_scale_tensor_bytes = (uint64_t)n_total_expert * down_scale_expert_bytes;
+            gate_scale_buf = ds4_gpu_wrap_model_exact_range(model_map, model_size,
+                                                             gate_offset + gate_tensor_bytes,
+                                                             gate_scale_tensor_bytes,
+                                                             &gate_scale_inner);
+            up_scale_buf = ds4_gpu_wrap_model_exact_range(model_map, model_size,
+                                                           up_offset + gate_tensor_bytes,
+                                                           gate_scale_tensor_bytes,
+                                                           &up_scale_inner);
+            down_scale_buf = ds4_gpu_wrap_model_exact_range(model_map, model_size,
+                                                             down_offset + down_tensor_bytes,
+                                                             down_scale_tensor_bytes,
+                                                             &down_scale_inner);
+        }
+        /* Fail-closed defense-in-depth (§0 Q4): gate/up/down weight views + their
+         * scale siblings must all be live before any dispatch (merged single guard). */
+        if (!gate_buf || !up_buf || !down_buf ||
+            (i8_e8m0_routing && (!gate_scale_buf || !up_scale_buf || !down_scale_buf))) {
+            return 0;
+        }
         if (q4_grouped_boundary || q4_exact_boundary || q4_table_boundary) {
             if (ds4_gpu_end_commands() == 0 || ds4_gpu_begin_commands() == 0) {
                 return 0;
@@ -24348,6 +24531,47 @@ int ds4_gpu_routed_moe_one_tensor(
                                                               2,
                                                               false);
             }
+        } else if (fuse_pair_swiglu &&
+                   gate_type == DS4_METAL_TENSOR_I8_E8M0 &&
+                   pair_swiglu_pipeline == g_moe_mul_mv_id_i8_e8m0_pair_swiglu_pipeline) {
+            /* Story 11.50 D3.i — single-token I8_E8M0 fused gate+up via the new
+             * D2.b encoder (AC1/AC2/AC3). gate/up weights + gate/up scales are 4
+             * SEPARATE sibling buffers; this branch precedes the q4_k/iq2_xxs
+             * `else if (fuse_pair_swiglu)` case below so those packed-buffer paths
+             * are NOT disturbed. pairs = pair_rows = n_expert (n_tokens=1). */
+            ds4_metal_args_i8_e8m0_pair_swiglu_f32 act_args = {
+                .in_features            = expert_in_dim,
+                .out_features           = expert_mid_dim,
+                .pairs                  = pair_rows,
+                .pad0                   = 0,
+                .gate_expert_stride     = gate_expert_bytes,
+                .gate_scale_expert_stride = gate_scale_expert_bytes,
+                .up_expert_stride       = gate_expert_bytes,
+                .up_scale_expert_stride = gate_scale_expert_bytes,  /* gate+up share shape */
+                .src_pair_stride        = (uint64_t)expert_in_dim * sizeof(float),
+                .mid_pair_stride        = (uint64_t)expert_mid_dim * sizeof(float),
+                .weight_stride          = (uint64_t)n_expert * sizeof(float),
+                .clamp_value            = clamp,
+            };
+            ok = ds4_gpu_encode_mul_mv_id_i8_e8m0_pair_swiglu(cb,
+                                                                pair_swiglu_pipeline,
+                                                                &act_args,
+                                                                gate_buf,
+                                                                (NSUInteger)gate_inner,
+                                                                gate_scale_buf,
+                                                                (NSUInteger)gate_scale_inner,
+                                                                up_buf,
+                                                                (NSUInteger)up_inner,
+                                                                up_scale_buf,
+                                                                (NSUInteger)up_scale_inner,
+                                                                xbuf,
+                                                                ds4_gpu_tensor_offset(x),
+                                                                midbuf,
+                                                                ds4_gpu_tensor_offset(mid),
+                                                                selectedbuf,
+                                                                ds4_gpu_tensor_offset(selected),
+                                                                weightsbuf,
+                                                                ds4_gpu_tensor_offset(weights));
         } else if (fuse_pair_swiglu) {
             ds4_gpu_dsv4_moe_swiglu_weight_args act_args = {
                 .width = expert_mid_dim,
@@ -24672,6 +24896,40 @@ int ds4_gpu_routed_moe_one_tensor(
                                                  ds4_gpu_tensor_offset(selected),
                                                  down_smem,
                                                  2);
+        } else if (ok && i8_e8m0_routing) {
+            /* Story 11.50 §6 D2.5 — single-token I8_E8M0 DOWN dispatch via the
+             * FROZEN matmul kernel `kernel_mul_mm_id_i8_e8m0_f32` (moe.metal
+             * L4609), NOT the generic `ds4_gpu_encode_mul_mv_id(down_mv_pipeline)`
+             * fallback below. The FROZEN mv pipeline bound to `down_mv_pipeline`
+             * is the pair_swiglu kernel (semantically wrong for down: it would
+             * re-apply silu*gate on `mid`); routing the down arm through §6 GEMM
+             * here is the AC13 silent-numerics guard. This branch precedes the
+             * `} else if (ok) {` generic mv fallback so q4_k/iq2_xxs are untouched
+             * (their gate_type != I8_E8M0 → i8_e8m0_routing is false). */
+            id<MTLComputePipelineState> down_mm_pipeline = ds4_gpu_routed_mm_pipeline(down_type);
+            ds4_metal_args_i8_e8m0_mm_f32 down_i8_args = {
+                .in_features          = expert_mid_dim,
+                .out_features         = out_dim,
+                .tokens               = pair_rows,                     /* n_tokens=1 → pair_rows = n_expert (batched L25796 parity) */
+                .pad0                 = 0,
+                .expert_stride        = down_expert_bytes,
+                .scale_expert_stride  = down_scale_expert_bytes,
+                .src_token_stride     = (uint64_t)expert_mid_dim * sizeof(float),
+                .dst_token_stride     = (uint64_t)out_dim * sizeof(float),
+            };
+            ok = ds4_gpu_encode_mul_mm_id_i8_e8m0_f32(cb,
+                                                       down_mm_pipeline,
+                                                       &down_i8_args,
+                                                       down_buf,
+                                                       (NSUInteger)down_inner,
+                                                       down_scale_buf,
+                                                       (NSUInteger)down_scale_inner,
+                                                       midbuf,
+                                                       ds4_gpu_tensor_offset(mid),
+                                                       selectedbuf,
+                                                       ds4_gpu_tensor_offset(selected),
+                                                       down_dst,
+                                                       down_dst_off);
         } else if (ok) {
             ok = ds4_gpu_encode_mul_mv_id(cb,
                                                  down_mv_pipeline,
@@ -25913,7 +26171,7 @@ int ds4_gpu_test_i8_e8m0_host_dispatch_routing(void) {
     if (strcmp(ds4_gpu_metal_tensor_type_name(type), "i8_e8m0") != 0) ok = 0;
     if (ds4_gpu_routed_mv_nr0(type) != 1) ok = 0;  /* D2.1: was 0 (fail-closed); now 1 (nr0 for plain-2D kernel). */
     if (ds4_gpu_routed_mv_smem(type) != 0) ok = 0;
-    if (ds4_gpu_routed_mv_pipeline(type) != nil) ok = 0;  /* D2.2 DEFERRED to 11.49; pipeline getter stays nil. */
+    if (ds4_gpu_routed_mv_pipeline(type) != g_moe_mul_mv_id_i8_e8m0_pair_swiglu_pipeline) ok = 0;  /* D2.2 ACTIVE 11.50: pipeline now returns the fused pair_swiglu (gate+up arm). Down arm rides ds4_gpu_routed_mm_pipeline (§6 D2.5 GEMM) — AC13 silent-numerics guard. */
     if (ds4_gpu_routed_mm_pipeline(type) == nil) ok = 0;
     if (ds4_gpu_routed_mm_f16_rhs_pipeline(type) != nil) ok = 0;
     if (g_moe_mul_mv_id_i8_e8m0_pair_swiglu_pipeline == nil) ok = 0;
