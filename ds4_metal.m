@@ -24550,7 +24550,7 @@ int ds4_gpu_routed_moe_one_tensor(
                 .up_scale_expert_stride = gate_scale_expert_bytes,  /* gate+up share shape */
                 .src_pair_stride        = (uint64_t)expert_in_dim * sizeof(float),
                 .mid_pair_stride        = (uint64_t)expert_mid_dim * sizeof(float),
-                .weight_stride          = (uint64_t)n_expert * sizeof(float),
+                .weight_stride          = sizeof(float), /* per-pair route_weights; 11.52 fix (was n_expert*sizeof(float), 11.50 copy-paste) */
                 .clamp_value            = clamp,
             };
             ok = ds4_gpu_encode_mul_mv_id_i8_e8m0_pair_swiglu(cb,
