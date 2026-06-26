@@ -17,11 +17,9 @@ from mlx_lm.models.pipeline import PipelineMixin
 
 from .deepseek_v4 import (
     ModelArgs as _ParityModelArgs,
-    _apply_rope_tail_mlx,
     _attention_mlx,  # imported as the frozen math contract for AttentionNN (§8)
     _hyperconnection_mlx,
     _hyperhead_mlx,
-    _rms_norm_mlx,
     sanitize_weights,
 )
 
@@ -63,26 +61,6 @@ class ModelArgs(_ParityModelArgs):
 def _normal(shape: tuple[int, ...], *, scale: float = 0.02) -> mx.array:
     return mx.random.normal(shape=shape) * scale
 
-
-def _causal_sliding_mask(seq_len: int, sliding_window: int) -> mx.array:
-    positions = mx.arange(seq_len)
-    causal = mx.where(positions[:, None] >= positions[None, :], 0.0, -1e9)
-    if sliding_window <= 0 or sliding_window >= seq_len:
-        return causal
-    return mx.where((positions[:, None] - positions[None, :]) < sliding_window, causal, -1e9)
-
-
-def _rope_tail_tables(head_dim: int, qk_rope_head_dim: int, rope_theta: float, seq_len: int) -> tuple[mx.array, mx.array]:
-    half = qk_rope_head_dim // 2
-    positions = mx.arange(seq_len)
-    dim_idx = mx.arange(0, qk_rope_head_dim, 2)
-    freqs = 1.0 / (rope_theta ** (dim_idx / qk_rope_head_dim))
-    angles = mx.expand_dims(positions, 1) * mx.expand_dims(freqs, 0)
-    cos = mx.cos(angles)
-    sin = mx.sin(angles)
-    if cos.shape[-1] != half or head_dim < qk_rope_head_dim:
-        raise ValueError("invalid qk_rope_head_dim for RoPE tail")
-    return cos, sin
 
 
 class HyperConnectionNN(nn.Module):
@@ -175,41 +153,29 @@ class AttentionNN(nn.Module):
         self.sinks = mx.zeros((self.num_heads,))
 
     def __call__(self, x: mx.array, cache: Any | None = None) -> mx.array:
-        del cache  # cache/CSA are 13.3b concerns; this slice is cache-less sliding attention.
-        q_a = self.q_norm(self.q_a_proj(x))
-        q = self.q_b_proj(q_a).reshape((*x.shape[:-1], self.num_heads, self.head_dim))
-        q = _rms_norm_mlx(q, mx.ones((self.head_dim,)), self.rms_norm_eps)
-        kv = self.kv_norm(self.kv_proj(x))
+        del cache  # cache/CSA are 13.3b concerns; this slice is cache-less.
 
-        seq_len = x.shape[1]
-        cos, sin = _rope_tail_tables(self.head_dim, self.qk_rope_head_dim, self.rope_theta, seq_len)
-        q = _apply_rope_tail_mlx(q, cos, sin, qk_rope_head_dim=self.qk_rope_head_dim)
-        kv = _apply_rope_tail_mlx(kv, cos, sin, qk_rope_head_dim=self.qk_rope_head_dim)
+        def linear_weight(linear: Any) -> mx.array:
+            weight = getattr(linear, "weight", None)
+            if weight is not None:
+                return weight
+            base = getattr(linear, "linear", None)
+            if base is not None and hasattr(linear, "lora_a") and hasattr(linear, "lora_b"):
+                delta = ((linear.scale * linear.lora_b.T) @ linear.lora_a.T).astype(base.weight.dtype)
+                return base.weight + delta
+            raise AttributeError(f"{type(linear).__name__} does not expose a frozen-compatible weight")
 
-        scale = self.head_dim ** -0.5
-        q_by_head = q.transpose(0, 2, 1, 3)
-        kv_by_head = mx.expand_dims(kv, 1)
-        scores = (q_by_head @ kv_by_head.transpose(0, 1, 3, 2)) * scale
-        scores = scores + _causal_sliding_mask(seq_len, self.sliding_window)
-        sink_logits = self.sinks.reshape((1, self.num_heads, 1, 1)) + mx.zeros_like(scores[..., :1])
-        scores_with_sink = mx.concatenate([scores, sink_logits], axis=-1)
-        probs = mx.softmax(scores_with_sink, axis=-1)[..., :seq_len]
-        attended = probs @ kv_by_head
-        attended = attended.transpose(0, 2, 1, 3)
-        attended = _apply_rope_tail_mlx(attended, cos, -sin, qk_rope_head_dim=self.qk_rope_head_dim)
-
-        heads_per_group = self.num_heads // self.o_groups
-        low_rank_chunks = []
-        for group in range(self.o_groups):
-            head_start = group * heads_per_group
-            head_end = head_start + heads_per_group
-            row_start = group * self.o_lora_rank
-            row_end = row_start + self.o_lora_rank
-            group_heads = attended[..., head_start:head_end, :]
-            flat_group = group_heads.reshape((*group_heads.shape[:-2], heads_per_group * self.head_dim))
-            low_rank_chunks.append(self.o_a_proj(flat_group)[..., row_start:row_end])
-        low_rank = mx.concatenate(low_rank_chunks, axis=-1)
-        return self.o_b_proj(low_rank)
+        weights = {
+            "q_a_proj.weight": linear_weight(self.q_a_proj),
+            "q_norm.weight": self.q_norm.weight,
+            "q_b_proj.weight": linear_weight(self.q_b_proj),
+            "kv_proj.weight": linear_weight(self.kv_proj),
+            "kv_norm.weight": self.kv_norm.weight,
+            "o_a_proj.weight": linear_weight(self.o_a_proj),
+            "o_b_proj.weight": linear_weight(self.o_b_proj),
+            "sinks": self.sinks,
+        }
+        return _attention_mlx(self.config, x, weights)
 
 
 class MLPNN(nn.Module):
