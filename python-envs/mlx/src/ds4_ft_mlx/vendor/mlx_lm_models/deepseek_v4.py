@@ -539,6 +539,217 @@ def _csa_attention_mlx(
     return mx.where(has_valid, attended, mx.zeros_like(attended))
 
 
+# --- Real-dim CSA/HCA port (Story 13.3b; additive only; tiny path byte-identical) ---
+
+
+def _compress_rope_yarn_tail_tables_mlx(
+    head_dim: int,
+    qk_rope_head_dim: int,
+    rope_theta: float,
+    yarn_factor: float,
+    yarn_orig_max: int,
+    seq_len: int,
+    *,
+    positions: mx.array,
+) -> tuple[mx.array, mx.array]:
+    """YaRN compress-RoPE tables for the trailing qk_rope_head_dim slice."""
+
+    _validate_qk_rope_head_dim(head_dim, qk_rope_head_dim)
+    if seq_len < 0:
+        raise ValueError("seq_len must be non-negative")
+    if int(positions.shape[0]) != seq_len:
+        raise ValueError(f"positions length mismatch: got {positions.shape[0]}, expected {seq_len}")
+    if yarn_factor <= 0:
+        raise ValueError("yarn_factor must be positive")
+    if yarn_orig_max <= 0:
+        raise ValueError("yarn_orig_max must be positive")
+
+    dim = qk_rope_head_dim
+    beta_fast = 32.0
+    beta_slow = 1.0
+
+    def find_correction_dim(num_rotations: float) -> float:
+        return (dim * math.log(yarn_orig_max / (num_rotations * 2.0 * math.pi))) / (2.0 * math.log(rope_theta))
+
+    low = max(math.floor(find_correction_dim(beta_fast)), 0)
+    high = min(math.ceil(find_correction_dim(beta_slow)), dim - 1)
+    if low == high:
+        high += 0.001
+
+    dim_idx = mx.arange(0, dim, 2).astype(mx.float32)
+    pos_freqs = rope_theta ** (dim_idx / dim)
+    inv_freq_extrapolation = 1.0 / pos_freqs
+    inv_freq_interpolation = 1.0 / (float(yarn_factor) * pos_freqs)
+    ramp = mx.clip((mx.arange(dim // 2).astype(mx.float32) - float(low)) / (float(high) - float(low)), 0.0, 1.0)
+    extrapolation_factor = 1.0 - ramp
+    inv_freq = inv_freq_interpolation * (1.0 - extrapolation_factor) + inv_freq_extrapolation * extrapolation_factor
+
+    angles = mx.expand_dims(positions.astype(mx.float32), 1) * mx.expand_dims(inv_freq, 0)
+    return mx.cos(angles), mx.sin(angles)
+
+
+def _hca_compressor_mlx(
+    args: ModelArgs,
+    x: mx.array,
+    weights: dict[str, mx.array],
+    *,
+    position_ids: mx.array,
+) -> tuple[mx.array, mx.array | None]:
+    """Stateless real-dim HCA compressor: one non-overlap window per 128 tokens."""
+
+    rate = int(args.compression_ratio)
+    if rate != 128:
+        raise NotImplementedError("MLX real HCA compressor currently supports compression_ratio=128")
+    out_dim = int(args.head_dim)
+    required = {"compressor_wkv", "compressor_wgate", "compressor_ape", "compressor_norm"}
+    missing = sorted(required - set(weights))
+    if missing:
+        raise ValueError(f"missing MLX HCA compressor weights: {', '.join(missing)}")
+    if tuple(weights["compressor_wkv"].shape) != (out_dim, args.hidden_size):
+        raise ValueError(f"HCA compressor_wkv shape mismatch: got {weights['compressor_wkv'].shape}, expected {(out_dim, args.hidden_size)}")
+    if tuple(weights["compressor_wgate"].shape) != (out_dim, args.hidden_size):
+        raise ValueError(f"HCA compressor_wgate shape mismatch: got {weights['compressor_wgate'].shape}, expected {(out_dim, args.hidden_size)}")
+    if tuple(weights["compressor_ape"].shape) != (rate, out_dim):
+        raise ValueError(f"HCA compressor_ape shape mismatch: got {weights['compressor_ape'].shape}, expected {(rate, out_dim)}")
+    if tuple(weights["compressor_norm"].shape) != (out_dim,):
+        raise ValueError(f"HCA compressor_norm shape mismatch: got {weights['compressor_norm'].shape}, expected {(out_dim,)}")
+
+    batch, seq_len, _hidden = x.shape
+    if tuple(position_ids.shape) != (batch, seq_len):
+        raise ValueError(f"position_ids shape mismatch: got {position_ids.shape}, expected {(batch, seq_len)}")
+    usable = (seq_len // rate) * rate
+    n_windows = usable // rate
+    if n_windows == 0:
+        compressed_kv = mx.zeros((batch, 1, 0, out_dim), dtype=x.dtype)
+        return compressed_kv, None
+
+    kv = _linear_mlx(x[:, :usable, :], weights["compressor_wkv"])
+    gate = _linear_mlx(x[:, :usable, :], weights["compressor_wgate"])
+    kv = kv.reshape((batch, n_windows, rate, out_dim))
+    gate = gate.reshape((batch, n_windows, rate, out_dim)) + weights["compressor_ape"].reshape((1, 1, rate, out_dim))
+    gate_probs = mx.softmax(gate.astype(mx.float32), axis=2).astype(kv.dtype)
+    pooled = mx.sum(kv * gate_probs, axis=2)
+    compressed = _rms_norm_mlx(pooled, weights["compressor_norm"], args.rms_norm_eps)
+
+    positions = mx.arange(n_windows) * rate
+    cos, sin = _compress_rope_yarn_tail_tables_mlx(
+        args.head_dim,
+        args.qk_rope_head_dim,
+        args.compress_rope_theta,
+        float((args.rope_scaling or {}).get("factor", 16.0)),
+        int((args.rope_scaling or {}).get("original_max_position_embeddings", 65536)),
+        n_windows,
+        positions=positions,
+    )
+    compressed = _apply_rope_tail_mlx(compressed, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+    compressed_kv = mx.expand_dims(compressed, 1)
+    if seq_len == 1:
+        return compressed_kv, None
+
+    entry_indices = mx.arange(n_windows).reshape((1, 1, 1, n_windows))
+    causal_threshold = ((position_ids + 1) // rate).reshape((batch, 1, seq_len, 1))
+    visible = entry_indices < causal_threshold
+    zeros = mx.zeros((batch, 1, seq_len, n_windows), dtype=x.dtype)
+    neg_inf = mx.full((batch, 1, seq_len, n_windows), -float("inf"), dtype=x.dtype)
+    return compressed_kv, mx.where(visible, zeros, neg_inf)
+
+
+
+def _attention_real_mlx(
+    args: ModelArgs,
+    x: mx.array,
+    weights: dict[str, mx.array],
+    *,
+    index_topk: int | None = None,
+) -> mx.array:
+    """Real-dim compressed attention. Story 13.3b-1 implements the HCA branch."""
+
+    if args.compression_ratio != 128:
+        error = _csa_config_error(args)
+        if error is not None:
+            raise NotImplementedError(error)
+        raise NotImplementedError("MLX real compressed attention currently supports HCA compression_ratio=128")
+    if index_topk is not None:
+        raise NotImplementedError("index_topk is CSA-only; Story 13.3b-1 implements HCA without indexer")
+    if args.num_key_value_heads != 1:
+        raise NotImplementedError("MLX real compressed attention currently supports only num_key_value_heads=1")
+    if args.num_attention_heads % args.o_groups != 0:
+        raise NotImplementedError("MLX real compressed attention requires num_attention_heads divisible by o_groups")
+    if "sinks" not in weights:
+        raise NotImplementedError("MLX real attention slice requires explicit per-head sink logits")
+    raw_sinks = weights["sinks"]
+    if tuple(raw_sinks.shape) != (args.num_attention_heads,):
+        raise NotImplementedError("MLX real attention slice requires one sink logit per query head")
+
+    q_a = _linear_mlx(x, weights["q_a_proj.weight"])
+    q_a = _rms_norm_mlx(q_a, weights["q_norm.weight"], args.rms_norm_eps)
+    q = _linear_mlx(q_a, weights["q_b_proj.weight"])
+    q = q.reshape((*q.shape[:-1], args.num_attention_heads, args.head_dim))
+    q = _rms_norm_mlx(q, mx.ones(args.head_dim), args.rms_norm_eps)
+    kv = _linear_mlx(x, weights["kv_proj.weight"])
+    kv = _rms_norm_mlx(kv, weights["kv_norm.weight"], args.rms_norm_eps)
+
+    batch, seq_len, _hidden = x.shape
+    rope_scaling = args.rope_scaling or {}
+    cos, sin = _compress_rope_yarn_tail_tables_mlx(
+        args.head_dim,
+        args.qk_rope_head_dim,
+        args.compress_rope_theta,
+        float(rope_scaling.get("factor", 16.0)),
+        int(rope_scaling.get("original_max_position_embeddings", 65536)),
+        seq_len,
+        positions=mx.arange(seq_len),
+    )
+    q = _apply_rope_tail_mlx(q, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+    kv = _apply_rope_tail_mlx(kv, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+
+    position_ids = mx.broadcast_to(mx.arange(seq_len).reshape((1, seq_len)), (batch, seq_len))
+    compressed_kv, block_bias = _hca_compressor_mlx(args, x, weights, position_ids=position_ids)
+    kv_by_head = mx.expand_dims(kv, 1)  # [batch, 1, seq, head_dim], broadcast over heads
+    kv_full = mx.concatenate([kv_by_head, compressed_kv], axis=2)
+
+    sliding_mask = _causal_sliding_mask_mlx(seq_len, args.sliding_window).reshape((1, 1, seq_len, seq_len))
+    if compressed_kv.shape[2] > 0:
+        if block_bias is None:
+            block_bias = mx.zeros((batch, 1, seq_len, compressed_kv.shape[2]), dtype=x.dtype)
+        mask = mx.concatenate([sliding_mask + mx.zeros((batch, 1, seq_len, seq_len), dtype=x.dtype), block_bias], axis=-1)
+    else:
+        mask = sliding_mask
+
+    scale = args.head_dim ** -0.5
+    q_by_head = q.transpose(0, 2, 1, 3)  # [batch, heads, seq, head_dim]
+    scores = (q_by_head @ kv_full.transpose(0, 1, 3, 2)) * scale
+    scores = scores + mask
+    sink_logits = raw_sinks.reshape((1, args.num_attention_heads, 1, 1)) + mx.zeros_like(scores[..., :1])
+    scores_with_sink = mx.concatenate([scores, sink_logits], axis=-1)
+    probs_with_sink = mx.softmax(scores_with_sink, axis=-1)
+    probs = probs_with_sink[..., : kv_full.shape[2]]
+    attended = probs @ kv_full
+    attended = attended.transpose(0, 2, 1, 3)  # [batch, seq, heads, head_dim]
+    attended = _apply_rope_tail_mlx(attended, cos, -sin, qk_rope_head_dim=args.qk_rope_head_dim)
+
+    heads_per_group = args.num_attention_heads // args.o_groups
+    expected_o_a_shape = (args.o_groups * args.o_lora_rank, heads_per_group * args.head_dim)
+    if tuple(weights["o_a_proj.weight"].shape) != expected_o_a_shape:
+        raise ValueError(f"o_a_proj.weight shape mismatch for grouped output: got {weights['o_a_proj.weight'].shape}, expected {expected_o_a_shape}")
+    expected_o_b_shape = (args.hidden_size, args.o_groups * args.o_lora_rank)
+    if tuple(weights["o_b_proj.weight"].shape) != expected_o_b_shape:
+        raise ValueError(f"o_b_proj.weight shape mismatch for grouped output: got {weights['o_b_proj.weight'].shape}, expected {expected_o_b_shape}")
+
+    low_rank_chunks = []
+    for group in range(args.o_groups):
+        head_start = group * heads_per_group
+        head_end = head_start + heads_per_group
+        row_start = group * args.o_lora_rank
+        row_end = row_start + args.o_lora_rank
+        group_heads = attended[..., head_start:head_end, :]
+        flat_group = group_heads.reshape((*group_heads.shape[:-2], heads_per_group * args.head_dim))
+        low_rank_chunks.append(_linear_mlx(flat_group, weights["o_a_proj.weight"][row_start:row_end, :]))
+    low_rank = mx.concatenate(low_rank_chunks, axis=-1)
+    return _linear_mlx(low_rank, weights["o_b_proj.weight"])
+
+
+
 def _causal_sliding_mask_mlx(seq_len: int, sliding_window: int) -> mx.array:
     positions = mx.arange(seq_len)
     causal = mx.where(positions[:, None] >= positions[None, :], 0.0, -1e9)
@@ -639,7 +850,9 @@ def _attention_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array], *
     """
 
     if args.compression_ratio != 0:
-        return _csa_attention_mlx(args, x, weights, index_topk=index_topk)
+        if _csa_config_error(args) is None:
+            return _csa_attention_mlx(args, x, weights, index_topk=index_topk)
+        return _attention_real_mlx(args, x, weights, index_topk=index_topk)
     if args.num_key_value_heads != 1:
         raise NotImplementedError("MLX attention currently supports only num_key_value_heads=1")
     if args.num_attention_heads % args.o_groups != 0:
