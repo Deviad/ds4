@@ -675,7 +675,7 @@ def _moe_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array]) -> mx.a
     routed = mx.zeros_like(x)
     expert_dtype = str(args.expert_dtype).lower()
     for eid in range(args.n_routed_experts):
-        if expert_dtype in ("i8", "fp4"):
+        if expert_dtype == "i8":
             w1 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w1.weight"], weights[f"mlp.experts.{eid}.w1.scale"])
             w2 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w2.weight"], weights[f"mlp.experts.{eid}.w2.scale"])
             w3 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w3.weight"], weights[f"mlp.experts.{eid}.w3.scale"])
@@ -1785,7 +1785,9 @@ class Model:
             for eid in range(args.n_routed_experts):
                 for proj in ("w1", "w2", "w3"):
                     required.add(f"{prefix}mlp.experts.{eid}.{proj}.weight")
-            if str(args.expert_dtype).lower() in ("i8", "fp4"):
+            _edt = str(args.expert_dtype).lower()
+            _fp4_has_scales = _edt == "fp4" and f"{prefix}mlp.experts.0.w1.scale" in weights
+            if _edt == "i8" or _fp4_has_scales:
                 for eid in range(args.n_routed_experts):
                     for proj in ("w1", "w2", "w3"):
                         required.add(f"{prefix}mlp.experts.{eid}.{proj}.scale")

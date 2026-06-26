@@ -394,7 +394,7 @@ EXPECTED_SHAS = {
     "docs/adr/0008-two-track-parity-gguf-vs-mlx.md": "3f0f31ea8e70bc91",
     "docs/adr/0017-b2-metal-carry-forward.md": "88f8a81175920d7a",
     "docs/adr/0020-story-12-3-ac4-hypothesis-retrospective.md": "e1bb9a03d0fa74b5",
-    "python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py": "e4cafc52970b4617",
+    "python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py": "bc2574d05810b7e5",
     "python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_attention_spec.py": None,  # 11.53 FROZEN
     "tests/test_deepseek_v4_forward_parity_11_15h.py": "2df25cec54b91c7e",
 }

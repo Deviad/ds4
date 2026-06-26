@@ -380,7 +380,7 @@ EXPECTED_SHAS = {
     "docs/adr/0019-fusion-primary-adapter-serving.md": "ce38c38a5da989a1",
     "docs/adr/0020-story-12-3-ac4-hypothesis-retrospective.md": "e1bb9a03d0fa74b5",
     "docs/adr/0021-loader-paired-tensor-synthesis-i8-e8m0.md": "850b58512c47d6d4",
-    "python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py": "e4cafc52970b4617",
+    "python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py": "bc2574d05810b7e5",
     "tests/test_deepseek_v4_forward_parity_11_15h.py": "2df25cec54b91c7e",
     "tests/test_deepseek_v4_validate_real_mode_relaxation.py": "c3a28d340d0b4491",
     "tests/test_deepseek_v4_mlx_port.py": "bde0fa84f281e422",

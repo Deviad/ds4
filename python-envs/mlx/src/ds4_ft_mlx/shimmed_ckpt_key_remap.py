@@ -55,6 +55,21 @@ _DROP_RULES: tuple[_re.Pattern[str], ...] = (
     _re.compile(r"^mtp\.\d+\..+$"),
 )
 
+# Mirrors vendor deepseek_v4._CSA_WEIGHT_KEYS without importing the vendor
+# module during its load-time remap pre-pass.
+_CSA_WEIGHT_KEYS = frozenset({
+    "compressor_wkv",
+    "compressor_wgate",
+    "compressor_ape",
+    "compressor_norm",
+    "indexer_wq_b",
+    "indexer_proj",
+    "indexer_compressor_wkv",
+    "indexer_compressor_wgate",
+    "indexer_compressor_ape",
+    "indexer_compressor_norm",
+})
+
 
 def remap_shimmed_ckpt_keys(
     weights: _Iterable[tuple[str, _Any]] | _Mapping[str, _Any],
@@ -114,6 +129,13 @@ def _is_vendor_internal(key: str) -> bool:
     ``_canonicalize_weight_key`` can strip/translate them.
     """
     if key in {"embed.weight", "norm.weight", "lm_head.weight", "hc_head.base", "hc_head.fn", "hc_head.scale"}:
+        return True
+    csa_key = key
+    if key.startswith("layers."):
+        parts = key.split(".", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            csa_key = parts[2]
+    if csa_key in _CSA_WEIGHT_KEYS:
         return True
     if key.startswith("model.") or key == "lm_head.weight":
         return True
