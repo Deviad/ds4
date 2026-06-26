@@ -50,6 +50,13 @@ _REQUIRED_FIELDS = (
     "moe_intermediate_size",
 )
 _SUPPORTED_EXPERT_DTYPES = {"fp4", "i8", "I8"}
+# OCP MXFP4 E2M1 (1 sign, 2 exp, 1 mantissa, bias=1). Index = 4-bit code 0..15.
+# Codes 8..15 are the negative half (-0.0 .. -6.0).
+_E2M1_FP4_LUT = (
+    +0.0, +0.5, +1.0, +1.5, +2.0, +3.0, +4.0, +6.0,
+    -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+)
+_E2M1_FP4_LUT_MX = mx.array(_E2M1_FP4_LUT, dtype=mx.float32) if mx is not None else None
 
 
 def forward_parity_blockers() -> tuple[str, ...]:
@@ -151,6 +158,49 @@ def _dequantize_i8_block_scale_mlx(weight: mx.array, scale: mx.array, *, block_s
         raise ValueError(f"I8 scale shape mismatch: got {scale.shape}, expected {tuple(expected_scale_shape)}")
     expanded = mx.repeat(scale.astype(mx.float32), repeats=block_size, axis=axis)
     return weight.astype(mx.float32) * expanded
+
+
+def _dequantize_fp4_block_scale_mlx(weight: mx.array, scale: mx.array, *, block_size: int = 32, axis: int = 1) -> mx.array:
+    """On-the-fly FP4 (OCP MXFP4 E2M1) → fp32 dequant of byte-packed routed experts.
+
+    Shimmed-ckpt routed-expert I8 containers hold 2 E2M1 nibbles/byte along the
+    in-features axis, LSB-first (low nibble = even logical element). Per-32-logical
+    BF16 block scale, linear domain (direct multiply, NOT E8M0). Mirrors the i8
+    primitive's STRUCTURE (shape guards + mx.repeat broadcast); math derives from
+    OCP MXFP4 spec + HF mxfp4 reference (transformers/integrations/mxfp4.py:28-45,
+    292-298), NOT _dequantize_i8_block_scale_mlx / _apply_i8_block_scales (ADR 0017).
+    """
+
+    if mx is None or _E2M1_FP4_LUT_MX is None:
+        raise NotImplementedError("mlx is required for FP4 expert dequantization")
+    if block_size != 32:
+        raise ValueError("fp4 block_size must be 32 (OCP MXFP4 default; BA Q2 LOCKED)")
+    if axis < 0:
+        axis += len(weight.shape)
+    if axis < 0 or axis >= len(weight.shape):
+        raise ValueError("scale axis out of range")
+    if axis != 1:
+        raise ValueError("fp4 scale axis must be 1 (in-features)")
+    in_logical = weight.shape[axis] * 2
+    if in_logical % block_size != 0:
+        raise ValueError("FP4 block-scale dequant requires complete logical blocks")
+
+    u = weight.astype(mx.uint8)
+    lo_idx = mx.bitwise_and(u, 0x0F)
+    hi_idx = mx.bitwise_and(mx.right_shift(u, 4), 0x0F)
+    lo_val = _E2M1_FP4_LUT_MX[lo_idx]
+    hi_val = _E2M1_FP4_LUT_MX[hi_idx]
+    fp4 = mx.stack([lo_val, hi_val], axis=-1).reshape(u.shape[0], u.shape[1] * 2)
+
+    n_blocks = scale.shape[axis]
+    if n_blocks * block_size != fp4.shape[axis]:
+        raise ValueError(f"fp4 scale cols {n_blocks} * block_size {block_size} != in_logical {fp4.shape[axis]}")
+    expected_scale_shape = list(weight.shape)
+    expected_scale_shape[axis] = n_blocks
+    if tuple(scale.shape) != tuple(expected_scale_shape):
+        raise ValueError(f"fp4 scale shape mismatch: got {scale.shape}, expected {tuple(expected_scale_shape)}")
+    scale_expanded = mx.repeat(scale.astype(mx.float32), repeats=block_size, axis=axis)
+    return fp4 * scale_expanded
 
 
 def _softplus_mlx(x: mx.array) -> mx.array:
@@ -650,9 +700,11 @@ def _attention_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array], *
 def _moe_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array]) -> mx.array:
     """Bounded synthetic top-k MoE in MLX.
 
-    Supports small unquantized fixture weights and the existing synthetic I8
-    block-scale path.  Packed FP4 real-checkpoint expert decode remains outside
-    this helper's proven scope.
+    Supports small unquantized fixture weights, the existing synthetic I8
+    block-scale path, and FP4 packed routed experts when per-projection scale
+    metadata is present. Legacy raw fixtures with expert_dtype='fp4' and no
+    scale keys stay on the raw-weight path; real checkpoint loads are guarded
+    by _fp4_has_scales before this helper runs.
     """
 
     if args.scoring_func != "sqrtsoftplus":
@@ -679,6 +731,26 @@ def _moe_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array]) -> mx.a
             w1 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w1.weight"], weights[f"mlp.experts.{eid}.w1.scale"])
             w2 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w2.weight"], weights[f"mlp.experts.{eid}.w2.scale"])
             w3 = _dequantize_i8_block_scale_mlx(weights[f"mlp.experts.{eid}.w3.weight"], weights[f"mlp.experts.{eid}.w3.scale"])
+        elif expert_dtype == "fp4":
+            scale_keys = [
+                f"mlp.experts.{eid}.w1.scale",
+                f"mlp.experts.{eid}.w2.scale",
+                f"mlp.experts.{eid}.w3.scale",
+            ]
+            if all(key in weights for key in scale_keys):
+                w1 = _dequantize_fp4_block_scale_mlx(weights[f"mlp.experts.{eid}.w1.weight"], weights[f"mlp.experts.{eid}.w1.scale"])
+                w2 = _dequantize_fp4_block_scale_mlx(weights[f"mlp.experts.{eid}.w2.weight"], weights[f"mlp.experts.{eid}.w2.scale"])
+                w3 = _dequantize_fp4_block_scale_mlx(weights[f"mlp.experts.{eid}.w3.weight"], weights[f"mlp.experts.{eid}.w3.scale"])
+            elif any(key in weights for key in scale_keys):
+                missing = [key for key in scale_keys if key not in weights]
+                raise KeyError(f"missing FP4 expert scale keys: {missing}")
+            else:
+                # Legacy synthetic fixtures use expert_dtype='fp4' with raw small
+                # matrices and no scale metadata. Real checkpoint loads are still
+                # guarded by _fp4_has_scales before reaching this forward path.
+                w1 = weights[f"mlp.experts.{eid}.w1.weight"]
+                w2 = weights[f"mlp.experts.{eid}.w2.weight"]
+                w3 = weights[f"mlp.experts.{eid}.w3.weight"]
         else:
             w1 = weights[f"mlp.experts.{eid}.w1.weight"]
             w2 = weights[f"mlp.experts.{eid}.w2.weight"]

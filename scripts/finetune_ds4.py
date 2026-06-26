@@ -4042,13 +4042,19 @@ def deepseek_v4_dequant_parity_check(args: argparse.Namespace) -> int:
     i8_affine = run_tiny_i8_affine_fixture()
     if i8_affine.get("status") != "ok":
         raise PlanError(f"explicit I8 affine parity check failed: {i8_affine!r}")
-    for packed_kind in ("fp4", "i8"):
-        try:
-            dequantize_expert_packed(packed_kind, b"\x00", scales=None, shape=(1, 1))
-        except NotImplementedError:
-            pass
-        else:
-            raise PlanError(f"packed {packed_kind.upper()} expert dequant unexpectedly succeeded without parity proof")
+    try:
+        dequantize_expert_packed("fp4", b"\x00" * 16, scales=None, shape=(1, 32), block_size=32, scale_axis=1)
+    except ValueError as exc:
+        if "requires non-None scales" not in str(exc):
+            raise PlanError(f"packed FP4 expert dequant rejected missing scales with unexpected error: {exc}") from exc
+    else:
+        raise PlanError("packed FP4 expert dequant unexpectedly succeeded without BF16 scales")
+    try:
+        dequantize_expert_packed("i8", b"\x00", scales=None, shape=(1, 1))
+    except NotImplementedError:
+        pass
+    else:
+        raise PlanError("packed I8 expert dequant unexpectedly succeeded without parity proof")
     _write_gate_marker(
         mlx_work,
         ".deepseek-v4-dequant-parity-ok",
@@ -4056,7 +4062,7 @@ def deepseek_v4_dequant_parity_check(args: argparse.Namespace) -> int:
             "gate": "deepseek-v4-dequant-parity",
             "status": "ok",
             "reference": "scripts/shim_ds4_safetensors.py",
-            "checks": ["f8_e4m3fn", "f8_e8m0", "explicit_scale_application", "i8_affine_explicit", "packed_experts_fail_closed"],
+            "checks": ["f8_e4m3fn", "f8_e8m0", "explicit_scale_application", "i8_affine_explicit", "fp4_requires_bf16_scales", "i8_without_metadata_fail_closed"],
         },
     )
     return 0
