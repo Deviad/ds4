@@ -21,6 +21,7 @@ if str(_MLX_SRC) not in sys.path:
 mx = pytest.importorskip("mlx.core")
 
 from test_compress_rope_oracle import real_hca_mlx_args
+from test_indexer_mlx_parity import real_csa_mlx_args
 
 
 def _tiny_csa_args():
@@ -119,3 +120,39 @@ def test_dispatch_tiny_csa_byte_identical_and_real_hca_routes_new(monkeypatch):
     got = deepseek_v4._attention_mlx(real_args, mx.zeros((1, 1, real_args.hidden_size)), {}, index_topk=None)
     assert got is sentinel
     assert called == {"args": real_args, "shape": (1, 1, real_args.hidden_size), "index_topk": None}
+
+
+def test_dispatch_real_csa_cr4_routes_to_csa_helper_before_hca(monkeypatch):
+    from ds4_ft_mlx.vendor.mlx_lm_models import deepseek_v4
+
+    csa_args = real_csa_mlx_args()
+    hca_args = real_hca_mlx_args()
+    assert csa_args.compression_ratio == 4
+    assert hca_args.compression_ratio == 128
+    assert deepseek_v4._csa_config_error(csa_args) is not None
+    assert deepseek_v4._csa_config_error(hca_args) is not None
+
+    csa_sentinel = mx.array([[[4.0]]])
+    hca_sentinel = mx.array([[[128.0]]])
+    calls = []
+
+    def fake_csa(fake_args, fake_x, fake_weights, *, index_topk=None):
+        calls.append(("csa", fake_args.compression_ratio, tuple(fake_x.shape), index_topk))
+        return csa_sentinel
+
+    def fake_hca(fake_args, fake_x, fake_weights, *, index_topk=None):
+        calls.append(("hca", fake_args.compression_ratio, tuple(fake_x.shape), index_topk))
+        return hca_sentinel
+
+    monkeypatch.setattr(deepseek_v4, "_csa_attention_real_mlx", fake_csa)
+    monkeypatch.setattr(deepseek_v4, "_attention_real_mlx", fake_hca)
+
+    csa_got = deepseek_v4._attention_mlx(csa_args, mx.zeros((1, 2, csa_args.hidden_size)), {}, index_topk=7)
+    hca_got = deepseek_v4._attention_mlx(hca_args, mx.zeros((1, 2, hca_args.hidden_size)), {}, index_topk=None)
+
+    assert csa_got is csa_sentinel
+    assert hca_got is hca_sentinel
+    assert calls == [
+        ("csa", 4, (1, 2, csa_args.hidden_size), 7),
+        ("hca", 128, (1, 2, hca_args.hidden_size), None),
+    ]

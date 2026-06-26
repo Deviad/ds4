@@ -75,7 +75,7 @@ def _load_torch_attention(config, weights):
 
 def test_attention_real_mlx_hca_matches_torch_attention_forward_real_dims():
     from transformers.models.deepseek_v4.modeling_deepseek_v4 import DeepseekV4RotaryEmbedding
-    from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import _attention_real_mlx
+    from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import _attention_mlx, _attention_real_mlx
 
     args = real_hca_mlx_args()
     config = real_hca_torch_config()
@@ -94,13 +94,14 @@ def test_attention_real_mlx_hca_matches_torch_attention_forward_real_dims():
             past_key_values=None,
         )
 
-    got = _attention_real_mlx(
-        args,
-        mx.array(hidden.numpy()),
-        {key: mx.array(value.numpy()) for key, value in weights.items()},
-    )
-    mx.eval(got)
+    mlx_hidden = mx.array(hidden.numpy())
+    mlx_weights = {key: mx.array(value.numpy()) for key, value in weights.items()}
+    got = _attention_real_mlx(args, mlx_hidden, mlx_weights)
+    routed = _attention_mlx(args, mlx_hidden, mlx_weights)
+    mx.eval(got, routed)
     got_t = torch.tensor(got.tolist(), dtype=torch.float32)
+    routed_t = torch.tensor(routed.tolist(), dtype=torch.float32)
 
     assert tuple(got.shape) == (1, hidden.shape[1], args.hidden_size)
     torch.testing.assert_close(got_t, expected.float(), atol=5e-3, rtol=0.0)
+    torch.testing.assert_close(routed_t, got_t, atol=0.0, rtol=0.0)

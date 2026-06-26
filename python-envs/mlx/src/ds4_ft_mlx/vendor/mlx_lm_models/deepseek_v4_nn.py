@@ -7,13 +7,45 @@ this module imports its proven MLX helpers instead of editing or copying them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 import mlx.core as mx
 import mlx.nn as nn
 
 from mlx_lm.models.pipeline import PipelineMixin
+
+_DEFAULT_COMPRESS_RATES = {
+    "compressed_sparse_attention": 4,
+    "heavily_compressed_attention": 128,
+}
+
+
+def _layer_type_from_ratio(ratio: int) -> str:
+    if ratio == 0:
+        return "sliding_attention"
+    if ratio == 4:
+        return "compressed_sparse_attention"
+    if ratio == 128:
+        return "heavily_compressed_attention"
+    raise ValueError(f"unsupported DeepSeek V4 attention compression ratio {ratio}")
+
+
+def _layer_compression_ratio(config: Any, layer_idx: int) -> int:
+    ratios = getattr(config, "compress_ratios", None)
+    if ratios is not None:
+        if layer_idx >= len(ratios):
+            raise ValueError("compress_ratios length must cover num_hidden_layers")
+        return int(ratios[layer_idx])
+    layer_types = getattr(config, "layer_types", None)
+    layer_type = "sliding_attention" if layer_types is None else layer_types[layer_idx]
+    if layer_type == "sliding_attention":
+        return int(getattr(config, "compression_ratio", 0)) if getattr(config, "compression_ratio", 0) else 0
+    rates = getattr(config, "compress_rates", None) or _DEFAULT_COMPRESS_RATES
+    if layer_type not in rates:
+        raise NotImplementedError(f"unsupported DeepSeek V4 attention layer_type {layer_type!r}")
+    return int(rates[layer_type])
+
 
 from .deepseek_v4 import (
     ModelArgs as _ParityModelArgs,
@@ -31,6 +63,9 @@ class ModelArgs(_ParityModelArgs):
     """DeepSeek V4 nn.Module config; sibling model_type keeps parity fixture intact."""
 
     model_type: str = "deepseek_v4_nn"
+    compress_rates: dict[str, int] | None = None
+    compress_ratios: list[int] | None = None
+    index_topk: int = 512
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "ModelArgs":
@@ -58,6 +93,14 @@ class ModelArgs(_ParityModelArgs):
             self.layer_types = ["sliding_attention"] * self.num_hidden_layers
         if len(self.layer_types) != self.num_hidden_layers:
             raise ValueError("layer_types length must equal num_hidden_layers")
+        if self.compress_ratios is not None:
+            if len(self.compress_ratios) < self.num_hidden_layers:
+                raise ValueError("compress_ratios length must cover num_hidden_layers")
+            self.compress_ratios = [int(value) for value in self.compress_ratios[: self.num_hidden_layers]]
+            # The shimmed real config currently carries stale all-sliding layer_types;
+            # the per-layer compression ratios are the truthful attention layout.
+            if all(kind == "sliding_attention" for kind in self.layer_types) and any(value != 0 for value in self.compress_ratios):
+                self.layer_types = [_layer_type_from_ratio(value) for value in self.compress_ratios]
 
 
 def _normal(shape: tuple[int, ...], *, scale: float = 0.02) -> mx.array:
@@ -132,13 +175,45 @@ class HyperHeadNN(nn.Module):
         )
 
 
+class AttentionCompressorNN(nn.Module):
+    """Trainable compressor leaves; AttentionNN exports them into functional weights."""
+
+    def __init__(self, *, hidden_size: int, out_dim: int, rate: int, overlap: bool, eps: float):
+        super().__init__()
+        projection_dim = (2 if overlap else 1) * out_dim
+        self.wkv = nn.Linear(hidden_size, projection_dim, bias=False)
+        self.wgate = nn.Linear(hidden_size, projection_dim, bias=False)
+        self.ape = _normal((rate, projection_dim))
+        self.norm = nn.RMSNorm(out_dim, eps=eps)
+
+
+class AttentionIndexerNN(nn.Module):
+    """CSA indexer leaves mirroring torch DeepseekV4Indexer."""
+
+    def __init__(self, config: ModelArgs, rate: int):
+        super().__init__()
+        self.compressor = AttentionCompressorNN(
+            hidden_size=config.hidden_size,
+            out_dim=config.index_head_dim,
+            rate=rate,
+            overlap=True,
+            eps=config.rms_norm_eps,
+        )
+        self.weights_proj = nn.Linear(config.hidden_size, config.index_n_heads, bias=False)
+        self.wq_b = nn.Linear(config.q_lora_rank, config.index_n_heads * config.index_head_dim, bias=False)
+
+
 class AttentionNN(nn.Module):
     """DeepSeek V4 MLA attention: grouped-o, sink logits, RoPE tail (§8)."""
 
     def __init__(self, config: ModelArgs, layer_idx: int):
         super().__init__()
-        self.config = config
         self.layer_idx = layer_idx
+        if config.layer_types is None or layer_idx >= len(config.layer_types):
+            raise ValueError("AttentionNN requires layer_types covering layer_idx")
+        self.layer_type = config.layer_types[layer_idx]
+        self.compression_ratio = _layer_compression_ratio(config, layer_idx)
+        self.config = replace(config, compression_ratio=self.compression_ratio)
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
@@ -150,12 +225,13 @@ class AttentionNN(nn.Module):
         self.rope_theta = config.rope_theta
         self.sliding_window = config.sliding_window
         self.rms_norm_eps = config.rms_norm_eps
-        if config.compression_ratio != 0:
-            raise NotImplementedError("13.3a-1 AttentionNN supports only compression_ratio=0")
+        self.index_topk = int(getattr(config, "index_topk", 512))
         if self.num_key_value_heads != 1:
             raise NotImplementedError("13.3a-1 AttentionNN supports only num_key_value_heads=1")
         if self.num_heads % self.o_groups != 0:
             raise ValueError("num_attention_heads must be divisible by o_groups")
+        if self.compression_ratio not in {0, 4, 128}:
+            raise NotImplementedError(f"AttentionNN does not support compression_ratio={self.compression_ratio}")
 
         heads_per_group = self.num_heads // self.o_groups
         self.q_a_proj = nn.Linear(self.hidden_size, self.q_lora_rank, bias=False)
@@ -166,9 +242,26 @@ class AttentionNN(nn.Module):
         self.o_a_proj = nn.Linear(heads_per_group * self.head_dim, self.o_groups * self.o_lora_rank, bias=False)
         self.o_b_proj = nn.Linear(self.o_groups * self.o_lora_rank, self.hidden_size, bias=False)
         self.sinks = mx.zeros((self.num_heads,))
+        if self.compression_ratio == 4:
+            self.compressor = AttentionCompressorNN(
+                hidden_size=self.hidden_size,
+                out_dim=self.head_dim,
+                rate=4,
+                overlap=True,
+                eps=self.rms_norm_eps,
+            )
+            self.indexer = AttentionIndexerNN(config, rate=4)
+        elif self.compression_ratio == 128:
+            self.compressor = AttentionCompressorNN(
+                hidden_size=self.hidden_size,
+                out_dim=self.head_dim,
+                rate=128,
+                overlap=False,
+                eps=self.rms_norm_eps,
+            )
 
     def __call__(self, x: mx.array, cache: Any | None = None) -> mx.array:
-        del cache  # cache/CSA are 13.3b concerns; this slice is cache-less.
+        del cache  # cache/stateful KV remain out of scope; 13.3b real path is cache-less.
 
         def linear_weight(linear: Any) -> mx.array:
             if isinstance(linear, nn.QuantizedLinear):
@@ -200,6 +293,29 @@ class AttentionNN(nn.Module):
             "o_b_proj.weight": linear_weight(self.o_b_proj),
             "sinks": self.sinks,
         }
+        if self.compression_ratio == 0:
+            return _attention_mlx(self.config, x, weights)
+
+        weights.update(
+            {
+                "compressor_wkv": linear_weight(self.compressor.wkv),
+                "compressor_wgate": linear_weight(self.compressor.wgate),
+                "compressor_ape": self.compressor.ape,
+                "compressor_norm": self.compressor.norm.weight,
+            }
+        )
+        if self.compression_ratio == 4:
+            weights.update(
+                {
+                    "indexer_compressor_wkv": linear_weight(self.indexer.compressor.wkv),
+                    "indexer_compressor_wgate": linear_weight(self.indexer.compressor.wgate),
+                    "indexer_compressor_ape": self.indexer.compressor.ape,
+                    "indexer_compressor_norm": self.indexer.compressor.norm.weight,
+                    "indexer_proj": linear_weight(self.indexer.weights_proj),
+                    "indexer_wq_b": linear_weight(self.indexer.wq_b),
+                }
+            )
+            return _attention_mlx(self.config, x, weights, index_topk=self.index_topk)
         return _attention_mlx(self.config, x, weights)
 
 
@@ -450,6 +566,8 @@ __all__ = [
     "DeepseekV4ModelNN",
     "DecoderLayerNN",
     "AttentionNN",
+    "AttentionCompressorNN",
+    "AttentionIndexerNN",
     "HyperConnectionNN",
     "HyperHeadNN",
     "MLPNN",

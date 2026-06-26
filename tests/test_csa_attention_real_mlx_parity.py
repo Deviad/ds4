@@ -81,6 +81,7 @@ def _load_torch_attention(config, weights):
 def test_csa_attention_real_mlx_matches_torch_attention_forward_real_dims():
     from transformers.models.deepseek_v4.modeling_deepseek_v4 import DeepseekV4RotaryEmbedding
     from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import (
+        _attention_mlx,
         _csa_attention_real_mlx,
         _csa_block_bias_mlx,
         _csa_compressor_real_mlx,
@@ -129,11 +130,13 @@ def test_csa_attention_real_mlx_matches_torch_attention_forward_real_dims():
     )
     got_bias = _csa_block_bias_mlx(top_k_indices, int(got_compressed.shape[2]), dtype=mlx_hidden.dtype)
     got = _csa_attention_real_mlx(args, mlx_hidden, mlx_weights, index_topk=512)
-    mx.eval(got_compressed, got_bias, got)
+    routed = _attention_mlx(args, mlx_hidden, mlx_weights, index_topk=512)
+    mx.eval(got_compressed, got_bias, got, routed)
 
     got_compressed_t = torch.tensor(got_compressed.tolist(), dtype=torch.float32)
     got_bias_t = torch.tensor(got_bias.tolist(), dtype=torch.float32)
     got_t = torch.tensor(got.tolist(), dtype=torch.float32)
+    routed_t = torch.tensor(routed.tolist(), dtype=torch.float32)
 
     assert tuple(got_compressed.shape) == tuple(expected_compressed.shape) == (1, 1, hidden.shape[1] // 4, 512)
     assert tuple(got_bias.shape) == tuple(expected_bias.shape) == (1, 1, hidden.shape[1], hidden.shape[1] // 4)
@@ -147,3 +150,4 @@ def test_csa_attention_real_mlx_matches_torch_attention_forward_real_dims():
     )
     assert tuple(got.shape) == (1, hidden.shape[1], args.hidden_size)
     torch.testing.assert_close(got_t, expected.float(), atol=1e-2, rtol=0.0)
+    torch.testing.assert_close(routed_t, got_t, atol=0.0, rtol=0.0)

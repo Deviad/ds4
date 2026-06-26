@@ -1199,6 +1199,8 @@ def _attention_mlx(args: ModelArgs, x: mx.array, weights: dict[str, mx.array], *
     if args.compression_ratio != 0:
         if _csa_config_error(args) is None:
             return _csa_attention_mlx(args, x, weights, index_topk=index_topk)
+        if args.compression_ratio == 4:
+            return _csa_attention_real_mlx(args, x, weights, index_topk=index_topk)
         return _attention_real_mlx(args, x, weights, index_topk=index_topk)
     if args.num_key_value_heads != 1:
         raise NotImplementedError("MLX attention currently supports only num_key_value_heads=1")
