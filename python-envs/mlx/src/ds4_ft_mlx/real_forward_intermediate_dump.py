@@ -2,7 +2,7 @@
 
 Delivers a witness-only subclass of the vendored DeepSeek-V4 ``Model`` that
 captures the post-FFN hyperconnection-residual-mix stream ``h`` returned by
-vendor ``_real_layer_forward`` (line 1882 ``return h``) once per layer, WITHOUT
+vendor ``_real_layer_forward`` (line 2518 ``return h``) once per layer, WITHOUT
 editing vendor source (ADR 0007 §4 anti-transliteration honored).
 
 Non-circularity audit (AC12, B.1-B.4 mirrors 11.53 Reviewer pattern):
@@ -56,9 +56,9 @@ from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import Model as _DeepseekV4Mode
 # Constants (Architecture Q4 / Q5 / Q6).
 # --------------------------------------------------------------------------- #
 
-VENDOR_CAPTURE_LINE = "deepseek_v4.py:1882 return h"
+VENDOR_CAPTURE_LINE = "deepseek_v4.py:2518 return h"
 VENDOR_HEAD_SHA = "221bdac"
-VENDOR_SHA256_16 = "812df0f7a34c0f07"  # ADR 0026 additive deepseek_v4.py baseline.
+VENDOR_SHA256_16 = "dc5aaaab9bb079d2"  # ADR 0026 additive CSA helper baseline.
 NUMPY_REF_SHA256_16 = "08d32750fc919453"  # post-11.54r2 F1-FIX.
 
 DEFAULT_CKPT_DIR = "/Volumes/Data NVME/mlx-ft/ds4/hf-f8shim/"

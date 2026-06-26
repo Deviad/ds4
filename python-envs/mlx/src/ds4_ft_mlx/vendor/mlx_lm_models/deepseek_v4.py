@@ -816,6 +816,192 @@ def _hca_compressor_mlx(
 
 
 
+def _csa_compressor_real_mlx(
+    args: ModelArgs,
+    x: mx.array,
+    weights: dict[str, mx.array],
+) -> mx.array:
+    """Stateless real-dim CSA compressor: Ca/Cb overlap, single KV head, compress-YaRN tail."""
+
+    rate = int(args.compression_ratio)
+    if rate != 4:
+        raise NotImplementedError("MLX real CSA compressor currently supports compression_ratio=4")
+    out_dim = int(args.head_dim)
+    required = {"compressor_wkv", "compressor_wgate", "compressor_ape", "compressor_norm"}
+    missing = sorted(required - set(weights))
+    if missing:
+        raise ValueError(f"missing MLX CSA compressor weights: {', '.join(missing)}")
+    if tuple(weights["compressor_wkv"].shape) != (2 * out_dim, args.hidden_size):
+        raise ValueError(f"CSA compressor_wkv shape mismatch: got {weights['compressor_wkv'].shape}, expected {(2 * out_dim, args.hidden_size)}")
+    if tuple(weights["compressor_wgate"].shape) != (2 * out_dim, args.hidden_size):
+        raise ValueError(f"CSA compressor_wgate shape mismatch: got {weights['compressor_wgate'].shape}, expected {(2 * out_dim, args.hidden_size)}")
+    if tuple(weights["compressor_ape"].shape) != (rate, 2 * out_dim):
+        raise ValueError(f"CSA compressor_ape shape mismatch: got {weights['compressor_ape'].shape}, expected {(rate, 2 * out_dim)}")
+    if tuple(weights["compressor_norm"].shape) != (out_dim,):
+        raise ValueError(f"CSA compressor_norm shape mismatch: got {weights['compressor_norm'].shape}, expected {(out_dim,)}")
+
+    batch, seq_len, _hidden = x.shape
+    usable = (seq_len // rate) * rate
+    n_windows = usable // rate
+    if n_windows == 0:
+        return mx.zeros((batch, 1, 0, out_dim), dtype=x.dtype)
+
+    # Do not call FROZEN _csa_windowed_compressor_mlx here: it expects transposed
+    # APE and applies full-channel plain RoPE. Real CSA uses token-major APE and
+    # compress-YaRN only on the trailing qk_rope_head_dim slice.
+    kv = _linear_mlx(x[:, :usable, :], weights["compressor_wkv"])
+    gate = _linear_mlx(x[:, :usable, :], weights["compressor_wgate"])
+    kv = kv.reshape((batch, n_windows, rate, 2 * out_dim))
+    gate = gate.reshape((batch, n_windows, rate, 2 * out_dim)) + weights["compressor_ape"].reshape((1, 1, rate, 2 * out_dim))
+    cb_kv = kv[..., out_dim:]
+    cb_gate = gate[..., out_dim:]
+    zero_kv = mx.zeros((batch, 1, rate, out_dim), dtype=kv.dtype)
+    masked_gate = mx.full((batch, 1, rate, out_dim), -float("inf"), dtype=gate.dtype)
+    if n_windows > 1:
+        ca_kv = mx.concatenate([zero_kv, kv[:, :-1, :, :out_dim]], axis=1)
+        ca_gate = mx.concatenate([masked_gate, gate[:, :-1, :, :out_dim]], axis=1)
+    else:
+        ca_kv = zero_kv
+        ca_gate = masked_gate
+    new_kv = mx.concatenate([ca_kv, cb_kv], axis=2)
+    new_gate = mx.concatenate([ca_gate, cb_gate], axis=2)
+    gate_probs = mx.softmax(new_gate.astype(mx.float32), axis=2).astype(new_kv.dtype)
+    pooled = mx.sum(new_kv * gate_probs, axis=2)
+    compressed = _rms_norm_mlx(pooled, weights["compressor_norm"], args.rms_norm_eps)
+
+    positions = mx.arange(n_windows) * rate
+    rope_scaling = args.rope_scaling or {}
+    cos, sin = _compress_rope_yarn_tail_tables_mlx(
+        args.head_dim,
+        args.qk_rope_head_dim,
+        args.compress_rope_theta,
+        float(rope_scaling.get("factor", 16.0)),
+        int(rope_scaling.get("original_max_position_embeddings", 65536)),
+        n_windows,
+        positions=positions,
+    )
+    compressed = _apply_rope_tail_mlx(compressed, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+    return mx.expand_dims(compressed, 1)
+
+
+def _csa_block_bias_mlx(top_k_indices: mx.array, compressed_len: int, *, dtype: Any) -> mx.array:
+    """Build torch CSA block_bias from indexer top-k sentinels using MLX put/scatter."""
+
+    if compressed_len < 0:
+        raise ValueError("compressed_len must be non-negative")
+    if len(top_k_indices.shape) != 3:
+        raise ValueError(f"CSA top_k_indices must have shape [batch, seq, k], got {top_k_indices.shape}")
+    batch, seq_len, _top_k = top_k_indices.shape
+    if compressed_len == 0:
+        return mx.zeros((batch, 1, seq_len, 0), dtype=dtype)
+
+    valid = top_k_indices >= 0
+    sentinel = mx.full(top_k_indices.shape, compressed_len, dtype=top_k_indices.dtype)
+    safe_indices = mx.where(valid, top_k_indices, sentinel).astype(mx.int32)
+    block_bias = mx.full((batch, 1, seq_len, compressed_len + 1), -float("inf"), dtype=dtype)
+    scatter_indices = mx.expand_dims(safe_indices, 1)
+    zeros = mx.zeros(scatter_indices.shape, dtype=dtype)
+    return mx.put_along_axis(block_bias, scatter_indices, zeros, axis=-1)[..., :compressed_len]
+
+
+def _csa_attention_real_mlx(
+    args: ModelArgs,
+    x: mx.array,
+    weights: dict[str, mx.array],
+    *,
+    index_topk: int | None = None,
+) -> mx.array:
+    """Real-dim CSA helper: compressor + indexer block bias + multi-head grouped output."""
+
+    if args.compression_ratio != 4:
+        raise NotImplementedError("MLX real CSA attention currently supports compression_ratio=4")
+    if args.num_key_value_heads != 1:
+        raise NotImplementedError("MLX real CSA attention currently supports only num_key_value_heads=1")
+    if args.num_attention_heads % args.o_groups != 0:
+        raise NotImplementedError("MLX real CSA attention requires num_attention_heads divisible by o_groups")
+    if "sinks" not in weights:
+        raise NotImplementedError("MLX real CSA attention slice requires explicit per-head sink logits")
+    raw_sinks = weights["sinks"]
+    if tuple(raw_sinks.shape) != (args.num_attention_heads,):
+        raise NotImplementedError("MLX real CSA attention slice requires one sink logit per query head")
+    if index_topk is None:
+        index_topk = 512
+
+    q_a = _linear_mlx(x, weights["q_a_proj.weight"])
+    q_residual = _rms_norm_mlx(q_a, weights["q_norm.weight"], args.rms_norm_eps)
+    q = _linear_mlx(q_residual, weights["q_b_proj.weight"])
+    q = q.reshape((*q.shape[:-1], args.num_attention_heads, args.head_dim))
+    q = _rms_norm_mlx(q, mx.ones(args.head_dim), args.rms_norm_eps)
+    kv = _linear_mlx(x, weights["kv_proj.weight"])
+    kv = _rms_norm_mlx(kv, weights["kv_norm.weight"], args.rms_norm_eps)
+
+    batch, seq_len, _hidden = x.shape
+    rope_scaling = args.rope_scaling or {}
+    cos, sin = _compress_rope_yarn_tail_tables_mlx(
+        args.head_dim,
+        args.qk_rope_head_dim,
+        args.compress_rope_theta,
+        float(rope_scaling.get("factor", 16.0)),
+        int(rope_scaling.get("original_max_position_embeddings", 65536)),
+        seq_len,
+        positions=mx.arange(seq_len),
+    )
+    q = _apply_rope_tail_mlx(q, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+    kv = _apply_rope_tail_mlx(kv, cos, sin, qk_rope_head_dim=args.qk_rope_head_dim)
+
+    position_ids = mx.broadcast_to(mx.arange(seq_len).reshape((1, seq_len)), (batch, seq_len))
+    compressed_kv = _csa_compressor_real_mlx(args, x, weights)
+    top_k_indices = _indexer_mlx(
+        args,
+        x,
+        q_residual,
+        weights,
+        position_ids=position_ids,
+        index_topk=int(index_topk),
+    )
+    block_bias = _csa_block_bias_mlx(top_k_indices, int(compressed_kv.shape[2]), dtype=x.dtype)
+    kv_by_head = mx.expand_dims(kv, 1)  # [batch, 1, seq, head_dim], broadcast over heads
+    kv_full = mx.concatenate([kv_by_head, compressed_kv], axis=2)
+
+    sliding_mask = _causal_sliding_mask_mlx(seq_len, args.sliding_window).reshape((1, 1, seq_len, seq_len))
+    if compressed_kv.shape[2] > 0:
+        mask = mx.concatenate([sliding_mask + mx.zeros((batch, 1, seq_len, seq_len), dtype=x.dtype), block_bias], axis=-1)
+    else:
+        mask = sliding_mask
+
+    scale = args.head_dim ** -0.5
+    q_by_head = q.transpose(0, 2, 1, 3)  # [batch, heads, seq, head_dim]
+    scores = (q_by_head @ kv_full.transpose(0, 1, 3, 2)) * scale
+    scores = scores + mask
+    sink_logits = raw_sinks.reshape((1, args.num_attention_heads, 1, 1)) + mx.zeros_like(scores[..., :1])
+    scores_with_sink = mx.concatenate([scores, sink_logits], axis=-1)
+    probs_with_sink = mx.softmax(scores_with_sink, axis=-1)
+    probs = probs_with_sink[..., : kv_full.shape[2]]
+    attended = probs @ kv_full
+    attended = attended.transpose(0, 2, 1, 3)  # [batch, seq, heads, head_dim]
+    attended = _apply_rope_tail_mlx(attended, cos, -sin, qk_rope_head_dim=args.qk_rope_head_dim)
+
+    heads_per_group = args.num_attention_heads // args.o_groups
+    expected_o_a_shape = (args.o_groups * args.o_lora_rank, heads_per_group * args.head_dim)
+    if tuple(weights["o_a_proj.weight"].shape) != expected_o_a_shape:
+        raise ValueError(f"o_a_proj.weight shape mismatch for grouped output: got {weights['o_a_proj.weight'].shape}, expected {expected_o_a_shape}")
+    expected_o_b_shape = (args.hidden_size, args.o_groups * args.o_lora_rank)
+    if tuple(weights["o_b_proj.weight"].shape) != expected_o_b_shape:
+        raise ValueError(f"o_b_proj.weight shape mismatch for grouped output: got {weights['o_b_proj.weight'].shape}, expected {expected_o_b_shape}")
+
+    low_rank_chunks = []
+    for group in range(args.o_groups):
+        head_start = group * heads_per_group
+        head_end = head_start + heads_per_group
+        row_start = group * args.o_lora_rank
+        row_end = row_start + args.o_lora_rank
+        group_heads = attended[..., head_start:head_end, :]
+        flat_group = group_heads.reshape((*group_heads.shape[:-2], heads_per_group * args.head_dim))
+        low_rank_chunks.append(_linear_mlx(flat_group, weights["o_a_proj.weight"][row_start:row_end, :]))
+    low_rank = mx.concatenate(low_rank_chunks, axis=-1)
+    return _linear_mlx(low_rank, weights["o_b_proj.weight"])
+
+
 def _attention_real_mlx(
     args: ModelArgs,
     x: mx.array,
