@@ -45,7 +45,13 @@ def _tiny_config() -> dict[str, object]:
 
 
 def test_deepseek_v4_nn_forward_returns_finite_mx_array_logits():
-    from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import Model, ModelArgs
+    from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import (
+        DeepseekV4FP4Experts,
+        MLPNN,
+        Model,
+        ModelArgs,
+        SparseMoeBlockNN,
+    )
 
     model = Model(ModelArgs.from_dict(_tiny_config()))
     tokens = mx.array([[1, 2, 3]], dtype=mx.int32)
@@ -56,5 +62,16 @@ def test_deepseek_v4_nn_forward_returns_finite_mx_array_logits():
     assert out.shape == (1, 3, 64)
     assert bool(mx.all(mx.isfinite(out)).item())
     assert not isinstance(out, list)
-    assert model.model.layers[0].mlp.layer_type == "hash_moe"
-    assert model.model.layers[1].mlp.layer_type == "moe"
+
+    hash_mlp = model.model.layers[0].mlp
+    moe_mlp = model.model.layers[1].mlp
+    assert isinstance(hash_mlp, SparseMoeBlockNN)
+    assert isinstance(moe_mlp, SparseMoeBlockNN)
+    assert hash_mlp.is_hash is True
+    assert moe_mlp.is_hash is False
+    assert hash_mlp.layer_type == "hash_moe"
+    assert moe_mlp.layer_type == "moe"
+    assert isinstance(hash_mlp.experts, DeepseekV4FP4Experts)
+    assert isinstance(moe_mlp.experts, DeepseekV4FP4Experts)
+    assert isinstance(hash_mlp.shared_experts, MLPNN)
+    assert isinstance(moe_mlp.shared_experts, MLPNN)

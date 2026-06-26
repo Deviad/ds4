@@ -18,8 +18,10 @@ from mlx_lm.models.pipeline import PipelineMixin
 from .deepseek_v4 import (
     ModelArgs as _ParityModelArgs,
     _attention_mlx,  # imported as the frozen math contract for AttentionNN (§8)
+    _dequantize_fp4_block_scale_mlx,
     _hyperconnection_mlx,
     _hyperhead_mlx,
+    _softplus_mlx,
     sanitize_weights,
 )
 
@@ -61,6 +63,19 @@ class ModelArgs(_ParityModelArgs):
 def _normal(shape: tuple[int, ...], *, scale: float = 0.02) -> mx.array:
     return mx.random.normal(shape=shape) * scale
 
+
+def _ceil_to_block(value: int, block: int) -> int:
+    return ((int(value) + block - 1) // block) * block
+
+
+def _pad_last_dim(x: mx.array, target: int) -> mx.array:
+    current = x.shape[-1]
+    if current == target:
+        return x
+    if current > target:
+        raise ValueError(f"cannot project {current} features through FP4 weight with {target} inputs")
+    pad_width = tuple((0, 0) for _ in range(x.ndim - 1)) + ((0, target - current),)
+    return mx.pad(x, pad_width)
 
 
 class HyperConnectionNN(nn.Module):
@@ -179,7 +194,7 @@ class AttentionNN(nn.Module):
 
 
 class MLPNN(nn.Module):
-    """Shared SwiGLU MLP stub for 13.3a-1; SparseMoeBlockNN lands in 13.3a-2."""
+    """Shared SwiGLU expert reused by SparseMoeBlockNN (§A Q4-Q5)."""
 
     def __init__(self, config: ModelArgs, layer_type: str):
         super().__init__()
@@ -192,10 +207,143 @@ class MLPNN(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
 
     def __call__(self, x: mx.array, input_ids: mx.array | None = None) -> mx.array:
-        del input_ids  # hash routing is 13.3a-2; this stub keeps the signature.
+        del input_ids
         gate = mx.clip(self.gate_proj(x), None, self.limit)
         up = mx.clip(self.up_proj(x), -self.limit, self.limit)
         return self.down_proj(mx.sigmoid(gate) * gate * up)
+
+
+class DeepseekV4FP4Experts(nn.Module):
+    """Frozen FP4 routed experts; dequantizes on the fly via ADR 0024 primitive."""
+
+    def __init__(self, config: ModelArgs):
+        super().__init__()
+        if str(config.expert_dtype).lower() != "fp4":
+            raise NotImplementedError("DeepseekV4FP4Experts supports only expert_dtype='fp4'")
+        self.n_routed_experts = config.n_routed_experts
+        self.hidden_size = config.hidden_size
+        self.intermediate_size = config.moe_intermediate_size
+        self.limit = config.swiglu_limit
+
+        # OCP MXFP4 packs two logical input features per byte and scales each
+        # 32-logical-feature block.  Tiny 16-wide tests are padded only on the
+        # FP4 input axes; real 4096/2048 shapes stay byte-identical to ckpt layout.
+        hidden_logical = _ceil_to_block(self.hidden_size, 32)
+        intermediate_logical = _ceil_to_block(self.intermediate_size, 32)
+        hidden_packed = hidden_logical // 2
+        hidden_scale = hidden_logical // 32
+        intermediate_packed = intermediate_logical // 2
+        intermediate_scale = intermediate_logical // 32
+
+        self.w1_weight = mx.zeros((self.n_routed_experts, self.intermediate_size, hidden_packed), dtype=mx.uint8)
+        self.w1_scale = mx.zeros((self.n_routed_experts, self.intermediate_size, hidden_scale), dtype=mx.bfloat16)
+        self.w3_weight = mx.zeros((self.n_routed_experts, self.intermediate_size, hidden_packed), dtype=mx.uint8)
+        self.w3_scale = mx.zeros((self.n_routed_experts, self.intermediate_size, hidden_scale), dtype=mx.bfloat16)
+        self.w2_weight = mx.zeros((self.n_routed_experts, self.hidden_size, intermediate_packed), dtype=mx.uint8)
+        self.w2_scale = mx.zeros((self.n_routed_experts, self.hidden_size, intermediate_scale), dtype=mx.bfloat16)
+        self.freeze()
+
+    def _dequant(self, weight: mx.array, scale: mx.array) -> mx.array:
+        return _dequantize_fp4_block_scale_mlx(weight, scale)
+
+    def forward_one(self, eid: int, x: mx.array) -> mx.array:
+        w1 = self._dequant(self.w1_weight[eid], self.w1_scale[eid])
+        w2 = self._dequant(self.w2_weight[eid], self.w2_scale[eid])
+        w3 = self._dequant(self.w3_weight[eid], self.w3_scale[eid])
+        x_for_w1 = _pad_last_dim(x, w1.shape[1])
+        gate = mx.clip(x_for_w1 @ w1.T, None, self.limit)
+        up = mx.clip(x_for_w1 @ w3.T, -self.limit, self.limit)
+        hidden = mx.sigmoid(gate) * gate * up
+        hidden_for_w2 = _pad_last_dim(hidden, w2.shape[1])
+        return hidden_for_w2 @ w2.T
+
+    def __call__(self, x: mx.array, eids: mx.array) -> mx.array:
+        slot_outputs = []
+        for slot in range(eids.shape[-1]):
+            out = mx.zeros_like(x)
+            slot_eids = eids[..., slot]
+            for eid in range(self.n_routed_experts):
+                selected = (slot_eids == eid).astype(x.dtype)
+                out = out + self.forward_one(eid, x) * mx.expand_dims(selected, -1)
+            slot_outputs.append(out)
+        return mx.stack(slot_outputs, axis=-2)
+
+
+class SparseMoeBlockNN(nn.Module):
+    """DeepSeek V4 sparse MoE with learned top-k or tid2eid hash routing."""
+
+    def __init__(self, config: ModelArgs, layer_idx: int):
+        super().__init__()
+        self.layer_idx = layer_idx
+        self.layer_type = config.mlp_layer_types[layer_idx]
+        self.is_hash = self.layer_type == "hash_moe"
+        self.hidden_size = config.hidden_size
+        self.n_routed_experts = config.n_routed_experts
+        self.top_k = config.num_experts_per_tok
+        self.routed_scaling_factor = config.routed_scaling_factor
+        self.scoring_func = config.scoring_func
+        if self.top_k > self.n_routed_experts:
+            raise ValueError("num_experts_per_tok cannot exceed n_routed_experts")
+
+        self.gate_weight = _normal((self.n_routed_experts, self.hidden_size))
+        self.e_score_correction_bias = mx.zeros((self.n_routed_experts,))
+        if self.is_hash:
+            self.tid2eid = mx.zeros((config.vocab_size, self.top_k), dtype=mx.int32)
+        self.experts = DeepseekV4FP4Experts(config)
+        self.shared_experts = MLPNN(config, "shared_experts")
+
+        frozen_keys = ["e_score_correction_bias"]
+        if self.is_hash:
+            frozen_keys.append("tid2eid")
+        self.freeze(recurse=False, keys=frozen_keys)
+
+    @property
+    def gate_proj(self):
+        return self.shared_experts.gate_proj
+
+    @property
+    def up_proj(self):
+        return self.shared_experts.up_proj
+
+    @property
+    def down_proj(self):
+        return self.shared_experts.down_proj
+
+    def _scores(self, x: mx.array) -> mx.array:
+        if self.scoring_func != "sqrtsoftplus":
+            raise NotImplementedError("SparseMoeBlockNN supports only scoring_func='sqrtsoftplus'")
+        logits = x @ self.gate_weight.T
+        return mx.sqrt(_softplus_mlx(logits))
+
+    def _select_indices(self, scores: mx.array, x_shape: tuple[int, ...], input_ids: mx.array | None) -> mx.array:
+        if self.is_hash:
+            if input_ids is None:
+                raise ValueError("hash_moe SparseMoeBlockNN requires input_ids")
+            return self.tid2eid[input_ids.reshape(-1)].reshape(*x_shape[:-1], self.top_k)
+        selection_scores = scores + self.e_score_correction_bias
+        return mx.argsort(-selection_scores, axis=-1)[..., : self.top_k]
+
+    def routing_indices(self, x: mx.array, input_ids: mx.array | None = None) -> mx.array:
+        return self._select_indices(self._scores(x), x.shape, input_ids)
+
+    def _route(self, x: mx.array, input_ids: mx.array | None) -> tuple[mx.array, mx.array, mx.array]:
+        scores = self._scores(x)
+        indices = self._select_indices(scores, x.shape, input_ids)
+        denom = mx.zeros_like(scores[..., 0])
+        for eid in range(self.n_routed_experts):
+            selected = mx.any(indices == eid, axis=-1).astype(scores.dtype)
+            denom = denom + scores[..., eid] * selected
+        return scores, indices, denom
+
+    def __call__(self, x: mx.array, input_ids: mx.array | None = None) -> mx.array:
+        scores, indices, denom = self._route(x, input_ids)
+        routed = mx.zeros_like(x)
+        for eid in range(self.n_routed_experts):
+            expert_out = self.experts.forward_one(eid, x)
+            selected = mx.any(indices == eid, axis=-1).astype(x.dtype)
+            factor = (scores[..., eid] / (denom + 1e-20)) * selected * self.routed_scaling_factor
+            routed = routed + expert_out * mx.expand_dims(factor, -1)
+        return routed + self.shared_experts(x)
 
 
 class DecoderLayerNN(nn.Module):
@@ -209,7 +357,7 @@ class DecoderLayerNN(nn.Module):
         self.attn_hc = HyperConnectionNN(config)
         self.ffn_hc = HyperConnectionNN(config)
         self.self_attn = AttentionNN(config, layer_idx)
-        self.mlp = MLPNN(config, config.mlp_layer_types[layer_idx])
+        self.mlp = SparseMoeBlockNN(config, layer_idx)
 
     def __call__(self, hidden_states: mx.array, input_ids: mx.array | None = None, cache: Any | None = None) -> mx.array:
         dtype = hidden_states.dtype
@@ -295,4 +443,6 @@ __all__ = [
     "HyperConnectionNN",
     "HyperHeadNN",
     "MLPNN",
+    "DeepseekV4FP4Experts",
+    "SparseMoeBlockNN",
 ]
