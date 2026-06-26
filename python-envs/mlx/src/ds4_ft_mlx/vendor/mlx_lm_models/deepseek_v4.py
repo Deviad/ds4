@@ -588,6 +588,167 @@ def _compress_rope_yarn_tail_tables_mlx(
     return mx.cos(angles), mx.sin(angles)
 
 
+def _indexer_scorer_mlx(
+    q: mx.array,
+    compressed_kv: mx.array,
+    hidden: mx.array,
+    *,
+    index_n_heads: int,
+    index_head_dim: int,
+    weights_proj: mx.array,
+) -> mx.array:
+    """Real-dim Lightning Indexer scorer with torch-matching fp32 accumulation."""
+
+    if tuple(q.shape[:2]) != tuple(hidden.shape[:2]):
+        raise ValueError(f"indexer scorer q/hidden prefix mismatch: got {q.shape[:2]} and {hidden.shape[:2]}")
+    if q.shape[2] != index_n_heads or q.shape[3] != index_head_dim:
+        raise ValueError(f"indexer q shape mismatch: got {q.shape}, expected (*, *, {index_n_heads}, {index_head_dim})")
+    if compressed_kv.shape[0] != q.shape[0] or compressed_kv.shape[-1] != index_head_dim:
+        raise ValueError(f"indexer compressed_kv shape mismatch: got {compressed_kv.shape}, expected batch {q.shape[0]} and dim {index_head_dim}")
+    expected_weights_shape = (index_n_heads, hidden.shape[-1])
+    if tuple(weights_proj.shape) != expected_weights_shape:
+        raise ValueError(f"indexer weights_proj shape mismatch: got {weights_proj.shape}, expected {expected_weights_shape}")
+
+    q32 = q.astype(mx.float32)
+    compressed32 = compressed_kv.astype(mx.float32)
+    dots = mx.sum(mx.expand_dims(q32, 3) * mx.expand_dims(mx.expand_dims(compressed32, 1), 1), axis=-1)
+    scores = mx.maximum(dots, 0.0) * (index_head_dim ** -0.5)
+    weights32 = _linear_mlx(hidden.astype(mx.float32), weights_proj.astype(mx.float32)) * (index_n_heads ** -0.5)
+    return mx.sum(scores * mx.expand_dims(weights32, -1), axis=2)
+
+
+def _indexer_mlx(
+    args: ModelArgs,
+    hidden: mx.array,
+    q_residual: mx.array,
+    weights: dict[str, mx.array],
+    *,
+    position_ids: mx.array,
+    index_topk: int,
+) -> mx.array:
+    """Real-dim stateless CSA indexer: overlap compressor, compress-RoPE, top-k sentinels."""
+
+    rate = int(args.compression_ratio)
+    if rate <= 0:
+        raise ValueError("indexer compression_ratio must be positive")
+    if index_topk <= 0:
+        raise ValueError("index_topk must be positive")
+    out_dim = int(args.index_head_dim)
+    required = {
+        "indexer_compressor_wkv",
+        "indexer_compressor_wgate",
+        "indexer_compressor_ape",
+        "indexer_compressor_norm",
+        "indexer_wq_b",
+        "indexer_proj",
+    }
+    missing = sorted(required - set(weights))
+    if missing:
+        raise ValueError(f"missing MLX real indexer weights: {', '.join(missing)}")
+    if tuple(weights["indexer_compressor_wkv"].shape) != (2 * out_dim, args.hidden_size):
+        raise ValueError(f"indexer_compressor_wkv shape mismatch: got {weights['indexer_compressor_wkv'].shape}, expected {(2 * out_dim, args.hidden_size)}")
+    if tuple(weights["indexer_compressor_wgate"].shape) != (2 * out_dim, args.hidden_size):
+        raise ValueError(f"indexer_compressor_wgate shape mismatch: got {weights['indexer_compressor_wgate'].shape}, expected {(2 * out_dim, args.hidden_size)}")
+    if tuple(weights["indexer_compressor_ape"].shape) != (rate, 2 * out_dim):
+        raise ValueError(f"indexer_compressor_ape shape mismatch: got {weights['indexer_compressor_ape'].shape}, expected {(rate, 2 * out_dim)}")
+    if tuple(weights["indexer_compressor_norm"].shape) != (out_dim,):
+        raise ValueError(f"indexer_compressor_norm shape mismatch: got {weights['indexer_compressor_norm'].shape}, expected {(out_dim,)}")
+    expected_q_shape = (args.index_n_heads * out_dim, args.q_lora_rank)
+    if tuple(weights["indexer_wq_b"].shape) != expected_q_shape:
+        raise ValueError(f"indexer_wq_b shape mismatch: got {weights['indexer_wq_b'].shape}, expected {expected_q_shape}")
+    expected_proj_shape = (args.index_n_heads, args.hidden_size)
+    if tuple(weights["indexer_proj"].shape) != expected_proj_shape:
+        raise ValueError(f"indexer_proj shape mismatch: got {weights['indexer_proj'].shape}, expected {expected_proj_shape}")
+
+    batch, seq_len, _hidden = hidden.shape
+    if tuple(q_residual.shape) != (batch, seq_len, args.q_lora_rank):
+        raise ValueError(f"q_residual shape mismatch: got {q_residual.shape}, expected {(batch, seq_len, args.q_lora_rank)}")
+    if tuple(position_ids.shape) != (batch, seq_len):
+        raise ValueError(f"position_ids shape mismatch: got {position_ids.shape}, expected {(batch, seq_len)}")
+
+    usable = (seq_len // rate) * rate
+    n_windows = usable // rate
+    if n_windows == 0:
+        compressed = mx.zeros((batch, 0, out_dim), dtype=hidden.dtype)
+    else:
+        # Reimplement FROZEN _csa_windowed_compressor_mlx pooling inline because
+        # that helper bakes full-channel plain RoPE; torch real indexer needs
+        # compress-YaRN on only the trailing qk_rope_head_dim slice after pooling.
+        kv = _linear_mlx(hidden[:, :usable, :], weights["indexer_compressor_wkv"])
+        gate = _linear_mlx(hidden[:, :usable, :], weights["indexer_compressor_wgate"])
+        kv = kv.reshape((batch, n_windows, rate, 2 * out_dim))
+        gate = gate.reshape((batch, n_windows, rate, 2 * out_dim)) + weights["indexer_compressor_ape"].reshape((1, 1, rate, 2 * out_dim))
+        cb_kv = kv[..., out_dim:]
+        cb_gate = gate[..., out_dim:]
+        zero_kv = mx.zeros((batch, 1, rate, out_dim), dtype=kv.dtype)
+        masked_gate = mx.full((batch, 1, rate, out_dim), -float("inf"), dtype=gate.dtype)
+        if n_windows > 1:
+            ca_kv = mx.concatenate([zero_kv, kv[:, :-1, :, :out_dim]], axis=1)
+            ca_gate = mx.concatenate([masked_gate, gate[:, :-1, :, :out_dim]], axis=1)
+        else:
+            ca_kv = zero_kv
+            ca_gate = masked_gate
+        new_kv = mx.concatenate([ca_kv, cb_kv], axis=2)
+        new_gate = mx.concatenate([ca_gate, cb_gate], axis=2)
+        gate_probs = mx.softmax(new_gate.astype(mx.float32), axis=2).astype(new_kv.dtype)
+        pooled = mx.sum(new_kv * gate_probs, axis=2)
+        compressed = _rms_norm_mlx(pooled, weights["indexer_compressor_norm"], args.rms_norm_eps)
+        c_positions = mx.arange(n_windows) * rate
+        rope_scaling = args.rope_scaling or {}
+        c_cos, c_sin = _compress_rope_yarn_tail_tables_mlx(
+            out_dim,
+            args.qk_rope_head_dim,
+            args.compress_rope_theta,
+            float(rope_scaling.get("factor", 16.0)),
+            int(rope_scaling.get("original_max_position_embeddings", 65536)),
+            n_windows,
+            positions=c_positions,
+        )
+        compressed = _apply_rope_tail_mlx(compressed, c_cos, c_sin, qk_rope_head_dim=args.qk_rope_head_dim)
+
+    q = _linear_mlx(q_residual, weights["indexer_wq_b"])
+    q = q.reshape((batch, seq_len, args.index_n_heads, out_dim))
+    q_positions = mx.broadcast_to(mx.expand_dims(position_ids, -1), (batch, seq_len, args.index_n_heads)).reshape((batch * seq_len * args.index_n_heads,))
+    rope_scaling = args.rope_scaling or {}
+    q_cos, q_sin = _compress_rope_yarn_tail_tables_mlx(
+        out_dim,
+        args.qk_rope_head_dim,
+        args.compress_rope_theta,
+        float(rope_scaling.get("factor", 16.0)),
+        int(rope_scaling.get("original_max_position_embeddings", 65536)),
+        int(q_positions.shape[0]),
+        positions=q_positions,
+    )
+    q = _apply_rope_tail_mlx(
+        q.reshape((1, batch * seq_len * args.index_n_heads, out_dim)),
+        q_cos,
+        q_sin,
+        qk_rope_head_dim=args.qk_rope_head_dim,
+    ).reshape((batch, seq_len, args.index_n_heads, out_dim))
+
+    scores = _indexer_scorer_mlx(
+        q,
+        compressed,
+        hidden,
+        index_n_heads=args.index_n_heads,
+        index_head_dim=out_dim,
+        weights_proj=weights["indexer_proj"],
+    )
+    compressed_len = int(compressed.shape[1])
+    top_k = min(int(index_topk), compressed_len)
+    if top_k == 0:
+        return mx.zeros((batch, seq_len, 0), dtype=mx.int32)
+
+    entry_indices = mx.arange(compressed_len).reshape((1, 1, compressed_len))
+    causal_threshold = ((position_ids + 1) // rate).astype(mx.int32)
+    future_mask = entry_indices >= mx.expand_dims(causal_threshold, -1)
+    masked_scores = mx.where(future_mask, mx.full(scores.shape, -float("inf"), dtype=scores.dtype), scores)
+    top_k_indices = mx.argsort(-masked_scores, axis=-1)[..., :top_k].astype(mx.int32)
+    invalid = top_k_indices >= mx.expand_dims(causal_threshold, -1)
+    sentinel = mx.full(top_k_indices.shape, -1, dtype=top_k_indices.dtype)
+    return mx.where(invalid, sentinel, top_k_indices)
+
+
 def _hca_compressor_mlx(
     args: ModelArgs,
     x: mx.array,
