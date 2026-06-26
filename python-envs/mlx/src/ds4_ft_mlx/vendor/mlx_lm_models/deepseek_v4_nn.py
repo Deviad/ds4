@@ -171,13 +171,23 @@ class AttentionNN(nn.Module):
         del cache  # cache/CSA are 13.3b concerns; this slice is cache-less.
 
         def linear_weight(linear: Any) -> mx.array:
+            if isinstance(linear, nn.QuantizedLinear):
+                return mx.dequantize(
+                    linear.weight,
+                    linear.scales,
+                    linear.biases,
+                    group_size=linear.group_size,
+                    bits=linear.bits,
+                    mode=linear.mode,
+                )
             weight = getattr(linear, "weight", None)
             if weight is not None:
                 return weight
             base = getattr(linear, "linear", None)
             if base is not None and hasattr(linear, "lora_a") and hasattr(linear, "lora_b"):
-                delta = ((linear.scale * linear.lora_b.T) @ linear.lora_a.T).astype(base.weight.dtype)
-                return base.weight + delta
+                base_weight = linear_weight(base)
+                delta = ((linear.scale * linear.lora_b.T) @ linear.lora_a.T).astype(base_weight.dtype)
+                return base_weight + delta
             raise AttributeError(f"{type(linear).__name__} does not expose a frozen-compatible weight")
 
         weights = {
