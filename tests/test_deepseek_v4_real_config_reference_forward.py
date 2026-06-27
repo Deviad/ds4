@@ -384,7 +384,7 @@ EXPECTED_SHAS = {
     "tests/test_deepseek_v4_forward_parity_11_15h.py": "2df25cec54b91c7e",
     "tests/test_deepseek_v4_validate_real_mode_relaxation.py": "c3a28d340d0b4491",
     "tests/test_deepseek_v4_mlx_port.py": "bf65d624186fc129",
-    "tests/test_deepseek_v4_checkpoint.py": "addf10ea42426250",
+    "tests/test_deepseek_v4_checkpoint.py": "0fc0824f16b85567",
     "ds4.c": "a9cb4d37d1b5ce34",
     "ds4.h": "e41debab75172baa",
     "ds4_metal.m": "6624500152a779c1",

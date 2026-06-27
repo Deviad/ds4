@@ -15,6 +15,47 @@ import mlx.nn as nn
 
 from mlx_lm.models.pipeline import PipelineMixin
 
+
+def _register_transformers_tokenizer_config() -> None:
+    """Let AutoTokenizer tolerate the MLX-only ``deepseek_v4_nn`` model_type.
+
+    ``mlx_lm.load`` imports this model before loading the tokenizer. Transformers
+    itself has no DeepSeek-V4-nn config class, so register a narrow tokenizer-only
+    config that discards DS4 layer/rope fields which generic validation rejects.
+    """
+
+    try:
+        from transformers import AutoConfig, PretrainedConfig
+    except Exception:  # pragma: no cover - transformers is optional outside mlx_lm.convert.
+        return
+
+    class _DeepseekV4NNTokenizerConfig(PretrainedConfig):
+        model_type = "deepseek_v4_nn"
+
+        def __init__(self, **kwargs: Any):
+            for key in (
+                "rope_scaling",
+                "rope_theta",
+                "compress_rope_theta",
+                "layer_types",
+                "mlp_layer_types",
+                "compress_ratios",
+                "compress_rates",
+                "index_topk",
+            ):
+                kwargs.pop(key, None)
+            super().__init__(**kwargs)
+
+    try:
+        AutoConfig.register("deepseek_v4_nn", _DeepseekV4NNTokenizerConfig)
+    except ValueError as exc:
+        if "already used" not in str(exc):
+            raise
+
+
+_register_transformers_tokenizer_config()
+
+
 _DEFAULT_COMPRESS_RATES = {
     "compressed_sparse_attention": 4,
     "heavily_compressed_attention": 128,
@@ -547,6 +588,23 @@ class Model(nn.Module):
     def sanitize(self, weights: dict[str, Any]) -> dict[str, Any]:
         sanitized, _ = sanitize_weights(weights)
         return sanitized
+
+    def load_weights(self, weights: dict[str, Any] | list[tuple[str, Any]], strict: bool = True) -> None:
+        # Story 13.3b-4b, ADR 0025/0027: shimmed ckpt-native keys -> nn param tree.
+        # Mirrors frozen deepseek_v4.Model.load_weights remap-pre-pass shape.
+        from ds4_ft_mlx.deepseek_v4_nn_remap import remap_weight_dict
+
+        mapping = dict(weights)
+        # IDEMPOTENT GATE: model-4bit reloads already carry nn keys (model.* / lm_head.*,
+        # including quant .scales/.biases). Remapping those would trip orphan-key guards.
+        is_native = any(not key.startswith(("model.", "lm_head.")) for key in mapping)
+        if is_native:
+            cfg = {
+                "n_routed_experts": self.args.n_routed_experts,
+                "num_hash_layers": self.args.num_hash_layers,
+            }
+            mapping, _report = remap_weight_dict(mapping, config=cfg)
+        super().load_weights(list(mapping.items()), strict=strict)
 
     @property
     def layers(self):
