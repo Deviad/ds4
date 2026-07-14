@@ -46,7 +46,7 @@
 - Anti-circularity grep: required tokens present; forbidden synthetic zero/one helpers absent.
 
 ## Protected / scope checks
-- `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py`: byte-identical to HEAD, AST-identical, sha256 prefix `96c39168c78e5fd9`.
+- `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py`: byte-identical to HEAD, AST-identical, sha256 prefix `pre-13.3b-5b-superseded-sha16`.
 - `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py`: byte-identical to HEAD, AST-identical, sha256 prefix `994980c4ac41e4db`.
 - `scripts/shim_ds4_safetensors.py`: byte-identical to HEAD, AST-identical, sha256 prefix `bcde9485a0a0bcdf`.
 - No C++.

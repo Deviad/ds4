@@ -899,7 +899,7 @@ def _csa_block_bias_mlx(top_k_indices: mx.array, compressed_len: int, *, dtype: 
     sentinel = mx.full(top_k_indices.shape, compressed_len, dtype=top_k_indices.dtype)
     safe_indices = mx.where(valid, top_k_indices, sentinel).astype(mx.int32)
     block_bias = mx.full((batch, 1, seq_len, compressed_len + 1), -float("inf"), dtype=dtype)
-    scatter_indices = mx.expand_dims(safe_indices, 1)
+    scatter_indices = mx.stop_gradient(mx.expand_dims(safe_indices, 1))
     zeros = mx.zeros(scatter_indices.shape, dtype=dtype)
     return mx.put_along_axis(block_bias, scatter_indices, zeros, axis=-1)[..., :compressed_len]
 

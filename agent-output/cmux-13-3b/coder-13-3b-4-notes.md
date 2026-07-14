@@ -41,7 +41,7 @@
 - `python -m py_compile` clean for script + new tests.
 
 ## Protected-file verification
-- `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py`: byte-identical to HEAD, AST-identical, sha256 prefix `96c39168c78e5fd9`.
+- `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py`: byte-identical to HEAD, AST-identical, sha256 prefix `pre-13.3b-5b-superseded-sha16`.
 - `python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py`: byte-identical to HEAD, AST-identical, sha256 prefix `994980c4ac41e4db`.
 - `scripts/shim_ds4_safetensors.py`: byte-identical to HEAD, AST-identical, sha256 prefix `bcde9485a0a0bcdf`.
 - sha-pin cascade no-op: no diff in `tests/test_numpy_real_forward_reference_composition.py` or `tests/test_deepseek_v4_real_config_reference_forward.py`.

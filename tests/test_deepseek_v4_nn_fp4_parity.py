@@ -104,5 +104,15 @@ def test_sparse_moe_fp4_forward_matches_frozen_moe_mlx_with_same_weights():
     expected = _moe_mlx(args, x, weights)
     mx.eval(got, expected)
 
-    max_abs = mx.max(mx.abs(got - expected))
-    assert float(max_abs.item()) <= 1e-5
+    abs_err = mx.abs(got - expected)
+    bound = 2e-6 + 1e-6 * mx.abs(expected)
+    nrmse = mx.sqrt(mx.mean(mx.square(abs_err))) / mx.maximum(
+        mx.sqrt(mx.mean(mx.square(expected))), mx.array(1e-12, dtype=mx.float32)
+    )
+    denom = mx.maximum(mx.maximum(mx.abs(got), mx.abs(expected)), mx.array(1e-6, dtype=mx.float32))
+    max_abs = float(mx.max(abs_err).item())
+    max_rel = float(mx.max(abs_err / denom).item())
+    nrmse_value = float(nrmse.item())
+    assert bool(mx.all(abs_err <= bound).item()) and nrmse_value <= 1e-6, (
+        f"fp4 whole forward max_abs={max_abs} max_rel={max_rel} nrmse={nrmse_value}"
+    )

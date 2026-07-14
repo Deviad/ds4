@@ -7,6 +7,7 @@ this module imports its proven MLX helpers instead of editing or copying them.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields, replace
 from typing import Any
 
@@ -436,6 +437,29 @@ class DeepseekV4FP4Experts(nn.Module):
         return mx.stack(slot_outputs, axis=-2)
 
 
+def _host_unique_rows_per_expert(
+    indices_flat: mx.array, n_experts: int
+) -> list[list[int]]:
+    """Host-materialize unique flat token rows per expert from stopped indices.
+
+    ``mx.stop_gradient`` must be applied by the caller before materialization.
+    Duplicate expert ids within one token are collapsed exactly once.
+    Token order within each expert’s row list is preserved.
+    """
+    indices_np = indices_flat.tolist()  # [T, K]
+    rows_by_expert: list[list[int]] = [[] for _ in range(n_experts)]
+    for t, slots in enumerate(indices_np):
+        seen: set[int] = set()
+        for raw_eid in slots:
+            eid = int(raw_eid)
+            if eid < 0 or eid >= n_experts:
+                raise ValueError(f"route expert id {eid} out of range [0, {n_experts})")
+            if eid not in seen:
+                rows_by_expert[eid].append(t)
+                seen.add(eid)
+    return rows_by_expert
+
+
 class SparseMoeBlockNN(nn.Module):
     """DeepSeek V4 sparse MoE with learned top-k or tid2eid hash routing."""
 
@@ -503,13 +527,31 @@ class SparseMoeBlockNN(nn.Module):
         return scores, indices, denom
 
     def __call__(self, x: mx.array, input_ids: mx.array | None = None) -> mx.array:
-        scores, indices, denom = self._route(x, input_ids)
-        routed = mx.zeros_like(x)
-        for eid in range(self.n_routed_experts):
-            expert_out = self.experts.forward_one(eid, x)
-            selected = mx.any(indices == eid, axis=-1).astype(x.dtype)
-            factor = (scores[..., eid] / (denom + 1e-20)) * selected * self.routed_scaling_factor
-            routed = routed + expert_out * mx.expand_dims(factor, -1)
+        scores, indices, _denom = self._route(x, input_ids)
+
+        # Flatten leading token axes for per-expert gather/scatter.  Only the
+        # stopped integer route metadata crosses the host boundary; packed expert
+        # payloads, activations, scores, outputs, and cotangents stay in MLX.
+        orig_shape = x.shape
+        T = int(math.prod(orig_shape[:-1]))
+        H = int(orig_shape[-1])
+        x_flat = x.reshape(T, H)
+        scores_flat = scores.reshape(T, self.n_routed_experts)
+        indices_flat = indices.reshape(T, self.top_k)
+        rows_by_expert = _host_unique_rows_per_expert(
+            mx.stop_gradient(indices_flat), self.n_routed_experts
+        )
+
+        from ds4_ft_mlx.routed_fp4_metal import routed_fp4
+
+        routed_flat = routed_fp4(
+            x_flat,
+            scores_flat,
+            rows_by_expert,
+            self.experts,
+            routed_scaling_factor=self.routed_scaling_factor,
+        )
+        routed = routed_flat.reshape(orig_shape)
         return routed + self.shared_experts(x)
 
 

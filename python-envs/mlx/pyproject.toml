@@ -1,0 +1,32 @@
+[project]
+name = "ds4-ft-mlx"
+version = "0.1.0"
+description = "MLX fine-tuning environment for DeepSeek V4 Flash / DS4 LoRA experiments"
+requires-python = ">=3.12"
+dependencies = [
+    "mlx==0.31.2",
+    "mlx-lm>=0.31.3",
+    "datasets",
+    "huggingface_hub",
+    "transformers",
+    "tokenizers",
+    "safetensors",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["sitecustomize"]
+
+[tool.setuptools.package-data]
+ds4_ft_mlx = ["metal/*.metal"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

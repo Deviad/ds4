@@ -1,0 +1,313 @@
+FFFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+____ test_forward_one_promotes_half_activation_without_inconsistent_reject _____
+
+    def test_forward_one_promotes_half_activation_without_inconsistent_reject():
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_forward_one
+
+        H, I = 64, 40
+        x, rows, w1, s1, w3, s3, w2, s2 = _fixture(H, I)
+>       out = packed_fp4_forward_one(
+            mx.array(x, dtype=mx.float16), mx.array(rows, dtype=mx.int32),
+            mx.array(w1, dtype=mx.uint8), mx.array(s1, dtype=mx.bfloat16), mx.array(w3, dtype=mx.uint8), mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8), mx.array(s2, dtype=mx.bfloat16), hidden_size=H, intermediate_size=I, limit=1.7,
+        )
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:180:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+x_flat = array([[-0.0900269, -0.0889893, -0.0880127, ..., -0.0288239, -0.0278168, -0.0268097],
+       [-0.0258026, -0.0248108, ...0.163818, 0.164795, 0.165771],
+       [0.166748, 0.167725, 0.168823, ..., 0.227905, 0.229004, 0.22998]], dtype=float16)
+rows = array([0, 3, 4], dtype=int32)
+w1 = array([[0, 1, 2, ..., 29, 30, 31],
+       [32, 33, 34, ..., 61, 62, 63],
+       [64, 65, 66, ..., 93, 94, 95],
+       ..., 189, 190, 191],
+       [192, 193, 194, ..., 221, 222, 223],
+       [224, 225, 226, ..., 253, 254, 255]], dtype=uint8)
+s1 = array([[0.000244141, 0.000488281],
+       [0.000732422, 0.000976562],
+       [0.0012207, 0.000244141],
+       ...,
+       [0.0012207, 0.000244141],
+       [0.000488281, 0.000732422],
+       [0.000976562, 0.0012207]], dtype=bfloat16)
+w3 = array([[5, 8, 11, ..., 92, 95, 98],
+       [101, 104, 107, ..., 188, 191, 194],
+       [197, 200, 203, ..., 28, 31, 34...235, ..., 60, 63, 66],
+       [69, 72, 75, ..., 156, 159, 162],
+       [165, 168, 171, ..., 252, 255, 2]], dtype=uint8)
+s3 = array([[0.000244141, 0.000488281],
+       [0.000732422, 0.000976562],
+       [0.0012207, 0.00146484],
+       ...,
+       [0.0012207, 0.00146484],
+       [0.00170898, 0.000244141],
+       [0.000488281, 0.000732422]], dtype=bfloat16)
+w2 = array([[11, 18, 25, ..., 214, 221, 228],
+       [235, 242, 249, ..., 182, 189, 196],
+       [203, 210, 217, ..., 150, ... 114, 121, ..., 54, 61, 68],
+       [75, 82, 89, ..., 22, 29, 36],
+       [43, 50, 57, ..., 246, 253, 4]], dtype=uint8)
+s2 = array([[0.000244141, 0.000488281],
+       [0.000732422, 0.000244141],
+       [0.000488281, 0.000732422],
+       ...,
+       [0.000732422, 0.000244141],
+       [0.000488281, 0.000732422],
+       [0.000244141, 0.000488281]], dtype=bfloat16)
+hidden_size = 64, intermediate_size = 40, limit = 1.7
+
+    def packed_fp4_forward_one(
+        x_flat: mx.array,
+        rows: mx.array,
+        w1: mx.array,
+        s1: mx.array,
+        w3: mx.array,
+        s3: mx.array,
+        w2: mx.array,
+        s2: mx.array,
+        *,
+        hidden_size: int,
+        intermediate_size: int,
+        limit: float,
+    ) -> mx.array:
+        R, H, I = _validate_one(
+            x_flat.astype(mx.float32), rows, w1, s1, w3, s3, w2, s2,
+            hidden_size=hidden_size, intermediate_size=intermediate_size,
+        )
+        if x_flat.dtype != mx.float32:
+>           raise ValueError("x_flat must be float32 before packed_fp4_forward_one")
+E           ValueError: x_flat must be float32 before packed_fp4_forward_one
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:202: ValueError
+____ test_matrix_kernels_structurally_use_8x8x32_tiles_and_simd_reductions _____
+
+    def test_matrix_kernels_structurally_use_8x8x32_tiles_and_simd_reductions():
+        import ds4_ft_mlx.routed_fp4_metal as routed_fp4_metal
+
+        source = importlib.resources.files("ds4_ft_mlx").joinpath("metal/ds4_routed_fp4_train.metal").read_text()
+        wrapper = Path(routed_fp4_metal.__file__).read_text()
+        assert "threadgroup float w1_tile[8][32]" in source
+        assert "threadgroup float w3_tile[8][32]" in source
+        assert source.count("threadgroup float w_tile[8][32]") >= 2
+        assert source.count("k0 += 32u") >= 5
+        assert source.count("simd_row == 0u") >= 5
+        assert source.count("simd_sum") >= 6
+>       assert "uint(hidden_size) <= 32u" not in source
+E       AssertionError: assert 'uint(hidden_size) <= 32u' not in '// Story 13...4_reduce_a\n'
+E
+E         'uint(hidden_size) <= 32u' is contained here:
+E            == 0u && uint(hidden_size) <= 32u) {
+E                   const uint token = uint(rows[r * rows_strides[0]]);
+E                   for (uint j = 0; j < 8u; ++j) {
+E                       const uint i = out_base + j;
+E                       if (i >= uint(intermediate_size)) { continue; }...
+E
+E         ...Full output truncated (217 lines hidden), use '-vv' to show
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:234: AssertionError
+_ test_routed_outer_transform_freezes_payloads_and_returns_x_score_cotangents __
+
+    def test_routed_outer_transform_freezes_payloads_and_returns_x_score_cotangents():
+        from ds4_ft_mlx.routed_fp4_metal import routed_fp4
+
+        ex = _stacked_experts(H=32, I=8, E=2)
+        x = (mx.arange(96, dtype=mx.float32).reshape(3, 32) / 97.0 + 0.1).astype(mx.bfloat16)
+        scores = mx.array([[0.7, 0.2], [0.4, 0.6], [0.1, 0.9]], dtype=mx.float32)
+        rows = [[0, 1], [1, 2]]
+
+        def loss(args):
+            xx, ss = args["x"], args["scores"]
+            y = routed_fp4(xx, ss, rows, ex, routed_scaling_factor=1.25)
+            return mx.sum(y * mx.arange(96, dtype=mx.float32).reshape(3, 32))
+
+>       value, grads = mx.value_and_grad(loss)({"x": x, "scores": scores})
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:363:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:360: in loss
+    y = routed_fp4(xx, ss, rows, ex, routed_scaling_factor=1.25)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:325: in routed_fp4
+    _check_rank_dtype("x_flat", x_flat, 2, mx.float32)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'x_flat'
+arr = array([[0.100098, 0.110352, 0.120605, ..., 0.398438, 0.410156, 0.419922],
+       [0.429688, 0.439453, 0.451172, ..., 0.730469, 0.738281, 0.75],
+       [0.761719, 0.769531, 0.78125, ..., 1.0625, 1.07031, 1.07812]], dtype=bfloat16)
+rank = 2, dtype = mlx.core.float32
+
+    def _check_rank_dtype(name: str, arr: mx.array, rank: int, dtype: mx.Dtype) -> None:
+        if arr.ndim != rank:
+            raise ValueError(f"{name} must be rank {rank}, got shape {arr.shape}")
+        if arr.dtype != dtype:
+>           raise ValueError(f"{name} must have dtype {dtype}, got {arr.dtype}")
+E           ValueError: x_flat must have dtype mlx.core.float32, got mlx.core.bfloat16
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:129: ValueError
+_____ test_host_unique_rows_per_expert_rejects_out_of_range_route_ids[-1] ______
+
+bad = -1
+
+    @pytest.mark.parametrize("bad", [-1, 4])
+    def test_host_unique_rows_per_expert_rejects_out_of_range_route_ids(bad):
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import _host_unique_rows_per_expert
+
+>       with pytest.raises(ValueError, match="expert id"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1120: Failed
+______ test_host_unique_rows_per_expert_rejects_out_of_range_route_ids[4] ______
+
+bad = 4
+
+    @pytest.mark.parametrize("bad", [-1, 4])
+    def test_host_unique_rows_per_expert_rejects_out_of_range_route_ids(bad):
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import _host_unique_rows_per_expert
+
+        with pytest.raises(ValueError, match="expert id"):
+>           _host_unique_rows_per_expert(mx.array([[0, bad]], dtype=mx.int32), 4)
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1121:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+indices_flat = array([[0, 4]], dtype=int32), n_experts = 4
+
+    def _host_unique_rows_per_expert(
+        indices_flat: mx.array, n_experts: int
+    ) -> list[list[int]]:
+        """Host-materialize unique flat token rows per expert from stopped indices.
+
+        ``mx.stop_gradient`` must be applied by the caller before materialization.
+        Duplicate expert ids within one token are collapsed exactly once.
+        Token order within each expert’s row list is preserved.
+        """
+        indices_np = indices_flat.tolist()  # [T, K]
+        rows_by_expert: list[list[int]] = [[] for _ in range(n_experts)]
+        for t, slots in enumerate(indices_np):
+            seen: set[int] = set()
+            for eid in slots:
+                if eid not in seen:
+>                   rows_by_expert[eid].append(t)
+                    ^^^^^^^^^^^^^^^^^^^
+E                   IndexError: list index out of range
+
+python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py:455: IndexError
+_ test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent[dtype0] _
+
+dtype = mlx.core.bfloat16
+
+    @pytest.mark.parametrize("dtype", [mx.bfloat16, mx.float16])
+    def test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent(dtype):
+        mx.disable_compile()
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import ModelArgs, SparseMoeBlockNN
+
+        args = ModelArgs.from_dict(_tiny_config())
+        block = SparseMoeBlockNN(args, layer_idx=1)
+        _fill_fp4(block.experts, scale=0.02)
+        _zero_shared(block)
+        block.gate_weight = mx.stack([mx.ones((16,), dtype=mx.float32) * s for s in (0.01, 0.02, 0.03, 0.04)])
+        block.e_score_correction_bias = mx.array([0.0, 0.01, 0.02, 0.03], dtype=mx.float32)
+        x = _nonuniform_x((2, 3, 16), start=0.2).astype(dtype)
+
+        def loss(xx):
+            y = block(xx, None)
+            return mx.sum(y.astype(mx.float32) * mx.arange(y.size, dtype=mx.float32).reshape(y.shape))
+
+>       value, grad = mx.value_and_grad(loss)(x)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1148:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1145: in loss
+    y = block(xx, None)
+        ^^^^^^^^^^^^^^^
+python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py:544: in __call__
+    routed_flat = routed_fp4(
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:325: in routed_fp4
+    _check_rank_dtype("x_flat", x_flat, 2, mx.float32)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'x_flat'
+arr = array([[0.200195, 0.209961, 0.219727, ..., 0.326172, 0.335938, 0.345703],
+       [0.355469, 0.365234, 0.375, ..., 0.48....., 0.949219, 0.957031, 0.96875],
+       [0.976562, 0.988281, 0.996094, ..., 1.10156, 1.10938, 1.125]], dtype=bfloat16)
+rank = 2, dtype = mlx.core.float32
+
+    def _check_rank_dtype(name: str, arr: mx.array, rank: int, dtype: mx.Dtype) -> None:
+        if arr.ndim != rank:
+            raise ValueError(f"{name} must be rank {rank}, got shape {arr.shape}")
+        if arr.dtype != dtype:
+>           raise ValueError(f"{name} must have dtype {dtype}, got {arr.dtype}")
+E           ValueError: x_flat must have dtype mlx.core.float32, got mlx.core.bfloat16
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:129: ValueError
+_ test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent[dtype1] _
+
+dtype = mlx.core.float16
+
+    @pytest.mark.parametrize("dtype", [mx.bfloat16, mx.float16])
+    def test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent(dtype):
+        mx.disable_compile()
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import ModelArgs, SparseMoeBlockNN
+
+        args = ModelArgs.from_dict(_tiny_config())
+        block = SparseMoeBlockNN(args, layer_idx=1)
+        _fill_fp4(block.experts, scale=0.02)
+        _zero_shared(block)
+        block.gate_weight = mx.stack([mx.ones((16,), dtype=mx.float32) * s for s in (0.01, 0.02, 0.03, 0.04)])
+        block.e_score_correction_bias = mx.array([0.0, 0.01, 0.02, 0.03], dtype=mx.float32)
+        x = _nonuniform_x((2, 3, 16), start=0.2).astype(dtype)
+
+        def loss(xx):
+            y = block(xx, None)
+            return mx.sum(y.astype(mx.float32) * mx.arange(y.size, dtype=mx.float32).reshape(y.shape))
+
+>       value, grad = mx.value_and_grad(loss)(x)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1148:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1145: in loss
+    y = block(xx, None)
+        ^^^^^^^^^^^^^^^
+python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py:544: in __call__
+    routed_flat = routed_fp4(
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:325: in routed_fp4
+    _check_rank_dtype("x_flat", x_flat, 2, mx.float32)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'x_flat'
+arr = array([[0.199951, 0.209717, 0.21936, ..., 0.326172, 0.335938, 0.345703],
+       [0.355225, 0.36499, 0.374756, ..., 0.4....., 0.947754, 0.95752, 0.966797],
+       [0.976562, 0.986328, 0.996094, ..., 1.10254, 1.1123, 1.12207]], dtype=float16)
+rank = 2, dtype = mlx.core.float32
+
+    def _check_rank_dtype(name: str, arr: mx.array, rank: int, dtype: mx.Dtype) -> None:
+        if arr.ndim != rank:
+            raise ValueError(f"{name} must be rank {rank}, got shape {arr.shape}")
+        if arr.dtype != dtype:
+>           raise ValueError(f"{name} must have dtype {dtype}, got {arr.dtype}")
+E           ValueError: x_flat must have dtype mlx.core.float32, got mlx.core.float16
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:129: ValueError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_forward_one_promotes_half_activation_without_inconsistent_reject
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_matrix_kernels_structurally_use_8x8x32_tiles_and_simd_reductions
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_routed_outer_transform_freezes_payloads_and_returns_x_score_cotangents
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_host_unique_rows_per_expert_rejects_out_of_range_route_ids[-1]
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_host_unique_rows_per_expert_rejects_out_of_range_route_ids[4]
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent[dtype0]
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_sparse_moe_block_promotes_half_activation_and_preserves_first_order_cotangent[dtype1]
+7 failed, 1 warning in 0.21s

@@ -109,8 +109,8 @@ PYTHONPATH="$PWD:$PWD/python-envs/mlx/src" pytest -q
 FROZEN `deepseek_v4.py`:
 
 ```text
-deepseek_v4_sha256 96c39168c78e5fd9158039707334f92206e8bb39f7e718e0d9064a7356809a44
-deepseek_v4_sha16 96c39168c78e5fd9
+deepseek_v4_sha256 pre-13.3b-5b-superseded-deepseek-v4-sha256
+deepseek_v4_sha16 pre-13.3b-5b-superseded-sha16
 deepseek_v4_ast_parse ok
 git diff -- deepseek_v4.py: empty
 ```

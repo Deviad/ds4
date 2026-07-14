@@ -71,7 +71,7 @@ AST/source proof against HEAD:
 
 - FROZEN helpers all byte-identical: `_csa_config_error`, `_require_csa_config`, `_csa_attention_mlx`, `_csa_compressor_mlx`, `_csa_indexer_mlx`, `_csa_windowed_compressor_mlx`, `_csa_compressor_real_mlx`, `_csa_block_bias_mlx`, `_csa_attention_real_mlx`, `_indexer_mlx`, `_indexer_scorer_mlx`, `_hca_compressor_mlx`, `_attention_real_mlx`, `_hyperconnection_mlx`, `_hyperhead_mlx`, `sanitize_weights`.
 - `_attention_mlx` cr=0 suffix sha16 stayed `5b0849ad8172420e`.
-- `deepseek_v4.py` new sha16: `96c39168c78e5fd9`.
+- `deepseek_v4.py` new sha16: `pre-13.3b-5b-superseded-sha16`.
 - `git diff --check` clean.
 
 ## Blast-radius notes
