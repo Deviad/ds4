@@ -4434,7 +4434,7 @@ As a DS4 fine-tuning maintainer (WHO), I want the authorized Deviad/mlx-lm fork 
 
 **Acceptance criteria:**
 
-1. Add `git@github.com:Deviad/mlx-lm.git` as a real submodule at `vendor/mlx-lm`. `.gitmodules` records that exact path and URL with no branch-following setting; the outer index records mode `160000` at exact SHA `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` from fork default branch `main`.
+1. Add `git@github.com:Deviad/mlx-lm.git` as a real submodule at `vendor/mlx-lm`. `.gitmodules` records that exact path and URL with no branch-following setting; the outer index records mode `160000` at exact SHA `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` from fork default branch `main` (advanced to `80fab4e4...` by Story 14.4).
 2. `git submodule update --init --recursive vendor/mlx-lm` succeeds; local `HEAD`, `origin`, commit-object availability, index gitlink, and recursive status prove the exact source identity without accessing any model, dataset, or shard.
 3. Preserve the declarative isolated MLX environment. MLX remains exactly `0.31.2`; released MLX-LM restoration is deterministic at `0.31.3`; no global/user-site/shared-environment Python mutation occurs.
 4. Existing environment command surface provides explicit **fork** selection and **release** reversion, defaults to release, keeps dry-run plus explicit execution/confirmation gates, and uses the active environment's `python -m pip`. Fork mode verifies the pin before `--no-deps -e vendor/mlx-lm`; release mode explicitly replaces editable identity with `mlx-lm==0.31.3 --no-deps`.
@@ -4453,7 +4453,7 @@ As a DS4 fine-tuning maintainer (WHO), I want MLX-LM tuner training to accept an
 
 **Canonical production contract:** `agent-output/cmux-14-1/requirements-r2.md`. **Binding r4 closure acceptance:** `agent-output/cmux-14-1/requirements-r4.md`.
 
-**Final double-green closure evidence (2026-07-15):** `agent-output/cmux-14-1/review-r6.md` records independent Reviewer **PASS** with no blocking findings; `agent-output/cmux-14-1/test-report-r6c.md` records independent Test Manager **GREEN** on the exact staged two-file fork scope, reusing the exact-environment r6b behavioral run. Final evidence is `31 passed / 74 subtests passed` for the focused tuner suite, `15 passed` for applicable `tests/test_finetune.py`, `13 passed` for repository-root `python3 tests/test_mlx_lm_source.py`, and temporary-output `py_compile` GREEN. `vendor/mlx-lm/adapters.safetensors` remained absent. Inner `HEAD` and outer gitlink remain `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`; inner cached paths remain exactly `mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py`; trainer SHA-256 remains `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`; trainer-test SHA-256 is `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`; semantic MLX source remains 19 files at `8881561e55b5734ed47676b0baf03da577f202697ab1b9ebe50efff92b3128bc`. Closure proves only the generic provider seam/default-path contract. It proves no DS4 segmented algorithm, memory reduction, command-buffer change, OOM repair, smoke readiness, or training readiness.
+**Final double-green closure evidence (2026-07-15):** `agent-output/cmux-14-1/review-r6.md` records independent Reviewer **PASS** with no blocking findings; `agent-output/cmux-14-1/test-report-r6c.md` records independent Test Manager **GREEN** on the exact staged two-file fork scope, reusing the exact-environment r6b behavioral run. Final evidence is `31 passed / 74 subtests passed` for the focused tuner suite, `15 passed` for applicable `tests/test_finetune.py`, `13 passed` for repository-root `python3 tests/test_mlx_lm_source.py`, and temporary-output `py_compile` GREEN. `vendor/mlx-lm/adapters.safetensors` remained absent. Inner `HEAD` and outer gitlink were `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` at 14.1 closure (advanced to `80fab4e4...` by Story 14.4); inner cached paths remain exactly `mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py`; trainer SHA-256 remains `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`; trainer-test SHA-256 is `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`; semantic MLX source remains 19 files at `8881561e55b5734ed47676b0baf03da577f202697ab1b9ebe50efff92b3128bc`. Closure proves only the generic provider seam/default-path contract. It proves no DS4 segmented algorithm, memory reduction, command-buffer change, OOM repair, smoke readiness, or training readiness.
 
 **R2 reason:** Architect STOP in `agent-output/cmux-14-1/architecture.md` proved mandatory dynamic nonfinite rejection impossible before optimizer execution while custom loss/gradient and update shared one compiled graph on MLX `0.31.2`. Operator accepted custom-provider-only graph split plus host synchronization. Prior `requirements.md` remains superseded evidence where it requires same-step custom execution.
 
@@ -4461,7 +4461,7 @@ As a DS4 fine-tuning maintainer (WHO), I want MLX-LM tuner training to accept an
 
 **Requirements:**
 
-1. At fork pin `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` (`mlx-lm==0.31.3`, MLX `0.31.2`), append one optional direct `loss_and_grad=None` argument after `training_callback`; preserve every existing positional/keyword caller and add no registry, factory, CLI, environment, model dispatch, or second protocol.
+1. At fork pin `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` (was the pin at 14.1 time; advanced to `80fab4e4...` by Story 14.4; `mlx-lm==0.31.3`, MLX `0.31.2`), append one optional direct `loss_and_grad=None` argument after `training_callback`; preserve every existing positional/keyword caller and add no registry, factory, CLI, environment, model dispatch, or second protocol.
 2. Provider contract remains exactly `loss_and_grad(model, *batch) -> ((loss, token_count), gradients)`. Provider owns loss/gradient computation only; trainer owns accumulation, distributed averaging, optimizer, evaluation, random-state policy, model mode, reporting, callbacks, checkpoints, and final save.
 3. Provider omission retains the original one-compiled-step `nn.value_and_grad(model, loss)` path. Custom validation, tree walks, finiteness scans, extra `mx.eval`, host synchronization, graph split, per-microbatch branch, and measurable overhead remain absent from default mode.
 4. Provider mode alone uses two trainer-orchestrated compiled phases: separately compiled provider graph; explicit evaluation/host synchronization plus structural and runtime-finiteness gate; separately compiled trainer-owned accumulation/update graph.
@@ -4574,7 +4574,7 @@ As a DS4 fine-tuning maintainer (WHO), I want the optional custom loss-and-gradi
 
 **Canonical requirements:** `agent-output/cmux-14-2a/requirements.md`.
 
-**Predecessor and amendment boundary:** Story 14.1 remains double-green at inner pin/gitlink `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`, staged trainer SHA-256 `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`, and staged trainer-test SHA-256 `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`. Story 14.2a supersedes only Story 14.1's custom-provider outer-compilation topology. Public signature/result schema, default path, validation, host finite gate, random rollback, compiled trainer phase 2, and all trainer-owned semantics remain binding.
+**Predecessor and amendment boundary:** Story 14.1 remains double-green at the 14.1-time inner pin/gitlink `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` (advanced to `80fab4e4...` by Story 14.4), staged trainer SHA-256 `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`, and staged trainer-test SHA-256 `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`. Story 14.2a supersedes only Story 14.1's custom-provider outer-compilation topology. Public signature/result schema, default path, validation, host finite gate, random rollback, compiled trainer phase 2, and all trainer-owned semantics remain binding.
 
 **Final closure identities:**
 - Reviewer PASS: `agent-output/cmux-14-2a/review.md` (r2)
@@ -4634,7 +4634,7 @@ As a DS4 fine-tuning operator (WHO), I want the DS4 segmented loss-and-gradient 
 
 1. Add a new MLX step (e.g., `ds4-segmented-smoke`) to `scripts/finetune_ds4.py` that activates the segmented provider by constructing `make_ds4_segmented_loss_and_grad(segment_size=1)` and passing it to `train(..., loss_and_grad=provider)` through a Python entry point. The default `smoke-train`, `full-train`, and `continue-train` steps remain unchanged in source, behavior, and identity.
 2. No generic registry, mode flag, capability bit, CLI/config/environment selector, monkey patch, model-type dispatch, alternate trainer loop, or permanent semantic variant in the fork, CLI, or generic trainer. The segmented provider is constructed and passed explicitly by the activation entry point only.
-3. No change to any `vendor/mlx-lm` inner file (`mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py` remain at the pinned 14.2a hashes). Inner `HEAD` and outer gitlink remain `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`.
+3. No change to any `vendor/mlx-lm` inner file (`mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py` remain at the pinned 14.2a hashes). Inner `HEAD` and outer gitlink were `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` at 14.3 time (advanced to `80fab4e4...` by Story 14.4).
 4. No change to `segmented_loss_and_grad.py` (blob SHA-256 `20572191316e36ce228d5a7b5f1cdd396e4d796c4b620696d10f3c33937f3518`), `test_ds4_segmented_loss_and_grad.py` (blob SHA-256 `618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6`), or `test_mlx_lm_source.py` (blob SHA-256 `dec2c2b5a7644540a7ec339712968593647abd64c70b821abddc97f9b6ff5d65`).
 5. One bounded 4096-token smoke is specified: one iteration, batch-size 1, learning-rate 1e-5, max-seq-length 4096, mask-prompt, grad-checkpoint, segment-size 1, timeout 600 seconds, no retry/fallback. Exact asset paths, abort conditions, artifact destinations, and validation policy are pinned in `custom-handoffs/14-3/requirements.md` R14.3-3 and R14.3-4.
 6. The smoke is not executed during implementation. Phase 1 (synthetic wiring + tests) must be complete with Reviewer PASS + Tester GREEN before Phase 2 (real smoke) may begin. Phase 2 requires explicit operator authorization and the exact pinned command from R14.3-4.
@@ -4713,8 +4713,8 @@ untouched and remains immutable.
   `test_ds4_segmented_loss_and_grad.py` (blob SHA-256 `618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6`),
   `test_mlx_lm_source.py` unless the source-sentinel manifest needs repinning for
   the edited `scripts/finetune_ds4.py` (Architect adjudicates).
-- No `vendor/mlx-lm/` inner file changes; inner HEAD and outer gitlink remain
-  15b522f593b7ca5fbc0cac6f7572d40859d2d8fe.
+- No `vendor/mlx-lm/` inner file changes; inner HEAD and outer gitlink were
+  15b522f593b7ca5fbc0cac6f7572d40859d2d8fe at 14.3 time (advanced to `80fab4e4...` by Story 14.4).
 - Path A permanent STOP, 365-file evidence manifest, ADR 0028, all Story
   14.1/14.2/14.2a protected hashes, and Epic 13 canonical evidence intact.
 
@@ -4809,5 +4809,90 @@ As a DS4 fine-tuning operator (WHO), I want the bounded real-smoke hard timeout 
 **Explicit non-claims (preserved from R14.3-6 / R14.3b-4):** This smoke does NOT prove convergence, loss quality, generalization, OOM repair, command-buffer lifetime fix, throughput, speed, full-training readiness, real-data correctness of segmented math (synthetic equivalence was proven in Story 14.2), or any result extrapolated beyond one bounded 4096-token microbatch. The adapter checkpoint is evidence only and must NOT be reused for further training.
 
 *No commit or push was performed. All changes remain staged in the local worktree. The supervisor/operator owns the commit/push decision.*
+
+### Story 14.4 — Repository reproducibility and stale-file cleanup — **Status: [ IMPLEMENTED — local cleanup staged; inner commit 80fab4e; inner branch story-14-loss-and-grad-seam pushed to origin; outer commit pending final gates; remote reachability RESOLVED ]**
+
+As a DS4 fine-tuning repository maintainer (WHO), I want untracked implementation files committed and stale generated/ephemeral files removed from version control (WHAT), so that a fresh clone reproduces the full Epic 14 test baseline without missing imports or carrying transient junk (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-4-repo-hygiene/requirements.md`
+
+**Classification summary:**
+
+1. **Current implementation (must be committed, ~68 files):**
+   - 15 untracked `python-envs/mlx/src/ds4_ft_mlx/` package files (including `__init__.py` — without it the package is unimportable)
+   - 4 untracked `scripts/` files (`convert_lora_to_ds4.py` referenced by committed `tests/test_finetune_ds4.py`, `fuse_lora_hf.py`, `make_synth_lora.py`, `smoke_fuse_serve.sh`)
+   - 27 untracked `tests/` files (baseline participants including `test_convert_lora_to_ds4.py`, `test_fuse_lora_hf.py`, test helpers, fixtures)
+   - 24 untracked `docs/adr/` files (ADRs 0001-0023 + README; referenced 268 times in backlog)
+   - 2 untracked `docs/` files (architecture dossier, MTP policy)
+   - 16 untracked `.pi/` files (project-local Pi agent scaffolding, role-pipeline scripts)
+   - Vendor inner staged changes: `vendor/mlx-lm/mlx_lm/tuner/trainer.py` (+240 lines) and `tests/test_tuner_trainer.py` (+2401 lines) — the Story 14.1 trainer seam; these are staged in the inner repo but NOT committed, so a fresh clone resolved the submodule to `15b522f...` which lacked them → all Epic 14 tests failed. **Resolved by Story 14.4:** inner vendor committed at `80fab4e4...`; outer gitlink updated to match.
+
+2. **Stale/generated (must be `git rm --cached`, ~197 tracked files):**
+   - 77 `.dispatch-epoch` files (transient epoch timestamps)
+   - 5 `.pid` files (process IDs)
+   - 4 `.rc` files (return codes)
+   - 105 `.log` files (transient execution logs)
+   - 1 `.pyc` file (compiled bytecode, force-added despite gitignore)
+   - 2 `.pipeline-private/` files (pipeline runtime state)
+   - 2 `.pipeline-slice.v1` files (pipeline slice state)
+   - 1 `.cmux-status/coder.done` (runtime marker, tracked despite gitignore)
+
+3. **Ambiguous (must not delete without operator confirmation):**
+   - `context.md` (scratch context note, not referenced by committed code)
+   - `adapter-converter-implementation-gpt55.md` (scratch from GPT-5.5 session)
+
+4. **Untracked ephemeral (must NOT be committed, ~1,402 files):**
+   - 1,260 untracked `agent-output/` files (handoff evidence only)
+   - 142 untracked `custom-handoffs/` files (handoff artifacts)
+
+**Vendor pin tension (CRITICAL):** Outer gitlink is `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`; inner HEAD is the same; but inner has 2 staged files (2,627 insertions / 14 deletions) that are the Epic 14.1/14.2a trainer seam. Fresh clone = broken Epic 14 tests. Resolution: commit inner, update outer gitlink, update all pin references in `docs/architecture.md` and `docs/backlog.md`.
+
+**Gitignore gaps:** `.dispatch-epoch`, `.pid`, `.rc`, `.log`, `.pipeline-private/`, `.pipeline-slice.v1` patterns missing. `agent-output/` and `custom-handoffs/` not gitignored (accumulates ~1,400 untracked files).
+
+**Acceptance criteria:**
+1. `custom-handoffs/14-4-repo-hygiene/requirements.md` exists with testable R14.4-* requirements and no unresolved placeholder.
+2. `docs/backlog.md` contains Story 14.4 user story in form `As a [type of user] (WHO), I want [some goal] (WHAT), so that [some reason] (WHY).`
+3. All three classification categories exhaustive: current implementation (~68 files), stale to remove (~197), ambiguous (2).
+4. Vendor pin tension documented with exact hashes and resolution steps.
+5. No deletions, `git rm`, `git add`, `git commit`, or `git push` during BA.
+6. Path A permanent STOP, Epic 14.3b smoke evidence, and all protected hashes preserved.
+7. All BA verdict files and backlog edits tracked/staged; no commit or push.
+8. Reviewer PASS and Tester GREEN required before any cleanup execution; fresh-clone reproducibility (R14.4-4) must verify 246 passed baseline from clean submodule init.
+9. Deletion manifest (`agent-output/cmux-14-4/deletion-manifest.txt`) and commit manifest (`agent-output/cmux-14-4/commit-manifest.txt`) required before execution.
+10. No `git push`; all changes remain staged in local worktree.
+
+**STOP/ESCALATE:** Error JSON + `custom-handoffs/14-4-repo-hygiene/ba-stop.md` if any untracked implementation file is orphan code with no consumer, any tracked stale file is actually referenced by current source/tests, inner vendor changes cannot be committed, or deleting any file would remove protected evidence.
+
+**Coder r2 execution record (2026-07-16):**
+- Inner vendor committed: `80fab4e419a57f9465bb9e2f4e90010d645e124c` (Story 14.1/14.2a trainer seam + test suite)
+- Outer gitlink staged: `80fab4e`
+- Staged additions: ~93 files (mlx src packages, scripts, tests, ADRs 0001-0023, docs, .pi agents, torch env, uv.lock, progress/training docs, chain-of-custody handoffs, manifests)
+- Staged deletions (git rm --cached): 21 files (dispatch-epoch, pipeline-slice, cmux markers outside Path A)
+- Root scratch: 111 historical review/plan/scout .md files physically deleted
+- Legacy: `python-envs/legacy-trans/` deleted (obsolete)
+- Compiled binaries: `tests/ds4_lora_test` removed from index; `tests/test_q4k_dot`, `ds4_agent_test` gitignored
+- Ambiguous: `context.md`, `adapter-converter-implementation-gpt55.md` preserved and gitignored
+- Path A: 365 files, 174 stale-looking tracked evidence files preserved under permanent STOP
+- Suite: 246 passed, 3 skipped, 2 subtests passed
+- Fresh-clone: standard remote submodule fetch blocked until operator publishes inner 80fab4e to remote; synthetic local-index checkout verifies repository self-consistency
+
+**Coder r3 remote-reachability closure (2026-07-16):**
+- Operator pushed inner `80fab4e` to `origin/story-14-loss-and-grad-seam` on `git@github.com:Deviad/mlx-lm.git`
+- Verified: `git ls-remote origin` advertises `80fab4e` at `refs/heads/story-14-loss-and-grad-seam`
+- Fresh-clone gate PASS: standard `git clone` + `git submodule update --init --recursive` from synthetic staged commit → submodule checks out `80fab4e` from remote
+- Trainer: 593 lines, 19 `loss_and_grad` occurrences
+- `ds4_ft_mlx` import resolves from fresh clone
+- No outer commit or push; outer candidate staged and ready for final gates
+
+**Coder r4 fresh-clone test fix (2026-07-16):**
+- `test_active_memory_matrix` failed in fresh clone (dir `agent-output/cmux-14-2/` absent)
+- Fix: added `_log_path.parent.mkdir(parents=True, exist_ok=True)` before `write_text`
+- Hash cascade: `test_provider_test` expected blob `618a0f22` → `8bf2a19f`
+- Synthetic fresh-clone suite: 246/246 GREEN
+
+**Coder r5 two-commit evidence design (2026-07-16):**
+- Commit 1: reviewed implementation (hygiene, manifests, pre-gate handoffs, vendor pin) — current staged index
+- Commit 2: final gate evidence (Reviewer report, Test Manager GREEN report, backlog closeout) — after both gates PASS
+- Final gate placeholder files removed from Commit 1 index; completed Test Manager report on disk under ignored `custom-handoffs/` for Commit 2
 
 **EOF Epic 14**

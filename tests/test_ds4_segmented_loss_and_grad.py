@@ -1018,7 +1018,9 @@ def test_active_memory_matrix():
             assert payload["provider_peak_active"] - payload["baseline_active"] <= payload["bound"]
             rows.append(payload)
     assert len(rows) == 8
-    (PROJECT_ROOT / "agent-output/cmux-14-2/memory-r4.log").write_text(
+    _log_path = PROJECT_ROOT / "agent-output/cmux-14-2/memory-r4.log"
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _log_path.write_text(
         "ACTIVE_MEMORY_MATRIX PASS 8/8\n" + "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n"
     )
 

@@ -136,4 +136,4 @@ python-envs/mlx/src/ds4_ft_mlx/real_forward_intermediate_dump.py: new_count=1 ol
 
 ### Commit
 
-- Commit SHA: PENDING (filled after commit).
+- Commit SHA: `a86bfe2` (`Story 13.1 r1: cascade fix per Architect §7 (26-RED regression)`).

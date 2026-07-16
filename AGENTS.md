@@ -31,7 +31,7 @@ Required agents:
 - **BA** — requirements, trackable user stories, acceptance criteria; owns `docs/backlog.md` updates.
 - **Architect** — design, boundaries, invariants, implementation plan.
 - **Coder** — TDD red → green implementation. File-mutating coder work stays serial.
-- **Reviewer** — `xhigh-reviewer`, fresh context, `openai-codex/gpt-5.5`; must not edit production code.
+- **Reviewer** — independent fresh-context review; must not edit production code.
 - **Tester / Test Manager** — runs and records validation independently.
 
 Use cmux/file-based handoff when possible, following the cmux skill exactly.
@@ -73,7 +73,7 @@ Objective-C only where Metal requires it and Metal kernels under `metal/`.
 ## Quality Rules
 
 - Always load the `self-improvement-skill` / auto-improvement skill at the start of work so reusable lessons are captured and applied.
-- Always run the GPT-5.5 xhigh reviewer as a parallel subagent for implementation/code changes. The reviewer must be a subagent, not an inline self-review, and its findings must be addressed or explicitly deferred.
+- Always run the independent Reviewer in parallel for implementation/code changes. It must not be an inline self-review, and its findings must be addressed or explicitly deferred.
 - Use TDD for code changes: write failing/red tests first, then implement the minimal green change, then refactor while keeping tests green.
 - Keep code clean, decoupled, and low-complexity; use appropriate design patterns where they reduce coupling or clarify responsibilities.
 - Keep the implementation small, sharp, easy to understand. Try to write elegant code in a state of grace. Don't settle for the first thing that comes to mind, try to find the most minimal and better working design. Don't introduce slop: very fragile code that just patches specific cases, dead code, useless code and code ways more complicated of how it should be.
@@ -94,25 +94,6 @@ This rule closed a real chain-of-custody break from Story 13.3b-3 (`d1f1488`), w
 - **When Coder touches an untracked test file, Coder commits it in the same slice.** Either `git add` + commit it (capturing the legit contract update, with a message explaining the change is a scoped contract update NOT a relaxation), OR escalate as a STOP if Coder believes the file should stay untracked (e.g. it's a local-only fixture). The supervisor must never re-discover an uncommitted baseline-modifying test file.
 - **Reviewer verifies baseline reproducibility.** On any slice claiming "N passed / 0 RED," Reviewer must confirm that EVERY file contributing to that count is tracked (`git ls-files`) so a fresh clone reproduces the same verdict. If any contributing file is untracked, the "N passed" claim is downgraded to "N passed locally, reproducibility NOT verified" and the slice is returned for tracking.
 - **NEVER let a modified untracked file slide via notes.** Coder notes saying "test file X is untracked; local expectations updated" are a RED flag, not an acceptable carry-over. The Coder MUST escalate the tracking question and resolve it (commit) before declaring done.
-
-## Subagent model routing
-
-Pass an explicit `model:` on every subagent dispatch. Roles and models
-(updated 2026-06-20):
-
-| Role | Model | Subscription | When to use |
-|---|---|---|---|
-| **BA / Architect** | `neuralwatt/glm-5.2-short` (default), fallback `anthropic/claude-opus-4-8` | Neuralwatt / Anthropic | Planning, user stories, acceptance criteria, architecture decisions, design reviews; launcher passes both via `--models` so Neuralwatt GLM-5.2 (short, 200k ctx) is the active default and Opus 4.8 is the Ctrl+P fallback |
-| **Coding** | `neuralwatt/kimi-k2.6` (user-permanent 2026-06-24), fallback `anthropic/claude-opus-4-8` | Neuralwatt / Anthropic | Writing code (TDD red→green), refactoring, implementation workers; launcher passes both via `--models` so Kimi K2.6 is the active default (Opus 4.8 Ctrl+P fallback); OpenAI Codex `gpt-5.5` was canonical but Codex throttled 2026-06-22 → 2026-06-24, user opted to switch Coder permanently to kimi-k2.6 over waiting for Codex to recover |
-| **Code review** | `openai-codex/gpt-5.5` (canonical), fallback `anthropic/claude-opus-4-8` (active during Codex throttle) | OpenAI / Anthropic | All code review via the `xhigh-reviewer` agent (fresh context, system-prompt `replace`); Reviewer model must NOT be silently swapped to kimi — review rigor needs Opus 4.8 or Codex |
-| **Tester / Test Manager** | `neuralwatt/qwen3.6-35b` (default), fallback `openai-codex/gpt-5.4-mini` | Neuralwatt / OpenAI | Independent validation runs; launcher passes both via `--models` so Neuralwatt Qwen3.6-35B is the active default and GPT-5.4 Mini is the Ctrl+P fallback |
-| **Utility** | `anthropic/claude-sonnet-4-6` | Anthropic | Running commands, codebase scanning, information extraction, web search, recon scouts |
-
-- Code review always goes through the `xhigh-reviewer` agent (fresh context,
-  system-prompt `replace`, model `openai-codex/gpt-5.5`). Do not silently
-  substitute its model.
-- Keep file-mutating coding dispatches **serial** — one worker slice at a time,
-  reviewed before the next, to prevent collision on shared source files.
 
 ## cmux agent orchestration
 

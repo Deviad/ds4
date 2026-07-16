@@ -17,3 +17,29 @@ __pycache__/
 /misc/
 .*.swp
 .DS_Store
+
+# role-pipeline runtime markers
+.cmux-status/
+# role-pipeline personal settings (per-user: notify sinks, ntfy topic, mux)
+.pi/agents/pipeline.conf
+
+# dispatch / pipeline runtime state
+*.dispatch-epoch
+*.pid
+*.rc
+*.log
+.pipeline-private/
+.pipeline-slice.v1
+
+# agent-output and custom-handoffs are handoff evidence only (AGENTS.md; ADR 0005)
+agent-output/
+custom-handoffs/
+
+# ambiguous scratch files
+context.md
+adapter-converter-*.md
+
+# compiled test binaries
+tests/ds4_lora_test
+tests/test_q4k_dot
+/ds4_agent_test

@@ -66,7 +66,7 @@ Primary files: `scripts/finetune_ds4.py`, `python-envs/mlx/`, `python-envs/torch
 Responsibilities:
 
 - Prepare isolated MLX and Torch environments.
-- Keep released `mlx-lm==0.31.3` as the default MLX-LM source while allowing an explicit, verified opt-in to the pinned `Deviad/mlx-lm` submodule at `vendor/mlx-lm` (`15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`).
+- Keep released `mlx-lm==0.31.3` as the default MLX-LM source while allowing an explicit, verified opt-in to the pinned `Deviad/mlx-lm` submodule at `vendor/mlx-lm` (`80fab4e419a57f9465bb9e2f4e90010d645e124c`, advanced from `15b522f5...` by Story 14.4).
 - Run cheap validation gates before expensive training/conversion work.
 - Convert portable LoRA safetensors into DS4 canonical adapter artifacts.
 - Keep marker files meaningful: no full-forward marker is written until the required parity stories are complete.

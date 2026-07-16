@@ -1,0 +1,5 @@
+# Story 14.4 — Reviewer final Commit 1 gate after portable wrappers
+
+Review exact staged Commit 1 after Coder r6. Do not delegate; perform review directly in this pane. Final reports remain outside Commit 1 for Commit 2 evidence.
+
+Verify all 14 `.pi/agents/bin/*.sh` are regular executable portable wrappers, no absolute `/Users/spotted`, source-vs-exec behavior correct, env override and missing-install diagnostics correct, README prerequisite documented. Verify exact manifest/index equality and current counts; zero unstaged/nonignored untracked; cached diff; no binaries; synthetic fresh clone exact 246 suite; remote vendor fetch; active-memory fix/hash cascade; Path A/smoke/protected invariants; stale deletion/quarantine scope. Write ignored `review-final.md` with reviewed tree/diff hash and PASS or BLOCKED. Marker.

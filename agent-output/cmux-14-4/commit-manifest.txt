@@ -1,0 +1,174 @@
+# Story 14.4 — Commit 1 Manifest (r6 final pre-gate)
+
+## Two-commit design
+- Commit 1: reviewed implementation + hygiene + pre-gate handoffs
+- Commit 2: Reviewer final + Test Manager final + backlog COMPLETE
+
+## Inner vendor commit
+- commit: 80fab4e419a57f9465bb9e2f4e90010d645e124c
+- remote: git@github.com:Deviad/mlx-lm.git refs/heads/story-14-loss-and-grad-seam
+- outer-gitlink: 80fab4e419a57f9465bb9e2f4e90010d645e124c
+
+## Staged additions (116 files)
+.pi/agents/bin/check-role.sh
+.pi/agents/bin/check-roster.sh
+.pi/agents/bin/dispatch-role.sh
+.pi/agents/bin/generate-agents-md.sh
+.pi/agents/bin/launch-role.sh
+.pi/agents/bin/mux-lib.sh
+.pi/agents/bin/notify-lib.sh
+.pi/agents/bin/notify-watch.sh
+.pi/agents/bin/pipeline-lib.sh
+.pi/agents/bin/pipeline.sh
+.pi/agents/bin/spawn-role-panes.sh
+.pi/agents/bin/supervisor-poll.sh
+.pi/agents/bin/wait-role-continuous.sh
+.pi/agents/bin/wait-role.sh
+.pi/agents/project-overlay.md
+.pi/agents/README.md
+agent-output/cmux-14-4/commit-manifest.txt
+agent-output/cmux-14-4/deletion-manifest.txt
+custom-handoffs/14-4-repo-hygiene/architecture-r2.md
+custom-handoffs/14-4-repo-hygiene/architecture.md
+custom-handoffs/14-4-repo-hygiene/coder-notes-r2.md
+custom-handoffs/14-4-repo-hygiene/coder-notes-r3.md
+custom-handoffs/14-4-repo-hygiene/coder-notes-r4.md
+custom-handoffs/14-4-repo-hygiene/coder-notes-r5.md
+custom-handoffs/14-4-repo-hygiene/coder-notes-r6.md
+custom-handoffs/14-4-repo-hygiene/coder-notes.md
+custom-handoffs/14-4-repo-hygiene/requirements.md
+custom-handoffs/14-4-repo-hygiene/review.md
+custom-handoffs/14-4-repo-hygiene/task-architect-r2.md
+custom-handoffs/14-4-repo-hygiene/task-architect.md
+custom-handoffs/14-4-repo-hygiene/task-ba.md
+custom-handoffs/14-4-repo-hygiene/task-coder-r2.md
+custom-handoffs/14-4-repo-hygiene/task-coder-r3.md
+custom-handoffs/14-4-repo-hygiene/task-coder-r4.md
+custom-handoffs/14-4-repo-hygiene/task-coder-r5.md
+custom-handoffs/14-4-repo-hygiene/task-coder-r6.md
+custom-handoffs/14-4-repo-hygiene/task-coder.md
+custom-handoffs/14-4-repo-hygiene/task-reviewer-r2.md
+custom-handoffs/14-4-repo-hygiene/task-reviewer.md
+custom-handoffs/14-4-repo-hygiene/task-tester-r2.md
+custom-handoffs/14-4-repo-hygiene/task-tester.md
+custom-handoffs/14-4-repo-hygiene/test-report-r2.md
+custom-handoffs/14-4-repo-hygiene/test-report.md
+docs/adr/0001-metal-graph-is-production-path.md
+docs/adr/0002-parity-first-fail-closed-gates.md
+docs/adr/0003-isolated-fine-tuning-environments.md
+docs/adr/0004-project-local-pi-agent-scaffolding.md
+docs/adr/0005-agent-output-is-not-canonical.md
+docs/adr/0006-canonical-backlog.md
+docs/adr/0007-expert-block-geometry-shape-authoritative.md
+docs/adr/0008-two-track-parity-gguf-vs-mlx.md
+docs/adr/0009-stateful-decode-readiness-diagnostic.md
+docs/adr/0010-b1-hc-mult-multilayer-readiness-diagnostic.md
+docs/adr/0011-b2-i8-dequant-realmode-moe-integration-proof.md
+docs/adr/0012-b2-i8-dequant-realmode-moe-multilayer-integration-proof.md
+docs/adr/0013-b2-i8-dequant-realmode-moe-topk-multi-expert-integration-proof.md
+docs/adr/0014-b2-real-checkpoint-payload-readiness-diagnostic.md
+docs/adr/0015-b2-routed-dequant-trusted-reference-readiness-diagnostic.md
+docs/adr/0016-b2-ds4-cpu-harness-independence-adjudication.md
+docs/adr/0017-b2-metal-carry-forward.md
+docs/adr/0018-test-purity-snapshot-diff.md
+docs/adr/0019-fusion-primary-adapter-serving.md
+docs/adr/0020-story-12-3-ac4-hypothesis-retrospective.md
+docs/adr/0021-loader-paired-tensor-synthesis-i8-e8m0.md
+docs/adr/0022-key-remap-adapter-fp4-expert-packing-contract.md
+docs/adr/0022-strategic-pivot-local-mlx-qlora-parity-marker-retired.md
+docs/adr/0023-post-fuse-generation-coherence-cross-check.md
+docs/adr/README.md
+docs/deepseek-v4-architecture-dossier.md
+docs/deepseek-v4-mtp-policy.md
+progress.md
+python-envs/mlx/src/ds4_ft_mlx/__init__.py
+python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_attention_spec.py
+python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_checkpoint.py
+python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_mapping.py
+python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_moe_spec.py
+python-envs/mlx/src/ds4_ft_mlx/lora_targets.py
+python-envs/mlx/src/ds4_ft_mlx/mlx_lm_plugin.py
+python-envs/mlx/src/ds4_ft_mlx/numpy_real_forward_reference.py
+python-envs/mlx/src/ds4_ft_mlx/vendor/__init__.py
+python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/__init__.py
+python-envs/mlx/src/sitecustomize.py
+python-envs/mlx/uv.lock
+python-envs/torch/pyproject.toml
+python-envs/torch/src/ds4_ft_torch/__init__.py
+scripts/convert_lora_to_ds4.py
+scripts/fuse_lora_hf.py
+scripts/make_synth_lora.py
+scripts/smoke_fuse_serve.sh
+tests/_fuse_fixture.py
+tests/ds4_e8m0_ocp_witness.py
+tests/ds4_f8_e4m3_e8m0_ocp_witness.py
+tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+tests/helpers/routed_fp4_multilayer_peak_probe.py
+tests/test_convert_lora_to_ds4.py
+tests/test_deepseek_v4_forward_parity.py
+tests/test_deepseek_v4_lora_targets.py
+tests/test_deepseek_v4_nn_interaction_ablation.py
+tests/test_deepseek_v4_nn_multilayer_peak.py
+tests/test_deepseek_v4_validate_real_mode_relaxation.py
+tests/test_ds4_metal_routed_i8_e8m0_isolation.py
+tests/test_finetune_ds4_b1_hc_mult_multilayer_readiness.py
+tests/test_finetune_ds4_b2_real_checkpoint_payload_readiness.py
+tests/test_finetune_ds4_b2_routed_dequant_trusted_reference_readiness.py
+tests/test_finetune_ds4_csa_topk_primitive.py
+tests/test_finetune_ds4_fuse_hf_gate.py
+tests/test_finetune_ds4_fused_gate_perf.py
+tests/test_finetune_ds4_i8_dequant_integration.py
+tests/test_finetune_ds4_stateful_decode_readiness.py
+tests/test_fuse_lora_hf.py
+tests/test_make_synth_lora.py
+tests/test_real_forward_intermediate_dump.py
+tests/test_shim_ds4_safetensors.py
+tests/test_smoke_fuse_serve_ac7_template_relative.sh
+training-backend-bakeoff-gpt55.md
+training-next-status.md
+
+## Staged modifications (12 files)
+.gitignore
+agent-output/cmux-13-1/coder-notes.md
+AGENTS.md
+docs/adr/0029-pinned-mlx-lm-source-selection.md
+docs/architecture.md
+docs/backlog.md
+docs/technical-spec.md
+scripts/finetune_ds4.py
+tests/test_ds4_segmented_loss_and_grad.py
+tests/test_ds4_segmented_smoke.py
+tests/test_mlx_lm_source.py
+vendor/mlx-lm
+
+## Staged deletions (21 files — git rm --cached, preserved on disk)
+.cmux-status/coder.done
+custom-handoffs/14-3-filtered/.pipeline-slice.v1
+custom-handoffs/14-3-filtered/reviewer-r2.dispatch-epoch
+custom-handoffs/14-3-filtered/reviewer.dispatch-epoch
+custom-handoffs/14-3-filtered/tester-r2.dispatch-epoch
+custom-handoffs/14-3-filtered/tester.dispatch-epoch
+custom-handoffs/14-3-timeout/.pipeline-slice.v1
+custom-handoffs/14-3-timeout/reviewer-r2.dispatch-epoch
+custom-handoffs/14-3-timeout/reviewer-r3.dispatch-epoch
+custom-handoffs/14-3-timeout/reviewer-r4.dispatch-epoch
+custom-handoffs/14-3-timeout/reviewer.dispatch-epoch
+custom-handoffs/14-3-timeout/tester-r2.dispatch-epoch
+custom-handoffs/14-3-timeout/tester-r3.dispatch-epoch
+custom-handoffs/14-3-timeout/tester-r4.dispatch-epoch
+custom-handoffs/14-3-timeout/tester.dispatch-epoch
+custom-handoffs/14-3/reviewer-r10.dispatch-epoch
+custom-handoffs/14-3/reviewer-r11.dispatch-epoch
+custom-handoffs/14-3/reviewer-r12.dispatch-epoch
+custom-handoffs/14-3/tester-r10.dispatch-epoch
+custom-handoffs/14-3/tester-r11.dispatch-epoch
+custom-handoffs/14-3/tester-r12.dispatch-epoch
+
+## Physical deletions
+- 111 root-level historical review/plan/scout .md files
+- python-envs/legacy-trans/ (directory, obsolete)
+
+## r6: portable agent launchers
+- 14 .pi/agents/bin/*.sh absolute symlinks replaced with portable wrappers
+
+## Total staged: 149 paths

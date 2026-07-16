@@ -47,7 +47,7 @@ from scripts import finetune_ds4
 
 
 FORK_URL = "git@github.com:Deviad/mlx-lm.git"
-FORK_SHA = "15b522f593b7ca5fbc0cac6f7572d40859d2d8fe"
+FORK_SHA = "80fab4e419a57f9465bb9e2f4e90010d645e124c"
 class MlxLmSourceTests(unittest.TestCase):
     def args(self, tmp, *, step="mlx-lm-source", source="release", execute=False, yes=False, fmt="shell"):
         return type(

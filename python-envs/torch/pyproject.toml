@@ -1,0 +1,27 @@
+[project]
+name = "ds4-ft-torch"
+version = "0.1.0"
+description = "Torch/PEFT fine-tuning environment for DeepSeek V4 Flash / DS4 LoRA experiments"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch>=2.3",
+    "transformers",
+    "peft",
+    "trl",
+    "accelerate",
+    "datasets",
+    "safetensors",
+    "huggingface_hub",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

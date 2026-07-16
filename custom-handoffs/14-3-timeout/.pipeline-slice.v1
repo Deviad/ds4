@@ -1,5 +1,0 @@
-schema_version=1
-preset=coding
-preset_version=1
-class=full
-goal=Repin bounded smoke timeout from 600 seconds to 1200 seconds

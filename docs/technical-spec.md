@@ -256,12 +256,15 @@ uv venv --seed .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e /Users/spotted/projects/ds4-finetuning/python-envs/mlx
+python /Users/spotted/projects/ds4-finetuning/scripts/finetune_ds4.py \
+  run-command mlx-lm-source --mlx-lm-source release --execute --yes
 ```
 
 - Python 3.14 (current: 3.14.5)
-- Installs: `mlx`, `mlx-lm`, `transformers`, `datasets`, `safetensors`
+- Installs: `mlx==0.31.2`, `mlx-lm==0.31.3`, `transformers`, `datasets`, `safetensors`
 - `sitecustomize.py` in the `src/` directory injects the project-controlled
   `mlx_lm.models.deepseek_v4` plugin path automatically on `import mlx_lm`.
+- `setup-env` reconciles back to released MLX-LM by default. Selecting the fork is explicit and reversible; never rely on package version alone because the pinned fork also reports `0.31.3`.
 
 ### 6.2 Create / recreate the Torch/PEFT environment
 
@@ -286,6 +289,37 @@ source /Volumes/Data\ NVME/mlx-ft/ds4/.venv/bin/activate
 # Torch
 source /Volumes/Data\ NVME/mlx-ft/ds4/.venv-torch/bin/activate
 ```
+
+### 6.4 MLX-LM source selection and verification
+
+Story 14.0 adds `vendor/mlx-lm` as a real submodule pinned to `git@github.com:Deviad/mlx-lm.git`. The initial pin was `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`; Story 14.4 advanced it to `80fab4e419a57f9465bb9e2f4e90010d645e124c` to include the Story 14.1/14.2a trainer seam. The release package remains the default source. The fork is bootstrap-only and no file below `vendor/mlx-lm` may be edited in Story 14.0.
+
+```bash
+# Materialize and verify the source-control pin.
+git submodule update --init --recursive vendor/mlx-lm
+git ls-files --stage -- vendor/mlx-lm
+git -C vendor/mlx-lm rev-parse HEAD
+git -C vendor/mlx-lm remote get-url origin
+git submodule status --recursive vendor/mlx-lm
+
+# Dry-run selector commands.
+python3 scripts/finetune_ds4.py run-command mlx-lm-source
+python3 scripts/finetune_ds4.py run-command mlx-lm-source --mlx-lm-source fork
+
+# Execute only after reviewing the dry run. Both paths use the isolated venv's
+# absolute python, `python -m pip`, `--isolated`, `--require-virtualenv`, and
+# `--no-deps`; fork mode also uses `--no-build-isolation -e`.
+python3 scripts/finetune_ds4.py run-command mlx-lm-source --mlx-lm-source release --execute --yes
+python3 scripts/finetune_ds4.py run-command mlx-lm-source --mlx-lm-source fork --execute --yes
+
+# Read-only identity verification.
+"$MLX_WORK/.venv/bin/python" scripts/finetune_ds4.py \
+  mlx-lm-source-verify --mode release --scope all --mlx-work "$MLX_WORK"
+"$MLX_WORK/.venv/bin/python" scripts/finetune_ds4.py \
+  mlx-lm-source-verify --mode fork --scope all --mlx-work "$MLX_WORK"
+```
+
+The verifier fails closed on wrong venv, user-site enabled, `mlx` drift from `0.31.2`, MLX-LM drift from `0.31.3`, wrong submodule URL/SHA/HEAD/origin, dirty or uninitialized submodule state, and release/fork import identity mismatches. Release identity must resolve inside the isolated venv and outside `vendor/mlx-lm`; fork identity must resolve inside `vendor/mlx-lm` and carry editable PEP 610 metadata pointing at that path.
 
 ---
 
@@ -316,8 +350,10 @@ python3 scripts/finetune_ds4.py mlx-lora-targets-check
 
 # Inspect what expensive commands would do (no execution)
 python3 scripts/finetune_ds4.py emit-commands
+python3 scripts/finetune_ds4.py emit-commands mlx-lm-source --mlx-lm-source fork
 
 # Execute one expensive step (requires both flags)
+python3 scripts/finetune_ds4.py run-command mlx-lm-source --mlx-lm-source release --execute --yes
 python3 scripts/finetune_ds4.py run-command convert-shimmed --execute --yes
 ```
 
@@ -658,6 +694,24 @@ Reviewer round 3, the tracked 25-repeat `R=96` benchmark must report forward
 p50 `<=0.0080s`, input-VJP p50 `<=0.0140s`, and `256x43x20` extrapolation
 `<=1.25h` p50 / `<=1.35h` p95. These gates do not authorize the full
 5,000-iteration run.
+
+### 10.12 Story 13.3b-5g first-backward OOM re-entry
+
+The single authorized 4096-token smoke at commit `5dee4ce` is an end-to-end
+memory RED: finite validation completed, then the first backward evaluation
+aborted with Metal command-buffer out-of-memory (exit `134`) before gradient
+telemetry or an adapter payload. One-layer routed-operation memory probes do not
+establish the peak of the 43-layer checkpointed trainer graph or cover ordinary
+attention/shared-expert backward and command-buffer transients.
+
+`grad_checkpoint(model.layers[0])` patches the shared `DecoderLayerNN.__call__`
+class method and therefore covers all 43 current decoder-layer instances. Do not
+apply a checkpoint call-site fix without contrary tracked evidence. Real training
+stays STOPPED pending a tracked no-model/no-shard multi-layer synthetic peak
+report with depth/expert sweeps, component ablations, and one lazy graph versus
+sequential-evaluation controls. No second real smoke, shorter fallback, full run,
+primitive redesign, or layer-serial backward is authorized without a new
+BA/Architect re-pin plus independent Reviewer PASS and Test Manager GREEN.
 
 ---
 

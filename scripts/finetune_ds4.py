@@ -116,7 +116,7 @@ DEFAULT_BACKEND_STEPS: dict[str, tuple[str, ...]] = {
 MLX_VERSION = "0.31.2"
 MLX_LM_RELEASE_VERSION = "0.31.3"
 MLX_LM_FORK_URL = "git@github.com:Deviad/mlx-lm.git"
-MLX_LM_FORK_SHA = "15b522f593b7ca5fbc0cac6f7572d40859d2d8fe"
+MLX_LM_FORK_SHA = "80fab4e419a57f9465bb9e2f4e90010d645e124c"
 MLX_LM_FORK_PATH = pathlib.Path("vendor/mlx-lm")
 
 DS4_GGUF_BASE_SMOKE_MARKER = ".ds4-gguf-generate-ok"

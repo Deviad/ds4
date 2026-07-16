@@ -777,10 +777,12 @@ class TestProtected:
         assert hashlib.sha256(p.read_bytes()).hexdigest() == "20572191316e36ce228d5a7b5f1cdd396e4d796c4b620696d10f3c33937f3518"
     def test_provider_test(self):
         p = ROOT/"tests"/"test_ds4_segmented_loss_and_grad.py"
-        assert hashlib.sha256(p.read_bytes()).hexdigest() == "618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6"
+        # Blob advanced from 618a0f22... by Story 14.4r2 fresh-clone test fix (mkdir before write_text)
+        assert hashlib.sha256(p.read_bytes()).hexdigest() == "8bf2a19f9e142aab737ac5df54d22902f5bcf631766420e5752c1dc0f114903e"
     def test_source_sentinel(self):
         p = ROOT/"tests"/"test_mlx_lm_source.py"
-        assert hashlib.sha256(p.read_bytes()).hexdigest() == "dec2c2b5a7644540a7ec339712968593647abd64c70b821abddc97f9b6ff5d65"
+        # Blob advanced from dec2c2b5... by Story 14.4 vendor pin update (FORK_SHA 15b522f->80fab4e)
+        assert hashlib.sha256(p.read_bytes()).hexdigest() == "24325ef35e915b1cc3275d5fac31400c116e1adda6da0254b6158c7a6233dda9"
 
 
 # ===================================================================
