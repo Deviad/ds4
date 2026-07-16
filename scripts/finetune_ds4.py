@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import inspect
+import importlib.metadata
 import importlib.util
 import json
 import logging
@@ -23,6 +24,8 @@ import shlex
 import struct
 import subprocess
 import sys
+import site
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -38,6 +41,7 @@ DEFAULT_SPLIT_DIR = "mlx-4096"
 BACKENDS = ("local-mlx", "local-torch-mps", "remote-cuda", "cpu-check", "manual")
 MLX_STEPS = (
     "setup-env",
+    "mlx-lm-source",
     "mlx-device",
     "convert",
     "fp8-shim-scan",
@@ -70,6 +74,7 @@ MLX_STEPS = (
     "splice-dry-run",
     "splice",
     "ds4-smoke",
+    "ds4-segmented-smoke",
 )
 TORCH_MPS_STEPS = (
     "torch-env-create",
@@ -101,12 +106,18 @@ BACKEND_STEPS: dict[str, tuple[str, ...]] = {
 DEFAULT_BACKEND_STEPS: dict[str, tuple[str, ...]] = {
     # Raw `convert` is kept as an explicit diagnostic step, but the default
     # local path must route through FP8 emulation before mlx-lm conversion.
-    "local-mlx": tuple(step for step in MLX_STEPS if step != "convert"),
+    "local-mlx": tuple(step for step in MLX_STEPS if step not in ("convert", "ds4-segmented-smoke")),
     "local-torch-mps": TORCH_MPS_STEPS,
     "remote-cuda": REMOTE_CUDA_STEPS,
     "cpu-check": CPU_CHECK_STEPS,
     "manual": MANUAL_STEPS,
 }
+
+MLX_VERSION = "0.31.2"
+MLX_LM_RELEASE_VERSION = "0.31.3"
+MLX_LM_FORK_URL = "git@github.com:Deviad/mlx-lm.git"
+MLX_LM_FORK_SHA = "15b522f593b7ca5fbc0cac6f7572d40859d2d8fe"
+MLX_LM_FORK_PATH = pathlib.Path("vendor/mlx-lm")
 
 DS4_GGUF_BASE_SMOKE_MARKER = ".ds4-gguf-generate-ok"
 DS4_GGUF_BASE_SMOKE_REPORT = "ds4-gguf-base-smoke.json"
@@ -907,6 +918,382 @@ def q(value: str | pathlib.Path) -> str:
     return shlex.quote(str(value))
 
 
+def _resolved(path: str | pathlib.Path) -> pathlib.Path:
+    return pathlib.Path(path).expanduser().resolve(strict=False)
+
+
+def _is_relative_to(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _run_git_text(args: list[str], cwd: pathlib.Path | None = None) -> str:
+    return subprocess.check_output(["git", *args], cwd=cwd, text=True, stderr=subprocess.STDOUT)
+
+
+def _append_failure(failures: list[str], code: str) -> None:
+    if code not in failures:
+        failures.append(code)
+
+
+def check_mlx_lm_submodule(project_root: pathlib.Path, run_git: Any | None = None) -> dict[str, Any]:
+    project_root = _resolved(project_root)
+    run_git = run_git or _run_git_text
+    fork_path = project_root / MLX_LM_FORK_PATH
+    failures: list[str] = []
+    report: dict[str, Any] = {
+        "path": str(MLX_LM_FORK_PATH),
+        "expected_url": MLX_LM_FORK_URL,
+        "expected_sha": MLX_LM_FORK_SHA,
+        "gitmodules": None,
+        "index_mode": None,
+        "index_sha": None,
+        "index_stage": None,
+        "head": None,
+        "origin": None,
+        "commit_available": False,
+        "main_contains": False,
+        "recursive_status": "",
+        "clean": False,
+        "failures": failures,
+    }
+
+    try:
+        raw = run_git(["config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.(path|url|branch)$"], cwd=project_root)
+    except subprocess.CalledProcessError:
+        raw = ""
+    entries: dict[str, list[tuple[str, str]]] = {}
+    branches: list[str] = []
+    for line in raw.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        key, value = parts
+        key_parts = key.split(".")
+        if len(key_parts) < 3:
+            continue
+        section = ".".join(key_parts[:-1])
+        field = key_parts[-1]
+        entries.setdefault(section, []).append((field, value))
+        if field == "branch":
+            branches.append(value)
+    matching = [fields for fields in entries.values() if ("path", str(MLX_LM_FORK_PATH)) in fields]
+    if len(matching) != 1 or ("url", MLX_LM_FORK_URL) not in matching[0] or branches:
+        _append_failure(failures, "gitmodules-mismatch")
+    report["gitmodules"] = {section: dict(fields) for section, fields in entries.items()}
+
+    try:
+        stage_raw = run_git(["ls-files", "--stage", "--", str(MLX_LM_FORK_PATH)], cwd=project_root).strip()
+    except subprocess.CalledProcessError:
+        stage_raw = ""
+    stage_lines = [line for line in stage_raw.splitlines() if line]
+    if len(stage_lines) == 1:
+        left, _, path = stage_lines[0].partition("\t")
+        fields = left.split()
+        if len(fields) >= 3:
+            report["index_mode"], report["index_sha"], report["index_stage"] = fields[:3]
+        if path != str(MLX_LM_FORK_PATH) or report["index_mode"] != "160000" or report["index_sha"] != MLX_LM_FORK_SHA or report["index_stage"] != "0":
+            _append_failure(failures, "gitlink-mismatch")
+    else:
+        _append_failure(failures, "gitlink-mismatch")
+
+    try:
+        report["head"] = run_git(["rev-parse", "HEAD"], cwd=fork_path).strip()
+    except subprocess.CalledProcessError:
+        report["head"] = None
+    if report["head"] != MLX_LM_FORK_SHA:
+        _append_failure(failures, "submodule-head-mismatch")
+
+    try:
+        report["origin"] = run_git(["remote", "get-url", "origin"], cwd=fork_path).strip()
+    except subprocess.CalledProcessError:
+        report["origin"] = None
+    if report["origin"] != MLX_LM_FORK_URL:
+        _append_failure(failures, "origin-mismatch")
+
+    try:
+        run_git(["cat-file", "-e", f"{MLX_LM_FORK_SHA}^{{commit}}"], cwd=fork_path)
+        report["commit_available"] = True
+    except subprocess.CalledProcessError:
+        _append_failure(failures, "commit-object-missing")
+
+    try:
+        run_git(["show-ref", "--verify", "refs/remotes/origin/main"], cwd=fork_path)
+        run_git(["merge-base", "--is-ancestor", MLX_LM_FORK_SHA, "refs/remotes/origin/main"], cwd=fork_path)
+        report["main_contains"] = True
+    except subprocess.CalledProcessError:
+        _append_failure(failures, "main-provenance-mismatch")
+
+    try:
+        dirty = run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=fork_path)
+    except subprocess.CalledProcessError:
+        dirty = "<git status failed>"
+    report["clean"] = dirty.strip() == ""
+    if not report["clean"]:
+        _append_failure(failures, "submodule-dirty")
+
+    try:
+        recursive = run_git(["submodule", "status", "--recursive", str(MLX_LM_FORK_PATH)], cwd=project_root)
+    except subprocess.CalledProcessError:
+        recursive = ""
+    report["recursive_status"] = recursive
+    recursive_lines = [line for line in recursive.splitlines() if line]
+    if not recursive_lines or any(line[0] in "-+U" for line in recursive_lines):
+        _append_failure(failures, "recursive-status-mismatch")
+
+    if report["head"] is None and "submodule-head-mismatch" in failures:
+        _append_failure(failures, "submodule-uninitialized")
+    report["pass"] = not failures
+    return report
+
+
+def _default_environment_probe() -> dict[str, Any]:
+    probe: dict[str, Any] = {
+        "prefix": sys.prefix,
+        "base_prefix": sys.base_prefix,
+        "executable": sys.executable,
+        "user_site_enabled": bool(site.ENABLE_USER_SITE),
+    }
+    try:
+        import mlx  # type: ignore
+        probe["mlx_runtime_version"] = getattr(mlx, "__version__", None)
+    except Exception as exc:
+        probe["mlx_import_error"] = str(exc)
+        probe["mlx_runtime_version"] = None
+    try:
+        probe["mlx_distribution_version"] = importlib.metadata.version("mlx")
+    except Exception as exc:
+        probe["mlx_distribution_error"] = str(exc)
+        probe["mlx_distribution_version"] = None
+    return probe
+
+
+def _default_installed_probe() -> dict[str, Any]:
+    probe: dict[str, Any] = {}
+    try:
+        probe["distribution_version"] = importlib.metadata.version("mlx-lm")
+        dist = importlib.metadata.distribution("mlx-lm")
+        direct_url_text = dist.read_text("direct_url.json")
+        probe["direct_url"] = json.loads(direct_url_text) if direct_url_text else None
+    except Exception as exc:
+        probe["metadata_error"] = str(exc)
+        probe.setdefault("distribution_version", None)
+        probe.setdefault("direct_url", None)
+    try:
+        import mlx_lm  # type: ignore
+        probe["runtime_version"] = getattr(mlx_lm, "__version__", None)
+        probe["module_path"] = getattr(mlx_lm, "__file__", None)
+    except Exception as exc:
+        probe["import_error"] = str(exc)
+        probe.setdefault("runtime_version", None)
+        probe.setdefault("module_path", None)
+    try:
+        probe["packages_distributions"] = importlib.metadata.packages_distributions()
+    except Exception:
+        probe["packages_distributions"] = {}
+    return probe
+
+
+def _direct_url_path(direct_url: Any) -> pathlib.Path | None:
+    if not isinstance(direct_url, dict):
+        return None
+    url = direct_url.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    return pathlib.Path(urllib.parse.unquote(parsed.path)).resolve(strict=False)
+
+
+def collect_mlx_lm_source_verification(
+    *,
+    mode: str,
+    scope: str,
+    mlx_work: pathlib.Path,
+    project_root: pathlib.Path,
+    env_probe: dict[str, Any] | None = None,
+    installed_probe: dict[str, Any] | None = None,
+    checkout_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if mode not in {"release", "fork"}:
+        raise PlanError("--mode must be release or fork")
+    if scope not in {"environment", "checkout", "installed", "all"}:
+        raise PlanError("--scope must be environment, checkout, installed, or all")
+    mlx_work = _resolved(mlx_work)
+    project_root = _resolved(project_root)
+    expected_prefix = mlx_work / ".venv"
+    expected_python = expected_prefix / "bin" / "python"
+    fork_path = project_root / MLX_LM_FORK_PATH
+    failures: list[str] = []
+    env_probe = env_probe if env_probe is not None else _default_environment_probe()
+    installed_probe = installed_probe if installed_probe is not None else _default_installed_probe()
+
+    report: dict[str, Any] = {
+        "schema_version": 1,
+        "selected_mode": mode,
+        "scope": scope,
+        "pass": False,
+        "failures": failures,
+        "environment": {
+            "expected_prefix": str(expected_prefix),
+            "actual_prefix": env_probe.get("prefix"),
+            "executable": env_probe.get("executable"),
+            "user_site_enabled": env_probe.get("user_site_enabled"),
+        },
+        "mlx": {
+            "runtime_version": env_probe.get("mlx_runtime_version"),
+            "distribution_version": env_probe.get("mlx_distribution_version"),
+        },
+        "mlx_lm": {
+            "runtime_version": installed_probe.get("runtime_version"),
+            "distribution_version": installed_probe.get("distribution_version"),
+            "module_path": installed_probe.get("module_path"),
+            "editable": bool(isinstance(installed_probe.get("direct_url"), dict) and installed_probe.get("direct_url", {}).get("dir_info", {}).get("editable") is True),
+        },
+        "submodule": None,
+    }
+
+    def needs(part: str) -> bool:
+        if scope == "all":
+            if part == "checkout":
+                return mode == "fork"
+            return True
+        return scope == part
+
+    if needs("environment"):
+        actual_prefix = pathlib.Path(str(env_probe.get("prefix", ""))).resolve(strict=False)
+        base_prefix = pathlib.Path(str(env_probe.get("base_prefix", ""))).resolve(strict=False)
+        executable = pathlib.Path(str(env_probe.get("executable", ""))).resolve(strict=False)
+        if actual_prefix == base_prefix:
+            _append_failure(failures, "not-isolated-venv")
+        if actual_prefix != expected_prefix.resolve(strict=False):
+            _append_failure(failures, "wrong-venv-prefix")
+        if executable != expected_python.resolve(strict=False):
+            _append_failure(failures, "wrong-venv-python")
+        if env_probe.get("user_site_enabled") is not False:
+            _append_failure(failures, "user-site-enabled")
+        if env_probe.get("mlx_import_error") or env_probe.get("mlx_runtime_version") is None:
+            _append_failure(failures, "mlx-import-failed")
+        if env_probe.get("mlx_runtime_version") != MLX_VERSION or env_probe.get("mlx_distribution_version") != MLX_VERSION:
+            _append_failure(failures, "mlx-version-mismatch")
+
+    if needs("checkout"):
+        checkout_report = checkout_report if checkout_report is not None else check_mlx_lm_submodule(project_root)
+        report["submodule"] = {k: v for k, v in checkout_report.items() if k != "failures"}
+        for failure in checkout_report.get("failures", []):
+            _append_failure(failures, failure)
+
+    if needs("installed"):
+        packages = installed_probe.get("packages_distributions") or {}
+        mapped = "mlx-lm" in packages.get("mlx_lm", [])
+        module_path_raw = installed_probe.get("module_path")
+        module_path = pathlib.Path(str(module_path_raw)).resolve(strict=False) if module_path_raw else None
+        direct_url_path = _direct_url_path(installed_probe.get("direct_url"))
+        if installed_probe.get("metadata_error") or installed_probe.get("distribution_version") is None or not mapped:
+            _append_failure(failures, "mlx-lm-metadata-missing")
+        if installed_probe.get("import_error") or installed_probe.get("runtime_version") is None or module_path is None:
+            _append_failure(failures, "mlx-lm-import-failed")
+        if installed_probe.get("distribution_version") != MLX_LM_RELEASE_VERSION or installed_probe.get("runtime_version") != MLX_LM_RELEASE_VERSION:
+            _append_failure(failures, "mlx-lm-version-mismatch")
+        if mode == "release" and module_path is not None:
+            if not _is_relative_to(module_path, expected_prefix) or _is_relative_to(module_path, fork_path):
+                _append_failure(failures, "source-mode-mismatch")
+            if direct_url_path is not None and direct_url_path == fork_path.resolve(strict=False):
+                _append_failure(failures, "editable-metadata-mismatch")
+        if mode == "fork" and module_path is not None:
+            if not _is_relative_to(module_path, fork_path):
+                _append_failure(failures, "source-mode-mismatch")
+            direct_url = installed_probe.get("direct_url")
+            editable = isinstance(direct_url, dict) and direct_url.get("dir_info", {}).get("editable") is True
+            if not editable or direct_url_path != fork_path.resolve(strict=False):
+                _append_failure(failures, "editable-metadata-mismatch")
+            if scope == "installed":
+                checkout_report = checkout_report if checkout_report is not None else check_mlx_lm_submodule(project_root)
+                if not checkout_report.get("pass"):
+                    for failure in checkout_report.get("failures", []):
+                        _append_failure(failures, failure)
+
+    report["pass"] = not failures
+    return report
+
+
+def mlx_lm_source_verify(args: argparse.Namespace) -> int:
+    report = collect_mlx_lm_source_verification(
+        mode=args.mode,
+        scope=args.scope,
+        mlx_work=path_arg(args.mlx_work),
+        project_root=path_arg(args.project_root) if args.project_root else pathlib.Path(__file__).resolve().parent.parent,
+    )
+    if not getattr(args, "quiet", False):
+        print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["pass"] else 2
+
+
+def mlx_lm_source_commands(mode: str, mlx_work: pathlib.Path, project_root: pathlib.Path, script_path: pathlib.Path) -> list[str]:
+    if mode not in {"release", "fork"}:
+        raise PlanError("mlx-lm source must be release or fork")
+    python = mlx_work / ".venv/bin/python"
+    env = "unset SSLKEYLOGFILE && PYTHONNOUSERSITE=1"
+    common = f"--mlx-work {q(mlx_work)} --project-root {q(project_root)}"
+    verify_quiet = f"{env} {q(python)} {q(script_path)} mlx-lm-source-verify --mode {mode} --scope all {common} --quiet"
+    pre_scope = "checkout" if mode == "fork" else "environment"
+    precheck = f"{env} {q(python)} {q(script_path)} mlx-lm-source-verify --mode {mode} --scope {pre_scope} {common}"
+    final = f"{env} {q(python)} {q(script_path)} mlx-lm-source-verify --mode {mode} --scope all {common}"
+    if mode == "fork":
+        pip = f"{env} {q(python)} -m pip --isolated --require-virtualenv install --no-deps --no-build-isolation --force-reinstall -e {q(project_root / MLX_LM_FORK_PATH)}"
+    else:
+        pip = f"{env} {q(python)} -m pip --isolated --require-virtualenv install --no-deps --force-reinstall 'mlx-lm=={MLX_LM_RELEASE_VERSION}'"
+    return ["\n".join([
+        f"# mlx-lm-source={mode}",
+        f"if {verify_quiet}; then",
+        f"  echo 'mlx-lm-source={mode} already selected; no pip operation needed'",
+        "else",
+        f"  {precheck}",
+        f"  {pip}",
+        f"  {final}",
+        "fi",
+    ])]
+
+
+def _manifest_hash(files: Iterable[pathlib.Path], root: pathlib.Path) -> dict[str, Any]:
+    rows: list[str] = []
+    for path in sorted(files, key=lambda p: p.as_posix()):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        rows.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {rel}")
+    payload = ("\n".join(rows) + "\n").encode("utf-8")
+    return {"count": len(rows), "sha256": hashlib.sha256(payload).hexdigest()}
+
+
+def compute_story_14_protected_manifest_report(project_root: pathlib.Path) -> dict[str, Any]:
+    root = _resolved(project_root)
+    prod_names = [
+        "ds4.c", "ds4.h", "ds4_cli.c", "ds4_server.c", "ds4_metal.m",
+        "ds4_ssd.c", "ds4_ssd.h", "ds4_distributed.c", "ds4_distributed.h",
+        "ds4_cuda.cu", "ds4_rocm.cu", "ds4_rocm.h",
+    ]
+    prod_files = [root / name for name in prod_names] + sorted((root / "metal").glob("*.metal"))
+    mlx_src = [p for p in (root / "python-envs/mlx/src").rglob("*") if p.is_file()]
+    path_a = [p for p in (root / "agent-output/cmux-13-3b").rglob("*") if p.is_file()]
+    adr_0028 = root / "docs/adr/0028-opaque-packed-fp4-metal-training-primitive.md"
+    backlog = (root / "docs/backlog.md").read_text(encoding="utf-8")
+    start = backlog.index("#### Story 13.3b-5i — permanent STOP closure")
+    end = backlog.index("**EOF Epic 13**") + len("**EOF Epic 13**")
+    section = (backlog[start:end] + "\n").encode("utf-8")
+    return {
+        "production_runtime": _manifest_hash(prod_files, root),
+        "mlx_src": _manifest_hash(mlx_src, root),
+        "path_a_evidence": _manifest_hash(path_a, root),
+        "adr_0028": {"count": 1, "sha256": hashlib.sha256(adr_0028.read_bytes()).hexdigest()},
+        "story_13_3b_5i_section": {"bytes": len(section), "sha256": hashlib.sha256(section).hexdigest()},
+    }
+
+
 def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
     hf = path_arg(args.hf_model)
     dataset_root = path_arg(args.dataset_root)
@@ -929,8 +1316,11 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
     lora_config = mlx_work / "lora-config.json"
     project_root = pathlib.Path(__file__).resolve().parent.parent
     scripts_dir = project_root / "scripts"
+    script_path = pathlib.Path(__file__).resolve()
+    setup_release_selector = mlx_lm_source_commands("release", mlx_work, project_root, script_path)[0]
     return {
-        "setup-env": [f"mkdir -p {q(mlx_work)} && cd {q(mlx_work)} && {{ test -d .venv || uv venv --seed .venv; }} && {activate} && pip install -U pip && pip install -e {q(project_root / 'python-envs' / 'mlx')} && python -c {q('from ds4_ft_mlx.mlx_lm_plugin import install_startup_pth_hook; print(install_startup_pth_hook())')}"],
+        "setup-env": [f"mkdir -p {q(mlx_work)} && cd {q(mlx_work)} && {{ test -d .venv || uv venv --seed .venv; }} && {activate} && pip install -U pip && pip install -e {q(project_root / 'python-envs' / 'mlx')} && python -c {q('from ds4_ft_mlx.mlx_lm_plugin import install_startup_pth_hook; print(install_startup_pth_hook())')}", setup_release_selector],
+        "mlx-lm-source": mlx_lm_source_commands(getattr(args, "mlx_lm_source", "release"), mlx_work, project_root, script_path),
         "mlx-device": [f"cd {q(mlx_work)} && {activate} && python - <<'PY'\nimport mlx.core as mx\nprint(mx.default_device())\nPY"],
         "deepseek-v4-import-check": [f"cd {q(project_root)} && {activate} && python3 {q(pathlib.Path(__file__))} deepseek-v4-import-check --mlx-work {q(mlx_work)}"],
         "deepseek-v4-tiny-config-check": [f"cd {q(project_root)} && {activate} && python3 {q(pathlib.Path(__file__))} deepseek-v4-tiny-config-check --mlx-work {q(mlx_work)}"],
@@ -963,6 +1353,7 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
         "splice-dry-run": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)} --dry-run"],
         "splice": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)}"],
         "ds4-smoke": [f"cd {q(ds4_root)} && ./ds4 -m {q(mixed)} -p {q('Explain why deduplicating by question matters for supervised fine-tuning.')} -n 300"],
+        "ds4-segmented-smoke": [f"cd {q(mlx_work)} && unset SSLKEYLOGFILE && . {q(mlx_work / '.venv/bin/activate')} && PYTHONPATH={q(project_root / 'python-envs' / 'mlx' / 'src')}:{q(project_root / 'vendor' / 'mlx-lm')} python {q(project_root / 'scripts' / 'ds4_segmented_smoke.py')} --model {q(mlx_work / 'model-4bit')} --data {q(dataset_root / "mlx-4096-smoke")} --adapter-path {q(mlx_work / 'adapters-segmented-smoke')} --config {q(lora_config)} --iters 1 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint --segment-size 1 > {q(project_root / 'agent-output' / 'cmux-14-3' / 'smoke-log.txt')} 2>&1"],
         "torch-env-create": [
             f"mkdir -p {q(mlx_work)}",
             f"cd {q(mlx_work)} && uv venv --seed --python 3.12 --clear .venv-torch",
@@ -1023,9 +1414,10 @@ def emit_commands(args: argparse.Namespace) -> int:
         raise PlanError(f"step(s) {', '.join(disallowed)!r} are not available for backend {backend!r}; use one of {', '.join(allowed_steps)}")
     selected = {step: catalog[step] for step in steps}
     if args.format == "json":
-        print(json.dumps({"backend": backend, "default_note": "Mac Studio M3 Ultra local resources preferred", "steps": selected}, indent=2))
+        print(json.dumps({"backend": backend, "default_note": "Mac Studio M3 Ultra local resources preferred", "mlx_lm_source": getattr(args, "mlx_lm_source", "release"), "steps": selected}, indent=2))
     else:
         print(f"# backend={backend}")
+        print(f"# mlx-lm-source={getattr(args, 'mlx_lm_source', 'release')}")
         print("# Mac Studio M3 Ultra local resources preferred; remote CUDA requires explicit backend selection")
         print("set -euo pipefail")
         print()
@@ -4486,7 +4878,7 @@ def check_execute_prerequisites(args: argparse.Namespace) -> None:
     ds4_root = path_arg(args.ds4_root)
     ds4_gguf = path_arg(args.ds4_gguf) if args.ds4_gguf else ds4_root / "ds4flash.gguf"
     adapter_ds4 = path_arg(getattr(args, "adapter_ds4", None)) if getattr(args, "adapter_ds4", None) else mlx_work / "adapter.ds4.safetensors"
-    if step != "setup-env" and step in {"mlx-device", "convert", "fp8-shim-probe", "convert-shimmed", "smoke-train", "smoke-train-2048", "smoke-generate", "full-train", "continue-train", "eval", "fuse", "fused-generate"}:
+    if step != "setup-env" and step in {"mlx-lm-source", "mlx-device", "convert", "fp8-shim-probe", "convert-shimmed", "smoke-train", "smoke-train-2048", "smoke-generate", "full-train", "continue-train", "eval", "fuse", "fused-generate"}:
         if not (mlx_work / ".venv/bin/activate").is_file():
             raise PlanError(f"{mlx_work / '.venv/bin/activate'}: missing venv; run setup-env first")
     if step == "fp8-shim" and not (mlx_work / ".fp8-shim-probe-ok").is_file():
@@ -4561,6 +4953,7 @@ def check_execute_prerequisites(args: argparse.Namespace) -> None:
         return
     # Default mlx steps still require mlx venv, dataset, and converted model as before.
     if step in {
+        "mlx-lm-source",
         "mlx-device",
         "convert",
         "fp8-shim-probe",
@@ -4719,9 +5112,18 @@ Conversion, training, GGUF quantization, splicing writes, and DS4 server runs ar
     add_common_paths(p)
     p.set_defaults(func=mlx_lora_targets_check)
 
+    p = sub.add_parser("mlx-lm-source-verify", help="read-only MLX-LM release/fork source identity verifier")
+    add_common_paths(p)
+    p.add_argument("--mode", choices=("release", "fork"), required=True)
+    p.add_argument("--scope", choices=("environment", "checkout", "installed", "all"), default="all")
+    p.add_argument("--project-root", default=None)
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=mlx_lm_source_verify)
+
     p = sub.add_parser("emit-commands", help="print expensive MLX/GGUF commands without running them")
     add_common_paths(p)
     p.add_argument("--format", choices=("shell", "json"), default="shell")
+    p.add_argument("--mlx-lm-source", choices=("release", "fork"), default="release")
     p.add_argument(
         "--backend",
         choices=("local-mlx", "local-torch-mps", "remote-cuda", "cpu-check", "manual"),
@@ -4743,6 +5145,7 @@ Conversion, training, GGUF quantization, splicing writes, and DS4 server runs ar
         help="execution backend selector; local-mlx is the default on Mac Studio M3 Ultra",
     )
     p.add_argument("step", choices=COMMAND_STEPS)
+    p.add_argument("--mlx-lm-source", choices=("release", "fork"), default="release")
     p.add_argument("--execute", action="store_true")
     p.add_argument("--yes", action="store_true", help="required with --execute")
     p.add_argument("--fused-hf-model")

@@ -1,0 +1,19 @@
+==> test-13-3b-5g-r4-diff-tracking-hashes
+helper tracked: yes
+error: pathspec 'agent-output/cmux-13-3b/test-report-13-3b-5g-r3.md' did not match any file(s) known to git
+Did you forget to 'git add'?
+r3 report tracked: 
+helper status:
+A  tests/helpers/routed_fp4_multilayer_peak_probe.py
+r3 report status:
+?? agent-output/cmux-13-3b/test-report-13-3b-5g-r3.md
+index/worktree hashes:
+100644 b8374586bbb8d6a90cba05e14440b9933666f561 0	tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+100755 c085c77d10c763aa99d6f145c2a3361a6978d762 0	tests/helpers/routed_fp4_multilayer_peak_probe.py
+100644 85bbee5add47b74ab0fdce3c52c7047cecff9040 0	tests/test_deepseek_v4_nn_multilayer_peak.py
+sha256 worktree:
+c521202ef835956ec1b5259015046b45a014f0b23eeaddc29d1843d62fd525ef  tests/helpers/routed_fp4_multilayer_peak_probe.py
+e9421d714b0fa57a2351fa3f9a35a4b1d92d39837bc40d4d0f5fb8c9263593fd  tests/test_deepseek_v4_nn_multilayer_peak.py
+c80c103d3f9b8a12b6e3de5fa9b62b3efd56dc321497911a34357cf8c90ad094  tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+bb2b0cfbcab5b4efab7c5917fa593c31df138f04f4c7ea351bebcc669b68c980  agent-output/cmux-13-3b/test-report-13-3b-5g-r3.md
+[rc=0]

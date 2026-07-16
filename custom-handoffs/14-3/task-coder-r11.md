@@ -1,0 +1,13 @@
+# Story 14.3 — Coder r11 closure after Reviewer r10
+
+Read `custom-handoffs/standby/review.md` r10 in full, requirements.md, architecture.md, coder-notes-r10, canonical generator and current source/tests.
+
+Close all r10 blockers:
+
+1. Tracking/baseline: stage exact existing bytes (no content edits) for `.gitmodules`, provider source `python-envs/mlx/src/ds4_ft_mlx/segmented_loss_and_grad.py`, provider test `tests/test_ds4_segmented_loss_and_grad.py`, source sentinel `tests/test_mlx_lm_source.py`, `custom-handoffs/14-3/requirements.md`, `custom-handoffs/14-3/architecture.md`, `custom-handoffs/14-3/.pipeline-private/implementation-state.v1.tsv`, and ADR 0029. Ensure outer gitlink and Path A 365 exact frozen evidence remain staged. Do not edit vendor inner files.
+2. Functional identity: stage/index the complete four-file object (`scripts/ds4_segmented_smoke.py`, `tests/test_ds4_segmented_smoke.py`, `scripts/finetune_ds4.py`, `docs/architecture.md`) and compute deterministic hash using the exact documented command. Register r11 with that non-self-referential hash.
+3. Dataset/smoke identity: use available tokenizer to validate every row <=4096 where possible; otherwise conservative bound must reject unbroken 10000-char and >4096 whitespace-token rows. Enforce exact pinned Phase-1 smoke values (max_seq_length 4096, iters 1, batch_size 1, learning rate, mask_prompt, grad_checkpoint, segment_size 1) and reject altered paths/values at entry point, while preserving catalog/default behavior. Add tracked tests.
+4. LoRA: require exact canonical key set from `build_lora_parameters()` (`self_attn.q_a_proj`, `self_attn.q_b_proj`, `self_attn.kv_proj`), reject missing/subset/duplicate/wrong keys, validate rank/scale/dropout range, and test by invoking the canonical generator rather than hardcoded equivalent JSON.
+5. Preserve detailed preflight/parser reasons: do not overwrite preflight message with `str(SystemExit)`; distinguish argparse code 2 from timeout code 2 in report/marker; retain workspace routing/stale-marker cleanup. Add assertions for exact message/classification.
+6. Cleanup: one unchanged behavioral oracle applied to control and cleanup-release mutant; control must release lock and mutant must fail that same oracle. Persist cleanup-release exceptions in durable report/log/marker warning detail. Add tracked tests.
+7. Run exact-fork focused/finetune/provider/source suites, py_compile, Path A/pin/gitlink checks. No real assets, Phase 2, smoke/training/inference/backend/install/network, commit/push. Write `custom-handoffs/14-3/coder-notes-r11.md`; marker only complete, otherwise STOP.

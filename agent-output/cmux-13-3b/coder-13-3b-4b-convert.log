@@ -1,0 +1,7 @@
+[INFO] Loading
+[INFO] Using dtype: bfloat16
+[INFO] Quantizing
+[INFO] Quantized model with 8.292 bits per weight.
+real 122.09
+user 3.79
+sys 66.59

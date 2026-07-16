@@ -1,0 +1,3 @@
+[submodule "mlx-lm"]
+	path = vendor/mlx-lm
+	url = git@github.com:Deviad/mlx-lm.git

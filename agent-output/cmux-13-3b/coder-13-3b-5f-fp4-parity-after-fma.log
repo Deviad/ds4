@@ -1,0 +1,72 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_sparse_moe_fp4_forward_matches_frozen_moe_mlx_with_same_weights _____
+
+    def test_sparse_moe_fp4_forward_matches_frozen_moe_mlx_with_same_weights():
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import _moe_mlx
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import ModelArgs, SparseMoeBlockNN
+    
+        args = ModelArgs.from_dict(_fp4_config())
+        block = SparseMoeBlockNN(args, layer_idx=1)
+    
+        gate = (mx.arange(4 * 32, dtype=mx.float32).reshape(4, 32) - 64.0) / 500.0
+        bias = mx.array([0.02, -0.03, 0.01, 0.0], dtype=mx.float32)
+        w1 = _stacked_packed(4, 32, 16, 0x11)
+        w3 = _stacked_packed(4, 32, 16, 0x22)
+        w2 = _stacked_packed(4, 32, 16, 0x33)
+        s1 = _stacked_scale(4, 32, 1, 0.05)
+        s3 = _stacked_scale(4, 32, 1, 0.04)
+        s2 = _stacked_scale(4, 32, 1, 0.03)
+        sw1 = mx.ones((32, 32), dtype=mx.float32) * 0.02
+        sw3 = mx.ones((32, 32), dtype=mx.float32) * -0.015
+        sw2 = mx.ones((32, 32), dtype=mx.float32) * 0.01
+    
+        block.gate_weight = gate
+        block.e_score_correction_bias = bias
+        block.experts.w1_weight = w1
+        block.experts.w3_weight = w3
+        block.experts.w2_weight = w2
+        block.experts.w1_scale = s1
+        block.experts.w3_scale = s3
+        block.experts.w2_scale = s2
+        block.shared_experts.gate_proj.weight = sw1
+        block.shared_experts.up_proj.weight = sw3
+        block.shared_experts.down_proj.weight = sw2
+    
+        weights = {
+            "mlp.gate.weight": gate,
+            "mlp.gate.e_score_correction_bias": bias,
+            "mlp.shared_experts.w1.weight": sw1,
+            "mlp.shared_experts.w3.weight": sw3,
+            "mlp.shared_experts.w2.weight": sw2,
+        }
+        for eid in range(4):
+            weights[f"mlp.experts.{eid}.w1.weight"] = w1[eid]
+            weights[f"mlp.experts.{eid}.w3.weight"] = w3[eid]
+            weights[f"mlp.experts.{eid}.w2.weight"] = w2[eid]
+            weights[f"mlp.experts.{eid}.w1.scale"] = s1[eid]
+            weights[f"mlp.experts.{eid}.w3.scale"] = s3[eid]
+            weights[f"mlp.experts.{eid}.w2.scale"] = s2[eid]
+    
+        x = mx.arange(2 * 3 * 32, dtype=mx.float32).reshape(2, 3, 32) / 100.0
+        got = block(x)
+        expected = _moe_mlx(args, x, weights)
+        mx.eval(got, expected)
+    
+        max_abs = mx.max(mx.abs(got - expected))
+>       assert float(max_abs.item()) <= 1e-5
+E       assert 1.1444091796875e-05 <= 1e-05
+E        +  where 1.1444091796875e-05 = float(1.1444091796875e-05)
+E        +    where 1.1444091796875e-05 = <nanobind.nb_bound_method object at 0x11a4cfb00>()
+E        +      where <nanobind.nb_bound_method object at 0x11a4cfb00> = array(1.14441e-05, dtype=float32).item
+
+tests/test_deepseek_v4_nn_fp4_parity.py:108: AssertionError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_fp4_parity.py::test_sparse_moe_fp4_forward_matches_frozen_moe_mlx_with_same_weights
+1 failed, 1 warning in 0.18s

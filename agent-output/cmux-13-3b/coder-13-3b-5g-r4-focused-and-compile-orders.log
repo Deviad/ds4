@@ -1,0 +1,27 @@
+--- focused ---
+..............                                                           [100%]
+=============================== warnings summary ===============================
+../../../../Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345
+  /Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+14 passed, 1 warning in 7.82s
+--- focused then compiled host routing ---
+...............                                                          [100%]
+=============================== warnings summary ===============================
+../../../../Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345
+  /Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+15 passed, 1 warning in 7.89s
+--- compiled host routing then focused ---
+...............                                                          [100%]
+=============================== warnings summary ===============================
+../../../../Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345
+  /Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+15 passed, 1 warning in 7.79s

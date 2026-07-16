@@ -1,0 +1,26 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+______ test_package_local_metal_primitive_exists_with_six_kernel_markers _______
+
+    def test_package_local_metal_primitive_exists_with_six_kernel_markers():
+>       import ds4_ft_mlx.routed_fp4_metal as routed_fp4_metal
+E       ModuleNotFoundError: No module named 'ds4_ft_mlx.routed_fp4_metal'
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:25: ModuleNotFoundError
+______________ test_primitive_absent_red_requires_fail_closed_api ______________
+
+    def test_primitive_absent_red_requires_fail_closed_api():
+>       import ds4_ft_mlx.routed_fp4_metal as routed_fp4_metal
+E       ModuleNotFoundError: No module named 'ds4_ft_mlx.routed_fp4_metal'
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:45: ModuleNotFoundError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_package_local_metal_primitive_exists_with_six_kernel_markers
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_primitive_absent_red_requires_fail_closed_api
+2 failed, 1 warning in 0.02s

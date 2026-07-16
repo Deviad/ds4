@@ -1,0 +1,54 @@
+## git diff --check
+## git diff --cached --check
+## r2 file status
+A  agent-output/cmux-13-3b/coder-13-3b-5h-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-diff-tracking-hashes-prestage.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused-and-orders.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-full-tracked-baseline.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-make.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-red.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-r2-regenerate-25.log
+A  agent-output/cmux-13-3b/interaction-ablation-report.json
+A  tests/helpers/routed_fp4_multilayer_peak_probe.py
+A  tests/test_deepseek_v4_nn_interaction_ablation.py
+## unstaged r2 file changes
+## staged r2 file list
+agent-output/cmux-13-3b/coder-13-3b-5h-notes.md
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-diff-tracking-hashes-prestage.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused-and-orders.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-full-tracked-baseline.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-make.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-red.log
+agent-output/cmux-13-3b/coder-13-3b-5h-r2-regenerate-25.log
+agent-output/cmux-13-3b/interaction-ablation-report.json
+tests/helpers/routed_fp4_multilayer_peak_probe.py
+tests/test_deepseek_v4_nn_interaction_ablation.py
+## staged diff byte count and sha256
+staged_diff_bytes=169328
+staged_diff_sha256=38be42c8b6fc4499cccf1bac2a46bcfd61bc7e9e320e3ff87fb2ccf7397e6225
+## staged blob equals worktree
+MATCH tests/helpers/routed_fp4_multilayer_peak_probe.py 959f6d3d16aec8e1616c26f5e39144d1a83e94a49951976a947068609b3f915a
+MATCH tests/test_deepseek_v4_nn_interaction_ablation.py 855ff8a9aa0f5fdd14aed95275338efec87081f0e89ce5d29d940abfe79305a3
+MATCH agent-output/cmux-13-3b/interaction-ablation-report.json 8c24d9350d263c14bcfe61d6e18557453711865f0be175b6adb2b33ff2fecd97
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-notes.md 9ea35429024c8025a5314a8e02dbd7dd1c852e1385f85fdefe236edf9189c9fc
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-red.log c7ad5b6c6cde04a242182d4dcbf6be0f157359fed993cae6104819932e6ac7dc
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused.log cb311514e81aeb0bebb3dff810fc085d145c34d889185d47036cf0b976f15281
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-regenerate-25.log 543fd74ba0020da673a6424c62bdffcbd443b9fbc17b98c646811db06d2df404
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-focused-and-orders.log f61b9bdc8ef7379754607a0ada3dfb2aafcc91ae4c7183a605646bf147976861
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-full-tracked-baseline.log 62752b7dd25cb2a25e7ef026c6e92927fc096ccbf7aa676e45e2877c2d59b5f3
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-make.log b61dee69c0243e72341bc664e8d4744e1eef51a7de662ed2d02b9edcede890b9
+MATCH agent-output/cmux-13-3b/coder-13-3b-5h-r2-diff-tracking-hashes-prestage.log f5827a4ea5df63eb531ffc374c6154eeb73e474e9242fc08ccc5750f25f37916
+## protected staged/unstaged names
+staged:
+unstaged:
+## protected hash comparison current vs report
+protected_count 30
+protected_hashes_match_report True
+## report exact rows
+rows 25
+executed_cell_list_sha256 a5c3474c04ab8b0edb3aa03af806cf0830ebe73c76c9cb6077d42559cfa6a356
+created_at 2026-07-14T17:50:23Z
+classification not-classified-by-coder
+failures []

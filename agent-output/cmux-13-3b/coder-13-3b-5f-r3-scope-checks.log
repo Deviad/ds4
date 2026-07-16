@@ -1,0 +1,20 @@
+--- git diff --check
+--- tracked files
+docs/adr/0028-opaque-packed-fp4-metal-training-primitive.md
+docs/backlog.md
+docs/technical-spec.md
+python-envs/mlx/src/ds4_ft_mlx/metal/ds4_routed_fp4_train.metal
+tests/helpers/routed_fp4_bench.py
+tests/test_deepseek_v4_nn_fp4_parity.py
+tests/test_deepseek_v4_nn_routed_fp4_metal.py
+tests/test_deepseek_v4_nn_sparse_routed_backward.py
+--- structural grep
+simd_sum_count= 9
+lane0_serial_32_loop= False
+shape_branch_hidden= False
+shape_branch_intermediate= False
+ds4_fp4_pair_swiglu_forward simd_sum 2 lane0_loop False
+ds4_fp4_down_forward simd_sum 1 lane0_loop False
+ds4_fp4_down_input_vjp simd_sum 1 lane0_loop False
+ds4_fp4_pair_swiglu_vjp_terms simd_sum 2 lane0_loop False
+ds4_fp4_pair_input_vjp simd_sum 1 lane0_loop False

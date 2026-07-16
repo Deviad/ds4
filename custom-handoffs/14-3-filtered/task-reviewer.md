@@ -1,0 +1,5 @@
+# Story 14.3a Reviewer final
+
+Review Coder implementation for filtered smoke dataset repin. Read requirements.md, architecture.md, coder-notes.md, r12 PASS/GREEN handoffs.
+
+Verify only intended changes: pinned segmented-smoke data path is `/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`; catalog uses filtered path; default catalog entries unchanged; original dataset path rejected; tests are synthetic/no real asset reads; requirements/docs/backlog provenance accurate. Verify original dataset untouched, filter report counts (66 excluded; train 15108, valid 816, test 823) and all filtered rows pass same fallback. Verify protected hashes, Path A 365/digest/pyc, vendor gitlink/pins, exact-fork behavior. No real smoke/asset execution, commit/push. Write only `custom-handoffs/14-3-filtered/review.md` and marker. PASS or BLOCKED.

@@ -1,0 +1,19 @@
+--- git diff --check ---
+DIFF_CHECK_RC=0
+--- git diff --cached --check ---
+CACHED_DIFF_CHECK_RC=0
+--- tracked load-bearing files ---
+python-envs/mlx/pyproject.toml
+python-envs/mlx/src/ds4_ft_mlx/metal/ds4_routed_fp4_train.metal
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py
+tests/helpers/routed_fp4_memory_probe.py
+tests/test_deepseek_v4_nn_routed_fp4_metal.py
+tests/test_deepseek_v4_nn_sparse_routed_backward.py
+--- protected hashes ---
+a9cb4d37d1b5ce34580aec077857bd47f30217ba4e18a36697d86de8e877f957  ds4.c
+6624500152a779c1201e55c2c56d74221ee4f4b8982ff47d181e90c8b265a1c6  ds4_metal.m
+5a325e571fe05e929de249492d2bf564c37b759ca87d7a1230d97b735a56d727  ds4_cuda.cu
+ad333f0bb30be211d745e9b0c3a391f0f8e8b368f763d8afe2e591de308afb8c  ds4_distributed.c
+2b2ba6e2278c24196bde916f7149f9c2a9cbc87460d5ce6c421651899f4a4c78  ds4_ssd.c
+5e11a9c4d82aeb24ea595383dfe1a339cc43aa6877e9978cb5d303534eb6d98b  python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py
+--- root metal train source check ---

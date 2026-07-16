@@ -1,0 +1,43 @@
+.................................................................... [ 11%]
+............................................................................................... [ 27%]
+................................sss......s.........s............................................................... [ 47%]
+.................................................................F...... [ 59%]
+..............sss..................................................... [ 71%]
+............................................................ [ 81%]
+............................................s........................... [ 93%]
+...ss.....................ss...........                                  [100%]
+=================================== FAILURES ===================================
+__________________ TestInvariants.test_frozen_tests_unchanged __________________
+
+self = <test_deepseek_v4_real_config_reference_forward.TestInvariants object at 0x116c20510>
+
+    def test_frozen_tests_unchanged(self):
+        for rel in (
+            "tests/test_deepseek_v4_forward_parity_11_15h.py",
+            "tests/test_deepseek_v4_validate_real_mode_relaxation.py",
+            "tests/test_deepseek_v4_mlx_port.py",
+            "tests/test_deepseek_v4_checkpoint.py",
+        ):
+            p = ROOT / rel
+>           assert _sha16(p) == EXPECTED_SHAS[rel], f"frozen test drift: {rel}"
+E           AssertionError: frozen test drift: tests/test_deepseek_v4_checkpoint.py
+E           assert '0fc0824f16b85567' == 'addf10ea42426250'
+E             
+E             - addf10ea42426250
+E             + 0fc0824f16b85567
+
+tests/test_deepseek_v4_real_config_reference_forward.py:437: AssertionError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_real_config_reference_forward.py::TestInvariants::test_frozen_tests_unchanged
+1 failed, 577 passed, 13 skipped, 2 warnings, 96 subtests passed in 118.18s (0:01:58)
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

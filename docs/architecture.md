@@ -61,14 +61,17 @@ Responsibilities:
 
 ### Fine-tuning toolchain
 
-Primary files: `scripts/finetune_ds4.py`, `python-envs/mlx/`, `python-envs/torch/`, `tests/test_finetune_ds4.py`.
+Primary files: `scripts/finetune_ds4.py`, `python-envs/mlx/`, `python-envs/torch/`, `vendor/mlx-lm`, `tests/test_finetune_ds4.py`, `tests/test_mlx_lm_source.py`.
 
 Responsibilities:
 
 - Prepare isolated MLX and Torch environments.
+- Keep released `mlx-lm==0.31.3` as the default MLX-LM source while allowing an explicit, verified opt-in to the pinned `Deviad/mlx-lm` submodule at `vendor/mlx-lm` (`15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`).
 - Run cheap validation gates before expensive training/conversion work.
 - Convert portable LoRA safetensors into DS4 canonical adapter artifacts.
 - Keep marker files meaningful: no full-forward marker is written until the required parity stories are complete.
+- Treat MLX-LM source selection as environment plumbing only: switch with `python -m pip --no-deps`, verify source identity with module path plus PEP 610 metadata, and never edit fork source or claim a trainer/Metal lifetime fix in the bootstrap story.
+- **DS4 segmented activation** (Story 14.3): `scripts/ds4_segmented_smoke.py` is a standalone thin-wiring entry point that reuses the MLX-LM fork's public `train()` signature and the existing `lora.build_parser()`/`CONFIG_DEFAULTS`/`train_model`-body convention. It constructs the DS4 segmented loss-and-gradient provider from `ds4_ft_mlx.segmented_loss_and_grad.make_ds4_segmented_loss_and_grad` and passes it explicitly as `loss_and_grad=provider`. This step (`ds4-segmented-smoke`) is a non-default MLX step; the default `smoke-train`, `full-train`, and all other MLX-LM CLI commands remain byte-unchanged. The trainer retains ownership of accumulation, optimization, distributed averaging, callbacks, UI, validation, and checkpoint save — the provider owns only the bounded forward/reverse transform per microbatch. The activation is a local tool, not a durable architectural boundary change; no ADR is created. The pinned dataset path was repinned from `mlx-4096` to `mlx-4096-smoke` (filtered copy, 66 rows excluded by the same whitespace-token conservative bound the smoke preflight uses) after the original failed preflight on a row exceeding 4096 tokens. The filtered-dataset provenance is recorded in `agent-output/cmux-14-3/filtered-dataset-provenance.json` (input/kept/excluded: train 15170/15108/62, valid 819/816/3, test 824/823/1; total excluded 66; source and filtered SHA-256 hashes per split; excluded-row manifest). The original dataset remains immutable and is rejected by the pinned-path gate. The hard timeout was repinned from 600s to 1200s after the 14.3a filtered-dataset smoke reached trainer startup but timed out with zero completed iterations. The timeout constant <code>SMOKE_TIMEOUT_SECONDS</code> is the single source of truth: the signal alarm, backup watchdog thread, and report message all read it at runtime.
 
 ### DeepSeek V4 MLX/reference port
 

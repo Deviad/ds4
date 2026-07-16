@@ -1,7 +1,7 @@
 # ADR 0028 — Opaque packed-FP4 Metal training primitive
 
 - **Date:** 2026-07-14 (Story 13.3b-5f)
-- **Status:** Accepted; reduction-order parity amended by Architect r3 (2026-07-14)
+- **Status:** Accepted for primitive correctness; reduction-order parity amended by Architect r3; real-training memory path STOPPED by Story 13.3b-5g pending multi-layer synthetic proof (2026-07-14)
 - **Supersedes / amends:** Supersedes ADR 0025's Story 13.3b-5d amendment only where that amendment authorizes the Python `forward_one` + nested `mx.vjp` implementation or claims that per-expert `mx.eval` barriers bound its lifetime under an outer MLX transform. Does not change ADR 0024 or ADR 0026.
 - **Related:** ADR 0024 (binding FP4 packing/scale oracle), ADR 0025 (training sibling), Story 13.3b-5e (graph-lifetime RED/root-cause authority).
 
@@ -171,3 +171,11 @@ No model, shard, dataset run, or 4096 smoke is allowed before independent Review
 - Frozen packed experts remain non-trainable; LoRA gradients continue through activation and router-score paths.
 - Training now requires Apple Metal and exactly the validated MLX release; unsupported platforms fail closed without changing CPU or inference behavior.
 - Six launches per non-empty expert trade launch overhead for a small exact implementation. The `8x8x32` weight-reuse tile keeps the design credible for the gated 43-layer/20-iteration smoke and avoids the prohibited quadratic recomputation. Before Reviewer round 3, a tracked 25-repeat benchmark at `R=96` must show forward p50 `<=0.0080s`, input-VJP p50 `<=0.0140s`, and `256x43x20` extrapolation `<=1.25h` p50 / `<=1.35h` p95. These are review gates, not authorization for the later 5,000-iteration run.
+
+## Story 13.3b-5g post-smoke memory amendment
+
+The single authorized real 4096-token smoke at commit `5dee4ce` completed finite validation (`18.109817504882812`) and then aborted during evaluation of the first backward graph with Metal command-buffer out-of-memory, exit `134`. Last completed validation telemetry was active `160,085,895,190` bytes and peak `205,523,058,182` bytes. No gradient callback, optimizer update, or adapter payload completed.
+
+The one-operation gates above establish packed-primitive opacity and assignment-proportional local tensors only. They do not establish a 43-layer trainer peak: the real-dimension helpers cover one routed block with two experts, omit ordinary attention/shared-expert backward, and do not exercise the outer checkpointed graph's depth-by-expert launch count. MLX-LM's `grad_checkpoint(model.layers[0])` does cover all 43 current `DecoderLayerNN` instances through their shared class `__call__`; no checkpoint call-site fix is authorized from this RED. Coverage does not itself prove scheduler or command-buffer lifetime bounds.
+
+Real training through this path is STOPPED. The next authorized slice is diagnostic-only: a tracked, no-model/no-shard multi-layer synthetic peak proof with fresh-process depth, expert-count, component-ablation, and single-graph-versus-sequential controls. Any production redesign requires a later Architect re-entry using that report. No second real smoke, shorter fallback, full run, custom-primitive redesign, or layer-serial backward is authorized by this amendment.

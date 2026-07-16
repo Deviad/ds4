@@ -1,0 +1,7 @@
+logits_shape (1, 8, 129280)
+finite True
+nan_count 0
+inf_count 0
+real 77.64
+user 11.31
+sys 43.91

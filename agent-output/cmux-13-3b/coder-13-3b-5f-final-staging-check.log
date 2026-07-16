@@ -1,0 +1,15 @@
+cached diff check
+unstaged diff check
+tracked verdict tests
+tests/test_deepseek_v4_nn_routed_fp4_metal.py
+tests/test_deepseek_v4_nn_sparse_routed_backward.py
+staged 5f files
+agent-output/cmux-13-3b/coder-13-3b-5f-notes.md
+docs/adr/0028-opaque-packed-fp4-metal-training-primitive.md
+docs/technical-spec.md
+python-envs/mlx/pyproject.toml
+python-envs/mlx/src/ds4_ft_mlx/metal/ds4_routed_fp4_train.metal
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py
+python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py
+tests/test_deepseek_v4_nn_routed_fp4_metal.py
+tests/test_deepseek_v4_nn_sparse_routed_backward.py

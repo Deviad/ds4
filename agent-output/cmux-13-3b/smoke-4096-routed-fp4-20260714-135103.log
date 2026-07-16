@@ -1,0 +1,27 @@
+=== DS4 4096 routed-FP4 smoke start: 2026-07-14 13:51:03 ===
+commit=5dee4ce7037902c9787b523373ca46d40aaf6de0
+pid=6913
+project=/Users/spotted/projects/ds4-finetuning
+model=/Volumes/Data NVME/mlx-ft/ds4/model-4bit
+data=/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096
+output=/Volumes/Data NVME/mlx-ft/ds4/adapters-smoke-memory400
+policy=mx.disable_compile graph_limit=400000000000 stop_peak=340000000000
+archiving_existing_output=/Volumes/Data NVME/mlx-ft/ds4/adapters-smoke-memory400.pre-5dee4ce-20260714-135103
+command=python /Users/spotted/projects/ds4-finetuning/agent-output/cmux-13-3b/run_smoke_4096_routed_fp4.py --config /Volumes/Data\ NVME/mlx-ft/ds4/lora-config.json --model /Volumes/Data\ NVME/mlx-ft/ds4/model-4bit --train --data /Volumes/Data\ NVME/datasets/anthropomorphic-frankenmerge/mlx-4096 --adapter-path /Volumes/Data\ NVME/mlx-ft/ds4/adapters-smoke-memory400 --fine-tune-type lora --iters 20 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint --val-batches 1 --steps-per-report 1 
+DS4_SMOKE {"active_bytes": 72, "argv": ["--config", "/Volumes/Data NVME/mlx-ft/ds4/lora-config.json", "--model", "/Volumes/Data NVME/mlx-ft/ds4/model-4bit", "--train", "--data", "/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096", "--adapter-path", "/Volumes/Data NVME/mlx-ft/ds4/adapters-smoke-memory400", "--fine-tune-type", "lora", "--iters", "20", "--batch-size", "1", "--learning-rate", "1e-5", "--max-seq-length", "4096", "--mask-prompt", "--grad-checkpoint", "--val-batches", "1", "--steps-per-report", "1"], "cache_bytes": 0, "event": "startup", "graph_limit_bytes": 400000000000, "peak_bytes": 72, "pid": 6928, "stop_peak_bytes": 340000000000}
+Loading configuration file /Volumes/Data NVME/mlx-ft/ds4/lora-config.json
+Loading pretrained model
+Loading datasets
+Training
+Trainable parameters: 0.004% (5.571M/154430.069M)
+Starting training..., iters: 20
+Calculating loss...:   0%|          | 0/1 [00:00<?, ?it/s]Calculating loss...: 100%|██████████| 1/1 [01:22<00:00, 82.62s/it]Calculating loss...: 100%|██████████| 1/1 [01:22<00:00, 82.62s/it]
+Iter 1: Val loss 18.110, Val took 82.645s
+DS4_SMOKE {"active_bytes": 160085895190, "cache_bytes": 9252, "event": "validation", "iteration": 0, "peak_bytes": 205523058182, "val_loss": 18.109817504882812, "val_time": 82.64533533295617}
+DS4_SMOKE {"active_bytes": 160108177482, "cache_bytes": 9568, "event": "trainable_snapshot", "peak_bytes": 205523058182, "tensor_count": 96}
+libc++abi: terminating due to uncaught exception of type std::runtime_error: [METAL] Command buffer execution failed: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+agent-output/cmux-13-3b/run-smoke-4096-routed-fp4.sh: line 76:  6928 Abort trap: 6           "${COMMAND[@]}"
+/Users/spotted/.local/share/uv/python/cpython-3.13.5-macos-aarch64-none/lib/python3.13/multiprocessing/resource_tracker.py:301: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-pubeuo86'}
+  warnings.warn(
+=== DS4 4096 routed-FP4 smoke end: 2026-07-14 13:53:39 exit=134 ===
+DS4_SMOKE_PANEL_FAILED

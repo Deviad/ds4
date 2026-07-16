@@ -1,0 +1,118 @@
+.FF.                                                                     [100%]
+=================================== FAILURES ===================================
+__________ test_forward_one_matches_independent_packed_fp4_reference ___________
+
+    def test_forward_one_matches_independent_packed_fp4_reference():
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_forward_one
+    
+        H, I = 64, 40
+        x, rows, w1, s1, w3, s3, w2, s2 = _fixture(H, I)
+        ref, *_ = _forward_np(x, rows, w1, s1, w3, s3, w2, s2, H=H, I=I, limit=1.7)
+>       out = packed_fp4_forward_one(
+            mx.array(x, dtype=mx.float32),
+            mx.array(rows, dtype=mx.int32),
+            mx.array(w1, dtype=mx.uint8),
+            mx.array(s1, dtype=mx.bfloat16),
+            mx.array(w3, dtype=mx.uint8),
+            mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8),
+            mx.array(s2, dtype=mx.bfloat16),
+            hidden_size=H,
+            intermediate_size=I,
+            limit=1.7,
+        )
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:92: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:181: in packed_fp4_forward_one
+    R, H, I = _validate_one(
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:149: in _validate_one
+    rows_values = _rows_list(rows, int(T))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+rows = array([3, 0, 4], dtype=int32), T = 5
+
+    def _rows_list(rows: mx.array, T: int) -> list[int]:
+        _check_rank_dtype("rows", rows, 1, mx.int32)
+        values = [int(v) for v in rows.tolist()]
+        if any(v < 0 or v >= T for v in values):
+            raise ValueError("rows must be in [0,T)")
+        if len(set(values)) != len(values):
+            raise ValueError("rows must be unique within an expert")
+        if values != sorted(values):
+>           raise ValueError("rows must preserve ascending token order")
+E           ValueError: rows must preserve ascending token order
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:124: ValueError
+____________ test_input_vjp_one_matches_independent_dense_reference ____________
+
+    def test_input_vjp_one_matches_independent_dense_reference():
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_input_vjp_one
+    
+        H, I = 64, 40
+        x, rows, w1, s1, w3, s3, w2, s2 = _fixture(H, I)
+        g = (np.arange(x.size, dtype=np.float32).reshape(x.shape) / 1231.0) + 0.02
+        factor = np.array([0.125, 0.5, 1.25], dtype=np.float32)
+        y, hidden, W1, W3, W2, u1, u3 = _forward_np(x, rows, w1, s1, w3, s3, w2, s2, H=H, I=I, limit=1.7)
+        ge = g[rows]
+        gu = ge @ W2
+        gate = np.minimum(u1, 1.7)
+        up = np.clip(u3, -1.7, 1.7)
+        sig = 1.0 / (1.0 + np.exp(-gate))
+        silu = gate * sig
+        dhidden = factor[:, None] * gu
+        dup = dhidden * silu * ((u3 > -1.7) & (u3 < 1.7))
+        dgate = dhidden * up * (sig + gate * sig * (1.0 - sig)) * (u1 < 1.7)
+        dx_ref = dgate @ W1 + dup @ W3
+        a_ref = np.sum(hidden * gu, axis=-1)
+    
+>       dx, a = packed_fp4_input_vjp_one(
+            mx.array(x, dtype=mx.float32),
+            mx.array(g, dtype=mx.float32),
+            mx.array(rows, dtype=mx.int32),
+            mx.array(factor, dtype=mx.float32),
+            mx.array(w1, dtype=mx.uint8),
+            mx.array(s1, dtype=mx.bfloat16),
+            mx.array(w3, dtype=mx.uint8),
+            mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8),
+            mx.array(s2, dtype=mx.bfloat16),
+            hidden_size=H,
+            intermediate_size=I,
+            limit=1.7,
+        )
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:225: in packed_fp4_input_vjp_one
+    R, H, I = _validate_one(
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:149: in _validate_one
+    rows_values = _rows_list(rows, int(T))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+rows = array([3, 0, 4], dtype=int32), T = 5
+
+    def _rows_list(rows: mx.array, T: int) -> list[int]:
+        _check_rank_dtype("rows", rows, 1, mx.int32)
+        values = [int(v) for v in rows.tolist()]
+        if any(v < 0 or v >= T for v in values):
+            raise ValueError("rows must be in [0,T)")
+        if len(set(values)) != len(values):
+            raise ValueError("rows must be unique within an expert")
+        if values != sorted(values):
+>           raise ValueError("rows must preserve ascending token order")
+E           ValueError: rows must preserve ascending token order
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:124: ValueError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_forward_one_matches_independent_packed_fp4_reference
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_input_vjp_one_matches_independent_dense_reference
+2 failed, 2 passed, 1 warning in 0.05s

@@ -1,0 +1,19 @@
+tracked_test_files=45
+PYTHONPATH=.
+..............s........................s.s....s...sss.....s.............................s................. [ 21%]
+....................................s....s..........sss..............sss......s.........s................................. [ 46%]
+..........s.s.............................s.s...................... [ 59%]
+........................................................................ [ 74%]
+...................sss................................................ [ 88%]
+.............................s.............ss.............   [100%]
+=============================== warnings summary ===============================
+../../../../Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345
+  /Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.14/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+466 passed, 38 skipped, 2 warnings, 79 subtests passed in 49.32s

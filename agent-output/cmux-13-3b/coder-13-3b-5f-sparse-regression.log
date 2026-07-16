@@ -1,0 +1,47 @@
+............F........                                                    [100%]
+=================================== FAILURES ===================================
+__________________ test_expert_call_sizes_are_r_e_not_full_t ___________________
+
+    def test_expert_call_sizes_are_r_e_not_full_t():
+        """GREEN on sparse: only non-empty experts called, each with exact R_e rows."""
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4_nn import ModelArgs, SparseMoeBlockNN
+    
+        args = ModelArgs.from_dict(_tiny_config())
+        block = SparseMoeBlockNN(args, layer_idx=1)
+        _fill_fp4(block.experts)
+        _zero_shared(block)
+        # Route only to expert 3; expert 0 gets selected via tie-breaking with K=2
+        block.gate_weight = mx.zeros((4, 16), dtype=mx.float32)
+        block.gate_weight[3] = 1.0
+        block.e_score_correction_bias = mx.zeros((4,), dtype=mx.float32)
+    
+        x = mx.ones((1, 2, 16), dtype=mx.float32) * 0.25
+        T = int(x.shape[0] * x.shape[1])
+    
+        call_sizes = []
+        orig_forward_one = block.experts.forward_one
+    
+        def instrumented_forward_one(eid, x_):
+            call_sizes.append((eid, x_.shape))
+            return orig_forward_one(eid, x_)
+    
+        block.experts.forward_one = instrumented_forward_one
+        out = block(x, input_ids=None)
+        mx.eval(out)
+    
+        # Sparse: experts 0 and 3 called; experts 1,2 are empty → not called
+        called_eids = {eid for eid, _ in call_sizes}
+>       assert 0 in called_eids  # selected via tie-break
+        ^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 0 in set()
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:624: AssertionError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_expert_call_sizes_are_r_e_not_full_t
+1 failed, 20 passed, 1 warning in 15.87s

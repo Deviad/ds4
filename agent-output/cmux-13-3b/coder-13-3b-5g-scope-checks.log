@@ -1,0 +1,25 @@
+--- git diff --check
+--- git diff --cached --check
+--- 5g tracked files
+agent-output/cmux-13-3b/multilayer-peak-report.json
+tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+tests/helpers/routed_fp4_multilayer_peak_probe.py
+tests/test_deepseek_v4_nn_multilayer_peak.py
+--- protected hashes
+a9cb4d37d1b5ce34580aec077857bd47f30217ba4e18a36697d86de8e877f957  ds4.c
+6624500152a779c1201e55c2c56d74221ee4f4b8982ff47d181e90c8b265a1c6  ds4_metal.m
+5a325e571fe05e929de249492d2bf564c37b759ca87d7a1230d97b735a56d727  ds4_cuda.cu
+ad333f0bb30be211d745e9b0c3a391f0f8e8b368f763d8afe2e591de308afb8c  ds4_distributed.c
+2b2ba6e2278c24196bde916f7149f9c2a9cbc87460d5ce6c421651899f4a4c78  ds4_ssd.c
+5e11a9c4d82aeb24ea595383dfe1a339cc43aa6877e9978cb5d303534eb6d98b  python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py
+3f5a676756cee50e55db946f0b129cb8b772c64757b14c1a4508e0b515380f5a  python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py
+639c10cef35c061dbc02b6f3b5af60989fc1c1f887191f1765bea0600a180961  python-envs/mlx/src/ds4_ft_mlx/metal/ds4_routed_fp4_train.metal
+--- 5g status
+A  agent-output/cmux-13-3b/coder-13-3b-5g-probe-run.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-pytest.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-tracked-pytest.log
+A  agent-output/cmux-13-3b/multilayer-peak-report.json
+A  tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+A  tests/helpers/routed_fp4_multilayer_peak_probe.py
+A  tests/test_deepseek_v4_nn_multilayer_peak.py
+?? agent-output/cmux-13-3b/coder-13-3b-5g-scope-checks.log

@@ -1,0 +1,127 @@
+.......................F.................F.......................... [ 11%]
+.............................................F...................................F............. [ 27%]
+................................sss......s.........s............................................................... [ 47%]
+.......F................................................................ [ 59%]
+..............sssF.................................................... [ 71%]
+............................................................ [ 81%]
+............................................s........................... [ 93%]
+...ss.....................ss...........                                  [100%]
+=================================== FAILURES ===================================
+_ DeepSeekV4AttentionParityTests.test_generation_markers_absent_and_real_blockers_unchanged _
+
+self = <test_deepseek_v4_attention_parity.DeepSeekV4AttentionParityTests testMethod=test_generation_markers_absent_and_real_blockers_unchanged>
+
+    def test_generation_markers_absent_and_real_blockers_unchanged(self):
+        from ds4_ft_mlx.deepseek_v4_dequant import dequantize_expert_packed
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import forward_parity_blockers
+    
+        self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/.deepseek-v4-forward-parity-ok").exists())
+>       self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/model-4bit").exists())
+E       AssertionError: True is not false
+
+tests/test_deepseek_v4_attention_parity.py:411: AssertionError
+_ DeepSeekV4AttentionParityTests.test_stateful_csa_markers_absent_and_11_16_cache_unchanged _
+
+self = <test_deepseek_v4_attention_parity.DeepSeekV4AttentionParityTests testMethod=test_stateful_csa_markers_absent_and_11_16_cache_unchanged>
+
+    def test_stateful_csa_markers_absent_and_11_16_cache_unchanged(self):
+        from ds4_ft_mlx.deepseek_v4_attention_spec import IncrementalSlidingKVCache
+        from ds4_ft_mlx.deepseek_v4_dequant import dequantize_expert_packed
+        from ds4_ft_mlx.vendor.mlx_lm_models.deepseek_v4 import forward_parity_blockers
+    
+        self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/.deepseek-v4-forward-parity-ok").exists())
+>       self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/model-4bit").exists())
+E       AssertionError: True is not false
+
+tests/test_deepseek_v4_attention_parity.py:1091: AssertionError
+_ DeepSeekV4CheckpointHeaderTests.test_shape_compat_never_decodes_and_markers_absent _
+
+self = <test_deepseek_v4_checkpoint.DeepSeekV4CheckpointHeaderTests testMethod=test_shape_compat_never_decodes_and_markers_absent>
+
+    def test_shape_compat_never_decodes_and_markers_absent(self):
+        from ds4_ft_mlx.deepseek_v4_checkpoint import stacked_shape_compatibility_report
+        from ds4_ft_mlx.deepseek_v4_dequant import dequantize_expert_packed
+    
+        report = stacked_shape_compatibility_report(self._stacked_real_shape_meta(), expected_num_layers=43, n_routed_experts=2)
+        self.assertTrue(report["ok"])
+        with self.assertRaises(NotImplementedError):
+            dequantize_expert_packed("i8", b"\x00", scales=b"\x7f", shape=(1,))
+        with self.assertRaisesRegex(ValueError, "requires non-None scales"):
+            dequantize_expert_packed("fp4", b"\x00" * 16, scales=None, shape=(1, 32))
+        self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/.deepseek-v4-forward-parity-ok").exists())
+>       self.assertFalse(Path("/Volumes/Data NVME/mlx-ft/ds4/model-4bit").exists())
+E       AssertionError: True is not false
+
+tests/test_deepseek_v4_checkpoint.py:1145: AssertionError
+__ DeepSeekV4DequantParityTests.test_forward_parity_marker_absent_after_slice __
+
+self = <test_deepseek_v4_dequant_parity.DeepSeekV4DequantParityTests testMethod=test_forward_parity_marker_absent_after_slice>
+
+    def test_forward_parity_marker_absent_after_slice(self):
+        marker = Path("/Volumes/Data NVME/mlx-ft/ds4/.deepseek-v4-forward-parity-ok")
+        model_4bit = Path("/Volumes/Data NVME/mlx-ft/ds4/model-4bit")
+        self.assertFalse(marker.exists(), f"{marker} must not be written by Story 11.15a/11.15b/11.15c")
+>       self.assertFalse(model_4bit.exists(), f"{model_4bit} must not be created by Story 11.15b/11.15c")
+E       AssertionError: True is not false : /Volumes/Data NVME/mlx-ft/ds4/model-4bit must not be created by Story 11.15b/11.15c
+
+tests/test_deepseek_v4_dequant_parity.py:540: AssertionError
+_ DeepSeekV4MoESpecTests.test_forward_marker_and_model_4bit_stay_absent_for_routing_slice _
+
+self = <test_deepseek_v4_moe_parity.DeepSeekV4MoESpecTests testMethod=test_forward_marker_and_model_4bit_stay_absent_for_routing_slice>
+
+    def test_forward_marker_and_model_4bit_stay_absent_for_routing_slice(self):
+        marker = Path("/Volumes/Data NVME/mlx-ft/ds4/.deepseek-v4-forward-parity-ok")
+        model_4bit = Path("/Volumes/Data NVME/mlx-ft/ds4/model-4bit")
+        self.assertFalse(marker.exists(), f"{marker} must not be written by Story 11.15d")
+>       self.assertFalse(model_4bit.exists(), f"{model_4bit} must not be created by Story 11.15d")
+E       AssertionError: True is not false : /Volumes/Data NVME/mlx-ft/ds4/model-4bit must not be created by Story 11.15d
+
+tests/test_deepseek_v4_moe_parity.py:299: AssertionError
+_ DS4GGUFBaseSmokeTests.test_track_a_helper_does_not_touch_mlx_track_artifacts _
+
+self = <test_ds4_gguf_base_smoke.DS4GGUFBaseSmokeTests testMethod=test_track_a_helper_does_not_touch_mlx_track_artifacts>
+
+    def test_track_a_helper_does_not_touch_mlx_track_artifacts(self):
+        from scripts import finetune_ds4
+    
+        self._enable_gate()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "ds4-root"
+            root.mkdir()
+            mlx_work = Path(td) / "mlx-work"
+            mlx_work.mkdir()
+            self._write_fake_artifacts(root)
+            with patch.object(
+                finetune_ds4.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(["ds4"], 0, stdout="Answer in one word: ready?\nready\n", stderr=""),
+            ):
+                finetune_ds4.ds4_gguf_base_smoke_check(self._args(root, mlx_work=mlx_work))
+            self.assertFalse((mlx_work / ".deepseek-v4-forward-parity-ok").exists())
+            self.assertFalse((mlx_work / "model-4bit").exists())
+            self.assertFalse(TRACK_B_MARKER.exists())
+>           self.assertFalse(TRACK_B_MODEL_4BIT.exists())
+E           AssertionError: True is not false
+
+tests/test_ds4_gguf_base_smoke.py:195: AssertionError
+----------------------------- Captured stdout call -----------------------------
+/var/folders/bf/bg8nrdrx27z4cmyv4bm5z5_m0000gn/T/tmphzqjuxmt/ds4-root/.ds4-gguf-generate-ok
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_attention_parity.py::DeepSeekV4AttentionParityTests::test_generation_markers_absent_and_real_blockers_unchanged
+FAILED tests/test_deepseek_v4_attention_parity.py::DeepSeekV4AttentionParityTests::test_stateful_csa_markers_absent_and_11_16_cache_unchanged
+FAILED tests/test_deepseek_v4_checkpoint.py::DeepSeekV4CheckpointHeaderTests::test_shape_compat_never_decodes_and_markers_absent
+FAILED tests/test_deepseek_v4_dequant_parity.py::DeepSeekV4DequantParityTests::test_forward_parity_marker_absent_after_slice
+FAILED tests/test_deepseek_v4_moe_parity.py::DeepSeekV4MoESpecTests::test_forward_marker_and_model_4bit_stay_absent_for_routing_slice
+FAILED tests/test_ds4_gguf_base_smoke.py::DS4GGUFBaseSmokeTests::test_track_a_helper_does_not_touch_mlx_track_artifacts
+6 failed, 572 passed, 13 skipped, 2 warnings, 96 subtests passed in 119.83s (0:01:59)
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

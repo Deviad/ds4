@@ -4208,12 +4208,118 @@ Architect r3 reduction STOP — STOP and return to Architect if any occurs:
 
 No real 4096 smoke is authorized by this adjudication.
 
-### Story 13.3c — local QLoRA smoke-train (20 iters)
+#### Story 13.3b-5g — multi-layer synthetic peak diagnostics — **Status: [x] COMPLETE — evidence preserved; Path A permanently stopped; no further diagnostic, redesign, smoke, or training authorization**
+
+As a training engineer (WHO), I want a tracked no-model/no-shard multi-layer synthetic peak diagnostic that separates checkpoint depth, routed-expert node pressure, attention/shared-expert cost, and whole-graph lifetime (WHAT), so that an Architect can select or reject the next production design from controlled peak-memory evidence instead of inferring root cause from one Metal OOM (WHY).
+
+**Canonical requirements:** `agent-output/cmux-13-3b/requirements-13-3b-5g-r2-contract.md`. **Binding architecture:** `agent-output/cmux-13-3b/architecture-13-3b-5g-r2-contract.md`.
+
+**Scope:** tracked diagnostic helpers, verdict tests, one checked-in shape-reduced 43-entry synthetic topology fixture, and `agent-output/cmux-13-3b/multilayer-peak-report.json` only. No production source, current primitive, FROZEN parity body, root Metal, SSD, CUDA/ROCm, distributed, model-loader, site-packages, model, shard, dataset, external config, real model directory, real smoke, or full-training access/edit.
+
+**Acceptance criteria:**
+
+1. Exact 64-row plan and order remain load-bearing: Probe B checkpoint-on `D=[1,2,4,8,16,43]`, Probe B checkpoint-off `D=[1,4,8]`, Probe C outer `D=[1,8,16,43]` then `E=[2,8,32,128,256]` then one-graph/sequential, Probe D masks `[full,no_routed,no_shared,no_attention,routed_only]` then compression `[0,4,128]`; exact 25-key row schema, uniqueness, and no extras are verified.
+2. Probe B/D create trainer-equivalent topology in quantize → freeze → one `linear_to_lora_layers` sequence with rank `8`, scale `20.0`, dropout `0.0`, targets `q_a_proj,q_b_proj,kv_proj`, exact last-`min(D,16)` trainable key set and `6*min(D,16)` leaves, rank-8 shapes, and no forbidden trainables.
+3. Every model, Probe C one-graph, and Probe C sequential differentiated loss binds one forward exactly once; duplicate forward construction inside one loss graph is forbidden.
+4. Probe B/D differentiate the exact LoRA tree plus a separate zero-valued identity-gradient input probe of shape `[1,T,hc_mult,H]`; every successful cell records exact-shape, finite, non-zero input gradient and no trainable-key exception.
+5. Every successful row records actual DOT-derived `custom_kernel_nodes`; Probe C measured one-graph and sequential totals each equal `6*D*nonempty_experts`.
+6. `active_after_graph` is measured immediately after constructing the unevaluated differentiated graph and before DOT export/evaluation; baseline is materialized resident state without a pending graph, and sequential rows use the pinned per-stage maximum rather than copied baseline.
+7. Probe C retains every `E=2,K=2,128-assignment` row as a non-comparable low-E control. Expert-count claims use only `E=[8,32,128,256]`, `K=6`, exactly `384` assignments, within matched depth and execution mode; route formula and comparison authority are machine-readable metadata.
+8. Probe D consumes and validates the exact 43-entry topology fixture before model construction, derives configuration from it, verifies exact-byte fixture and canonical-source SHA-256 provenance, records validated derivation metadata, and rejects malformed temporary fixtures.
+9. Probe D masked execution preserves exact LoRA registration, output shape/dtype, full-path equality, zero-valued non-zero-input-gradient replacements, and direct current routed-branch parity without reimplementing production FP4/routing math.
+10. Top-level `cell_evidence` aligns one-to-one with all 64 rows and proves fresh child PID, unique nonce, monotonic interval, exact serial non-overlap, plan/row/evidence identity hashes, planned/executed count `64`, and maximum concurrency `1`.
+11. Process outcomes are normalized exactly: success, handled positive exit, canonical signal, or `TIMEOUT`; `exit_code` and `signal` never coexist, bounded UTF-8 error is preserved, every failure row remains present, and child output cannot override parent-observed status.
+12. Probe A proves exact 43-layer/checkpoint coverage, fresh subprocess and restoration, non-empty equal checkpoint-on/off gradient key sets/shapes/hashes, separate loss/gradient finiteness, and all-key parity at `atol=rtol=1e-5`.
+13. Strengthened behavioral tests fail against the Reviewer-RED implementation and pin every corrected invariant. The regenerated 64-row report is produced from scratch and fully supersedes all old values; no old row is retained or patched.
+14. Helper, fixture, focused test, and report are tracked by `git ls-files`; focused and tracked baseline are GREEN; `git diff --check` is clean; direct hashes prove protected production/FROZEN byte integrity.
+15. Independent Reviewer PASS plus independent Test Manager GREEN are mandatory. Double-GREEN authorizes only Architect classification re-entry, never production redesign, primitive change, layer-serial backward, real assets, second smoke, or real training.
+
+**Immediate STOP gates:**
+
+- any row count, identity, ordering, dimension, or 25-key schema drift;
+- any omitted or reduced pinned cell, including `D=43`, `E=256`, or retained `E=2` controls;
+- trainable topology/key/shape mismatch, unexpected gradient key, or measurement continuing after mismatch;
+- duplicate forward construction inside one differentiated loss;
+- copied/fabricated `active_after_graph` or arithmetic-placeholder custom-kernel count;
+- Probe C measured node-count mismatch or any mixed-volume `E=2` versus `E>=8` expert-count claim;
+- fixture schema, derived-config, provenance, or hash failure, or hard-coded Probe D configuration;
+- missing, overlapping, reused-child, or identity-inconsistent cell evidence;
+- unnormalized, omitted, or child-overridden process outcome;
+- Probe A count, key-set, shape, finiteness, or parity failure;
+- any pinned timeout, OOM, signal, or non-zero child result;
+- diagnostic limit above `8_000_000_000` bytes, timeout above `180` seconds, or concurrent children;
+- any untracked verdict helper, test, fixture, or report;
+- any real asset load, real model directory, site-packages edit, second smoke, shorter fallback, full training, production/source edit, redesign/classification, primitive change, or layer-serial backward.
+
+Any STOP is captured evidence and returns to Architect. It cannot authorize a smaller matrix, reduced dimensions, omitted cell, concurrency, larger memory limit, shorter fallback, real assets, production repair, or smoke.
+
+#### Story 13.3b-5h — cr4 attention/routed interaction ablation — **Status: [x] COMPLETE — corrected 25-row diagnostic double-GREEN; Path A permanently stopped**
+
+As a training engineer (WHO), I want one tracked 25-row no-model/no-shard synthetic ablation that separates the two backward legs, attention-to-routed materialization boundary, checkpoint behavior, and one-graph versus per-layer lifetime in the compression-ratio-4 attention/routed composition (WHAT), so that an Architect can classify the bounded synthetic spike or permanently stop Path A from controlled interaction evidence instead of attributing it to either bounded component alone (WHY).
+
+**Canonical requirements:** `agent-output/cmux-13-3b/requirements-13-3b-5h-interaction-ablation.md`. **Binding architecture:** `agent-output/cmux-13-3b/architecture-13-3b-5h-classification.md`.
+
+**Scope:** one diagnostic-only synthetic helper/test/report slice reusing the corrected 5g discipline and current checked-in topology fixture. No production/vendor/primitive/Metal edit; no real model, shard, dataset, external config, site-packages, smoke, training, semantic approximation, or redesign. Existing cr0/cr128 and standalone rows remain controls by reference and are not regenerated.
+
+**Exact fixed topology:** every row is cr4, no_shared, `T=64`, `H=128`, `I=64`, `E=8`, `K=2`, `hc_mult=4`, rank-8 LoRA on the last `min(D,16)` layers, raw gradients, and fixture-derived layer prefixes.
+
+**Exact 25-row order:**
+
+1. composed attention+routed one-graph, checkpoint on, `D=[1,2,4,8,16,43]` — 6 rows;
+2. same composed one-graph, checkpoint off, `D=[1,4,8]` — 3 rows;
+3. attention-forward plus routed-VJP, checkpoint on, `D=[1,8,16,43]` — 4 rows;
+4. routed-forward plus attention-VJP, checkpoint on, `D=[1,8,16,43]` — 4 rows;
+5. same-semantics materialized attention-to-routed boundary, checkpoint on, `D=[1,8,16,43]` — 4 rows;
+6. composed per-layer sequential memory control, checkpoint on, `D=[1,8,16,43]` — 4 rows.
+
+Total `6 + 3 + 4 + 4 + 4 + 4 = 25`; no omitted, reduced, reordered, substituted, or extra row.
+
+**Control contract:** attention-forward+routed-VJP preserves exact composed forward bytes, stops attention VJP at the attention-to-routed boundary, retains routed VJP, preserves the proven zero-forward/nonzero-input-gradient path, and keeps every LoRA key/shape. Routed-forward+attention-VJP preserves exact composed forward bytes, keeps routed forward, stops routed-output VJP, preserves residual/input path, and keeps every LoRA key/shape. Materialize only between attention and routed work and require matched forward/loss/LoRA-gradient/input-gradient parity at `atol=rtol=1e-5`. Sequential evaluates one complete no_shared cr4 layer at a time, carries only evaluated stage output, deletes graph references, clears cache, reports the per-stage maximum, and makes no training-equivalence claim.
+
+**Acceptance criteria:**
+
+1. Exact matrix/order/topology above; exact quantize → freeze → LoRA topology and raw-gradient key set/shapes.
+2. One fresh subprocess per row, unique PID/nonce, monotonic non-overlapping intervals, serial maximum concurrency `1`, MLX memory limit exactly `8_000_000_000 B`, and per-child timeout at most `180` seconds.
+3. Existing fixture validated and consumed; no real model, shard, dataset, external config, real model directory, or site-packages access.
+4. Record real `active_baseline`, `active_after_graph`, applicable pre/post-boundary active memory, `peak_forward`, `peak_backward`, final/cache memory, measured DOT custom-kernel nodes, raw finiteness, duration, parent-observed process outcome, child identity, trainable-key hash, input-gradient shape/nonzero, and exact matrix identity.
+5. Exact composed-forward bytes for both single-VJP controls; materialized-boundary forward/loss/every-LoRA-gradient/input-gradient parity at `atol=rtol=1e-5`; finite unsanitized raw losses/gradients; no key loss.
+6. Every attempted row remains captured; no hand-patched/reused report row and no child override of parent-observed outcome.
+7. Use baseline-subtracted backward delta. `delta <= 227,479,736 B` means collapsed/bounded; `delta >= 941,632,822 B` means spike persists; values between are ambiguous and authorize no redesign. Corrected composed D=43 no_shared/cr4 reference delta remains `1,883,265,644 B`.
+8. Helper, focused tests, fixture, and report are tracked by `git ls-files`; direct protected-source hashes and clean `git diff --check`; focused plus applicable tracked baseline tests GREEN.
+9. Independent Reviewer PASS and Test Manager GREEN; double-GREEN authorizes only Architect re-entry, never automatic redesign, code, primitive change, real asset, smoke, or training.
+
+**Classification/re-entry gates:** custom primitive lifetime redesign only when attention-VJP removal stays persistent, routed-VJP removal collapses, and sequential stays bounded. Attention checkpoint/lifetime redesign only when routed-VJP removal stays persistent, attention-VJP removal collapses, and checkpoint/materialization evidence points to attention retention/recomputation. Layer-serial research only when both single-VJP controls collapse, composed one-graph persists, sequential is bounded, and same-semantics materialization preserves parity while collapsing. Checkpoint interaction only from matched cr4 checkpoint-on/off divergence beyond ordinary measurement noise with exact semantic parity; checkpoint integration remains closed. Command-buffer/lazy-boundary interaction only if same-semantics materialization collapses; `active_after_graph` remains load-bearing. Permanent STOP Path A when controls are ambiguous, both single-VJP controls remain persistent, parity fails, any required `D=43` row cannot complete within bounds, or classification requires approximation. Every completed outcome returns to Architect; no result directly authorizes production work or smoke.
+
+**Immediate STOP gates:** any real asset/smoke/training/fallback or production/vendor/primitive/Metal/site-packages edit/access; matrix/order/dimension drift; concurrency, limit, or timeout increase; topology/key/shape/input-gradient mismatch; forward or parity failure; non-finite raw value or hidden sanitization; missing peak or fabricated/copied telemetry; missing/reused/overlapping child evidence; required `D=43` timeout/OOM/signal/nonzero result; any untracked verdict helper/test/fixture/report; root-cause claim from no_routed or no_attention alone; production redesign before Architect re-entry. STOP returns captured evidence to Architect and never authorizes a smaller matrix, reduced shape, approximation, larger bound, production repair, real asset, or smoke.
+
+**Closure evidence:** the corrected 25-row report completed with 25 successful rows, exact semantic/parity gates, Reviewer r2 PASS, Test Manager r2 GREEN, and canonical tracked baseline `498 passed, 15 skipped, 2 warnings, 86 subtests passed`. Final classification and authorization state are owned by Story 13.3b-5i below.
+
+#### Story 13.3b-5i — permanent STOP closure — **Status: [x] COMPLETE — Path A permanently stopped; no successor, redesign, diagnostic, smoke, fallback, or training authorized**
+
+As a training engineer (WHO), I want the corrected interaction evidence and binding final classification recorded in the canonical backlog (WHAT), so that Path A closes permanently without turning unresolved mechanism details into speculative production work (WHY).
+
+**Canonical requirements:** `agent-output/cmux-13-3b/requirements-13-3b-5i-permanent-stop-closure.md`. **Binding architecture:** `agent-output/cmux-13-3b/architecture-13-3b-5i-final-interaction-classification.md`.
+
+**Closure evidence and acceptance criteria:**
+
+1. The corrected 25-row diagnostic is complete and legitimate: all rows succeeded under the pinned `8_000_000_000 B` limit and `180 s` timeout, exact single-VJP forward bytes and materialized-boundary parity passed, all verdict artifacts are tracked, protected-source hashes match, Reviewer r2 PASS and Test Manager r2 GREEN are recorded, and the canonical tracked baseline is `498 passed, 15 skipped, 2 warnings, 86 subtests passed`.
+2. D43 remains persistent across every one-graph interaction family: composed checkpoint-on `1,882,121,016 B`, attention-forward plus routed-VJP `1,894,406,244 B`, routed-forward plus attention-VJP `1,883,084,480 B`, and materialized attention-to-routed boundary `1,882,049,620 B` baseline-subtracted backward delta.
+3. D43 composed layer-sequential collapses to `42,167,440 B`, but this memory-only control does not prove end-to-end loss, gradient, optimizer-order, accumulation, checkpoint/resume, distributed, or other training-semantic equivalence and therefore authorizes no layer-serial production work.
+4. Same-semantics materialization does not reduce the spike: its D43 delta is only `71,396 B` below composed (`0.999962x`) while forward, loss, every LoRA gradient, and input gradient preserve parity.
+5. Final synthetic classification is **compression-ratio-4 attention+routed one-graph lifetime accumulation**. Evidence rejects checkpoint integration, either standalone component, shared expert, either single VJP leg, boundary materialization, and custom-node count alone as sufficient causal production targets.
+6. Both single-VJP controls remain persistent, triggering the binding permanent-STOP gate. No smallest evidence-supported production slice exists; Path A is permanently stopped.
+7. Unidentified exact MLX retained object/resource, unmeasured checkpoint-off D16/D43, unresolved primitive-level cr4 mechanism, absent sequential training-equivalence proof, and unquantified mapping to the real sequence-4096 Metal command-buffer OOM remain explicit uncertainties. None reopens Path A or authorizes more evidence gathering.
+8. No further synthetic diagnostic, production/vendor/primitive/Metal redesign, real asset access, real smoke, shorter fallback, remote fallback, or training is authorized. Any future path would require a separately reviewed and explicitly operator-authorized backlog decision; this closure invents and authorizes none.
+9. Story 13.3c and Stories 13.4–13.6 are blocked/retired under this permanent STOP. Their historical requirements and evidence remain preserved below but are not executable authorization.
+
+### Story 13.3c — local QLoRA smoke-train (20 iters) — **Status: [ ] BLOCKED / RETIRED under Path A permanent STOP; no real smoke authorized**
 **As a** training engineer (WHO), **I want** `mlx_lm.lora --train --iters 20` to
 complete a local QLoRA smoke-train on `model-4bit/` (WHAT), proving the local
 training path is real (WHY).
 
-> **GATED on 13.3b complete (was Story 13.3; BA 2026-06-26, cmux-13-3 STOP-ESCALATE).** NOT a RUN slice
+> **Current gate (Story 13.3b-5i): permanently blocked/retired.** No real smoke, shorter fallback, or training is authorized; remaining uncertainty does not reopen Path A.
+>
+> **Historical gate:** GATED on 13.3b complete (was Story 13.3; BA 2026-06-26, cmux-13-3 STOP-ESCALATE). NOT a RUN slice
 > until 13.3a (real nn.Module port) + 13.3b (real convert) land. The original BA
 > STOP rationale (Blocker A: parity-fixture not nn.Module; Blocker B: hash_moe
 > unimplemented) is now OWNED by Story 13.3a. Data IS present
@@ -4235,7 +4341,10 @@ AC (gated behind 13.3a + 13.3b):
    proves 13.2's FP4 math is on the live training path, not just unit-fixture-proven
    (resolves BA Q2).
 
-### Story 13.4 — numpy-delta fuse → fused GGUF (ADR 0019 bridge)
+### Story 13.4 — numpy-delta fuse → fused GGUF (ADR 0019 bridge) — **Status: [ ] BLOCKED / RETIRED under Path A permanent STOP**
+
+> Historical downstream contract only. Story 13.3b-5i authorizes no smoke adapter, fuse execution, real asset access, or successor path.
+
 **As a** project owner (WHO), **I want** the trained smoke adapter fused into
 a HF safetensors dir → `deepseek4-quantize --hf` → fused GGUF
 **so that** the C engine can serve the trained model via Track-A path (WHAT),
@@ -4251,7 +4360,10 @@ AC:
 4. Adapter applied ONLY to LoRA-targetable modules (`q_a`/`q_b`/`kv` per
    `lora_targets.py`); experts/embeddings/lm_head untouched.
 
-### Story 13.5 — Post-fuse generation coherence cross-check (ADR 0023 gate)
+### Story 13.5 — Post-fuse generation coherence cross-check (ADR 0023 gate) — **Status: [ ] BLOCKED / RETIRED under Path A permanent STOP**
+
+> Historical downstream contract only. Story 13.3b-5i authorizes no fused artifact, coherence smoke, CUDA mirror run, or successor path.
+
 **As a** project owner (WHO), **I want** a `post-fuse-coherence-check`
 command in `scripts/finetune_ds4.py` that generates from BOTH the fused GGUF
 AND the immutable base GGUF on N≥4 canonical prompts and asserts they differ
@@ -4272,7 +4384,10 @@ AC:
    cross-check: Metal-fused vs CUDA-fused bitwise possible future hardening —
    not required for ADR 0023 baseline).
 
-### Story 13.6 — Full LoRA training (5000 iters)
+### Story 13.6 — Full LoRA training (5000 iters) — **Status: [ ] RETIRED under Path A permanent STOP; no training or fallback authorized**
+
+> Historical downstream contract only. Story 13.3b-5i permanently stops this run and authorizes no remote-CUDA or other fallback.
+
 **As a** researcher (WHO), **I want** `mlx_lm.lora --train --iters 5000
 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt
 --grad-checkpoint --steps-per-report 10 --steps-per-eval 200` to complete
@@ -4301,12 +4416,398 @@ AC:
 - `ds4flash.gguf` byte-intact (symlink to Q4K-Fixed; NEVER MUTATED).
 - Per-slice git commit discipline; docs/agent-output/.cmux-status/.pi/ untracked.
 
-**Resolution / Path B exit**: If local MLX QLoRA proves structurally fragile
-post-Story 13.5 (coherence cross-check fails for reasons not attributable to
-adapter quality), Story 13.0 ADR 0022 Path B exit ramp engages: rent remote
-CUDA, run HF Transformers + PEFT + TRL against canonical ckpt, save adapter,
-numpy-delta fuse per ADR 0019, serve locally via C engine `--cuda` or
-`--metal`. No architectural rework needed — fusion bridge consumes either-
-trained adapter.
+**Historical Path B exit — superseded by Story 13.3b-5i:** Earlier planning contemplated remote CUDA, HF Transformers + PEFT + TRL, adapter fusion, and local serving if local MLX QLoRA proved structurally fragile. Permanent STOP closure authorizes none of those fallback actions and does not create a successor path. Any future proposal requires a new separately reviewed backlog decision plus explicit operator authorization.
 
 **EOF Epic 13**
+
+---
+
+## Epic 14 — Deviad/mlx-lm fork successor
+
+> **Separate successor authorization (operator, 2026-07-14):** Epic 14 was authorized after Story 13.3b-5i permanently stopped Path A. It does not reopen Path A, rewrite its evidence, or change the historical fact that the 13.3b-5i closure itself authorized no successor. Epic 14 begins from a separately reviewed fork-bootstrap contract.
+
+### Story 14.0 — pinned fork and isolated source-selection bootstrap — **Status: [ ] READY FOR ARCHITECTURE — bootstrap only; no fork patch, real smoke, or training authorized**
+
+As a DS4 fine-tuning maintainer (WHO), I want the authorized Deviad/mlx-lm fork pinned as a reproducible submodule with explicit isolated-environment source selection and verification (WHAT), so that later architecture work can evaluate a trainer-level successor without reopening Path A, silently changing MLX core, or touching real training assets (WHY).
+
+**Canonical requirements:** `agent-output/cmux-14-0/requirements.md`.
+
+**Acceptance criteria:**
+
+1. Add `git@github.com:Deviad/mlx-lm.git` as a real submodule at `vendor/mlx-lm`. `.gitmodules` records that exact path and URL with no branch-following setting; the outer index records mode `160000` at exact SHA `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` from fork default branch `main`.
+2. `git submodule update --init --recursive vendor/mlx-lm` succeeds; local `HEAD`, `origin`, commit-object availability, index gitlink, and recursive status prove the exact source identity without accessing any model, dataset, or shard.
+3. Preserve the declarative isolated MLX environment. MLX remains exactly `0.31.2`; released MLX-LM restoration is deterministic at `0.31.3`; no global/user-site/shared-environment Python mutation occurs.
+4. Existing environment command surface provides explicit **fork** selection and **release** reversion, defaults to release, keeps dry-run plus explicit execution/confirmation gates, and uses the active environment's `python -m pip`. Fork mode verifies the pin before `--no-deps -e vendor/mlx-lm`; release mode explicitly replaces editable identity with `mlx-lm==0.31.3 --no-deps`.
+5. Lightweight verification fails closed unless selected mode, virtual environment, MLX version, MLX-LM distribution version, resolved `mlx_lm` path, fork URL, and fork SHA agree. It records source identity without secrets and proves source switching cannot silently upgrade MLX core.
+6. Tracked TDD tests start RED and cover submodule metadata, exact gitlink provenance, recursive/source identity, environment command ordering, `--no-deps`, release/fork selection and reversion, isolated-environment guards, MLX preservation, mode-specific import paths, and mismatch failures. Focused and applicable existing tests pass; `git diff --check` passes.
+7. A tracked regression test protects Story 13.3b-5i's exact permanent-STOP status, retired Epic 13 stories, canonical evidence paths, and historical successor prohibition. No existing Epic 13 text or `agent-output/cmux-13-3b/**` evidence changes; this Epic 14 section remains a later separate authorization.
+8. Story 14.0 edits no file inside `vendor/mlx-lm` and makes no trainer-behavior change. Architect must prove a public-API or trainer-level boundary before any claim that MLX-LM can affect MLX core command-buffer lifetime; any fork patch becomes a separately scoped successor story. Without that proof, bootstrap is the only authorized implementation.
+9. No real model/GGUF/safetensors shard, dataset/sample, adapter, smoke, training, inference server, Metal/CUDA/distributed job, or heavy process. Production inference, mmap loading, SSD streaming, CUDA, distributed, CPU, Metal, model artifacts, and datasets remain untouched.
+10. Requirements, architecture, implementation notes, review, test report, and every test cited in a verdict are staged/tracked. Reviewer PASS and Test Manager GREEN require `git ls-files` reproducibility checks. Coder stages only; no commit or push.
+
+**Immediate STOP:** Path A history rewrite; fork-source or MLX-core/private-runtime edit; unpinned/wrong fork source; dependency-resolving source switch; MLX version drift; installation outside the intended isolated environment; real asset/smoke/training/inference/heavy work; production-backend mutation; untracked verdict evidence; commit/push.
+
+### Story 14.1 — generic custom loss-and-gradient provider seam — **Status: [x] COMPLETE 2026-07-15 — Reviewer r6 PASS + Test Manager r6c GREEN; generic synthetic seam only**
+
+As a DS4 fine-tuning maintainer (WHO), I want MLX-LM tuner training to accept an optional generic custom loss-and-gradient provider through a fail-closed custom-only two-phase execution path while preserving the release-compatible default path (WHAT), so that a later separately reviewed provider can integrate without owning accumulation, distributed averaging, optimizer, reporting, callback, checkpoint, or save semantics (WHY).
+
+**Canonical production contract:** `agent-output/cmux-14-1/requirements-r2.md`. **Binding r4 closure acceptance:** `agent-output/cmux-14-1/requirements-r4.md`.
+
+**Final double-green closure evidence (2026-07-15):** `agent-output/cmux-14-1/review-r6.md` records independent Reviewer **PASS** with no blocking findings; `agent-output/cmux-14-1/test-report-r6c.md` records independent Test Manager **GREEN** on the exact staged two-file fork scope, reusing the exact-environment r6b behavioral run. Final evidence is `31 passed / 74 subtests passed` for the focused tuner suite, `15 passed` for applicable `tests/test_finetune.py`, `13 passed` for repository-root `python3 tests/test_mlx_lm_source.py`, and temporary-output `py_compile` GREEN. `vendor/mlx-lm/adapters.safetensors` remained absent. Inner `HEAD` and outer gitlink remain `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`; inner cached paths remain exactly `mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py`; trainer SHA-256 remains `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`; trainer-test SHA-256 is `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`; semantic MLX source remains 19 files at `8881561e55b5734ed47676b0baf03da577f202697ab1b9ebe50efff92b3128bc`. Closure proves only the generic provider seam/default-path contract. It proves no DS4 segmented algorithm, memory reduction, command-buffer change, OOM repair, smoke readiness, or training readiness.
+
+**R2 reason:** Architect STOP in `agent-output/cmux-14-1/architecture.md` proved mandatory dynamic nonfinite rejection impossible before optimizer execution while custom loss/gradient and update shared one compiled graph on MLX `0.31.2`. Operator accepted custom-provider-only graph split plus host synchronization. Prior `requirements.md` remains superseded evidence where it requires same-step custom execution.
+
+**R4 closure reason:** Reviewer r3 found mutation-sensitive gaps in actual retained-accumulator isolation, positional/default compatibility, non-unit token accounting, exact callback payloads, and test-save purity. Test Manager r3 remained blocked only by the volatile protected-source sentinel. R4 preserves the r2 production design and adds test-only closure acceptance; trainer source remains unchanged unless a legitimate new behavioral RED proves a defect.
+
+**Requirements:**
+
+1. At fork pin `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` (`mlx-lm==0.31.3`, MLX `0.31.2`), append one optional direct `loss_and_grad=None` argument after `training_callback`; preserve every existing positional/keyword caller and add no registry, factory, CLI, environment, model dispatch, or second protocol.
+2. Provider contract remains exactly `loss_and_grad(model, *batch) -> ((loss, token_count), gradients)`. Provider owns loss/gradient computation only; trainer owns accumulation, distributed averaging, optimizer, evaluation, random-state policy, model mode, reporting, callbacks, checkpoints, and final save.
+3. Provider omission retains the original one-compiled-step `nn.value_and_grad(model, loss)` path. Custom validation, tree walks, finiteness scans, extra `mx.eval`, host synchronization, graph split, per-microbatch branch, and measurable overhead remain absent from default mode.
+4. Provider mode alone uses two trainer-orchestrated compiled phases: separately compiled provider graph; explicit evaluation/host synchronization plus structural and runtime-finiteness gate; separately compiled trainer-owned accumulation/update graph.
+5. After provider evaluation and before phase 2, reject malformed nesting/scalars/gradient trees/shapes/dtypes and runtime NaN or positive/negative infinity in loss or any gradient leaf. No invalid result may mutate prior accumulation, model parameters/state, or optimizer state.
+6. Preserve exact baseline cadence: one provider result per successful microbatch; `do_update = (it % grad_accumulation_steps == 0)`; averaging/scaling/update only at that boundary; reset after update; no trailing-partial flush; validation continues through existing `loss`; callback/report/save cadence and payloads remain unchanged.
+7. Functional fork scope remains exactly `vendor/mlx-lm/mlx_lm/tuner/trainer.py` and `vendor/mlx-lm/tests/test_tuner_trainer.py`. No MLX core/private runtime, evaluator, CLI, model, optimizer/distributed helper, package/version, source-selection, or other fork file may change.
+8. Tiny synthetic mutation-sensitive TDD, tracked/staged inner files, direct pin/scope checks, no commits/pushes, no real assets/heavy execution, and protected Story 14.0 plus Epic 13/Path A evidence remain mandatory.
+
+**Acceptance criteria:**
+
+1. Existing `train` calls remain valid; provider omission calls the existing `nn.value_and_grad(model, loss)` path and executes exactly one compiled training step with baseline outputs, exceptions, update cadence, callbacks, and saves.
+2. Default-mode tests prove zero custom validator calls, zero gradient tree scans, zero added host synchronization/`mx.eval`, zero graph split, and no provider-support work per microbatch.
+3. Provider mode bypasses the default factory, invokes the provider exactly once per microbatch through a separately compiled graph, then explicitly materializes its result before any accumulation/update graph runs.
+4. Host validation rejects NaN/Inf loss and NaN/Inf in every gradient-leaf position before phase 2, `average_gradients`, `optimizer.update`, model mutation, accumulator mutation, reporting, callback, or save effects.
+5. Static validation rejects wrong result nesting/arity, nonscalar or nonnumeric loss/token metadata, gradient path/container mismatch, leaf shape mismatch, and disallowed dtype with deterministic actionable errors and no silent cast, broadcast, replacement, masking, or sanitization.
+6. Custom phase 2 accumulates every successful microbatch, averages and scales exactly once only at `it % grad_accumulation_steps == 0`, updates exactly once at that boundary, resets accumulation, and preserves baseline no-trailing-flush behavior.
+7. Distributed averaging remains trainer-owned and update-only; validation uses existing `loss`, not provider; report/callback payloads and cadence, cache clearing, periodic checkpoint names/saves, and final save remain unchanged.
+8. Mutation-sensitive RED-to-GREEN tests fail if implementation adds default sync, skips/reorders finite gate, calls phase 2 on failure, changes update/distributed cadence, moves optimizer ownership, or delegates callbacks/saves to provider.
+9. Only `vendor/mlx-lm/mlx_lm/tuner/trainer.py` and `vendor/mlx-lm/tests/test_tuner_trainer.py` change inside fork; both are tracked and staged in inner index while inner `HEAD` and outer gitlink remain pinned. No inner/outer commit or push.
+10. No real model, GGUF, shard, tokenizer, dataset, adapter, smoke, training, inference, Metal/CUDA/distributed job, network dependency, installed-environment mutation, DS4 algorithm, memory-reduction claim, or OOM-fix claim occurs.
+11. Focused tracked fork tests and applicable existing tuner tests pass; inner/outer `git diff --check` and direct status/path/pin checks pass; Story 14.0 and Epic 13/Path A text/evidence remain intact.
+12. Independent Reviewer PASS plus Test Manager GREEN close Story 14.1. Story 14.2 remains closed until both verdicts exist.
+
+**R4 closure acceptance amendment (binding):**
+
+1. Protected `python-envs/mlx/src` sentinel hashes semantic source only: recursively include regular files while excluding any `__pycache__` subtree, `.pyc` file, and `.egg-info` subtree. Repository-relative sorted manifest must report exactly 19 files and SHA-256 `8881561e55b5734ed47676b0baf03da577f202697ab1b9ebe50efff92b3128bc`; volatile generated-file churn must not affect it and included-source drift must fail.
+2. Sentinel repair may edit only `tests/test_mlx_lm_source.py`, with temporary-fixture exclusion proof. `scripts/finetune_ds4.py` and `python-envs/mlx/src/**` remain protected and unchanged.
+3. Every successful inner `train()` test mocks adapter saving or uses a test-owned temporary adapter path. `vendor/mlx-lm/adapters.safetensors` must be absent before and after every individual/focused/regression run; cleanup after generation does not satisfy purity.
+4. Every runtime phase-1 failure reachable after a prior success captures the actual retained non-`None` accumulator object/tree and proves identity plus value unchanged under the complete no-phase-2/no-averaging/no-optimizer/no-accounting/UI/callback/save harness. Setup-time unsupported expected dtype receives the same full effect instrumentation at its pre-loop boundary.
+5. Tests actually invoke the legacy eight-positional call, appended ninth-positional provider call, and provider keyword form; all nine parameters remain positional-or-keyword. Independent numeric default-mode fixtures pin accumulation `1` and greater-than-`1` prior-gradient addition, averaging/scaling/update/reset/trailing behavior, callbacks/saves, and exceptions.
+6. Deterministic non-unit token counts pin exact downstream accounting and exact callback key set/values. A two-microbatch fixture with losses `2.0, 4.0`, tokens `2, 3`, train time `2.0`, learning rate `0.25`, world size `1`, and peak memory `750_000_000` bytes expects exactly `iteration=2`, `train_loss=3.0`, `learning_rate=0.25`, `iterations_per_second=1.0`, `tokens_per_second=2.5`, `trained_tokens=5`, and `peak_memory=0.75` with no other callback key.
+7. R4 normally changes only `vendor/mlx-lm/tests/test_tuner_trainer.py` inside the existing r2 two-file fork allowlist plus outer `tests/test_mlx_lm_source.py`. Staged trainer source remains byte-identical unless a legitimate isolated RED proves a production defect; all r2 pin/scope/protected-evidence/no-real-assets/no-install/no-commit/no-push gates remain binding.
+8. Story 14.1 stays open until independent Reviewer PASS and Test Manager GREEN on the staged tracked artifact-free state. Story 14.2 remains closed and receives no automatic implementation, real-asset, smoke, or training authorization after double-green.
+
+**Fail-closed invariants:**
+
+- Default mode remains original one-compiled-step trainer path; custom machinery dormant and cost-free.
+- Custom mode order remains provider graph → explicit host materialization/finiteness gate → trainer accumulation/update graph.
+- Failed custom microbatch leaves model/optimizer/prior accumulator unchanged relative to that microbatch entry and triggers no downstream report/callback/save effect.
+- Provider never owns trainer state transitions or external effects.
+- Seam availability proves no lower memory use, command-buffer lifetime change, OOM resolution, DS4 correctness, smoke readiness, or training readiness.
+
+**Immediate STOP:** Same-step custom update without pre-update host finite gate; phase 2 after failed validation; phase-1 model/optimizer/accumulator mutation; nonfinite value reaching trainer state/effects; default-path sync/overhead/output drift; cadence/distributed/callback/save drift; provider ownership beyond loss/gradients; file outside exact two-file fork scope; MLX core/private-runtime or source/environment edit; DS4 algorithm or OOM/memory claim; real asset/heavy job; untracked/unstaged verdict test; pin/protected-evidence drift; inner/outer commit or push.
+
+**Definition of done:** Replacement Architect GO against r2; Coder RED then GREEN; exact two inner files tracked/staged at unchanged pin; default-identity and custom two-phase finite/cadence suites green; focused/applicable regressions and diff/scope checks green; explicit no-memory/OOM/training claim; independent Reviewer PASS; independent Test Manager GREEN; required handoffs/markers present; Story 14.2 still closed before double-green.
+
+### Story 14.2 — DS4 segmented loss-and-gradient provider — **Status: [x] COMPLETE 2026-07-15 — Reviewer r11 PASS + Test Manager r10 GREEN on registered revision 14-2-r10-coder-r10; synthetic equivalence/lifetime only**
+
+As a DS4 fine-tuning maintainer (WHO), I want a DS4-specific segmented `loss_and_grad` provider that propagates exact reverse-mode boundary adjoints while materializing and releasing one bounded layer segment at a time (WHAT), so that the approved Story 14.1 trainer seam can consume mathematically equivalent raw gradients without transferring optimizer, distributed, accumulation, reporting, callback, checkpoint, or save ownership to the provider (WHY).
+
+**Canonical requirements:** `agent-output/cmux-14-2/requirements.md`.
+
+**Architect feasibility STOP (2026-07-15, superseded by GO):** `agent-output/cmux-14-2/architecture.md` initially proved that the Story 14.1 trainer-owned outer `mx.compile` rejects provider public materialization with `ValueError: [eval] Attempting to eval an array during function transformations like compile or vmap is not allowed.` Removing `mx.eval` coalesces nested VJPs into one compiled graph and runs provider Python/release operations only at trace time, so the required runtime segment barriers and graph-release lifetime proof cannot exist under the immutable seam. **Story 14.2a** resolved this blocker by amending the custom-provider execution topology (host-executed direct call, no outer `mx.compile`). After Story 14.2a double-green, fresh Architect GO was issued, and Story 14.2 was implemented and closed double-green.
+
+**Final closure identities:**
+- Registered revision: `14-2-r10-coder-r10`
+- Registered functional artifact hash: `75786d9e99184fe30cf752d2e2eb180612252ba0566ad8b5624fdd564fa3d74d`
+- Reviewer PASS: `custom-handoffs/14-2-r11/review.md` (r11)
+- Test Manager GREEN: `agent-output/cmux-14-2/test-report-r10.md` (r10)
+- Staged provider blob SHA-256: `20572191316e36ce228d5a7b5f1cdd396e4d796c4b620696d10f3c33937f3518`
+- Staged provider-test blob SHA-256: `618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6`
+- Staged source-sentinel blob SHA-256: `dec2c2b5a7644540a7ec339712968593647abd64c70b821abddc97f9b6ff5d65`
+- Mutation matrix: `17/17 RED`; focused: `47 passed`; trainer: `36 passed, 74 subtests`; finetune: `15 passed`; source sentinel: `14 tests, OK`; py_compile: `5/5`; active-memory: `8/8 PASS`. All predecessor pins and protected evidence intact (see review/scope-guard sections).
+
+**Predecessor and Path A boundary:** Story 14.1 is double-GREEN and immutable at the pinned fork/gitlink. Story 14.2 is a separately scoped Epic 14 successor; it does not reopen or reinterpret Story 13.3b-5i. Path A remains permanently stopped, its 365-file evidence manifest and 9,958-byte canonical closure section remain protected, and the old `composed_layer_sequential` local-loss diagnostic is not an end-to-end gradient algorithm.
+
+**Requirements:**
+
+1. Add one project-owned provider module exposing only `make_ds4_segmented_loss_and_grad(*, segment_size: int = 1)`. The returned direct callable has exactly `provider(model, batch, lengths) -> ((loss, token_count), gradients)` and is passed programmatically through Story 14.1's approved seam. `segment_size` is exactly an integer in `[1,4]`; no monolithic/debug/fallback mode, registry, CLI/config/environment flag, or alternate loop exists.
+2. Support only the `deepseek_v4_nn` embedding → ordered decoder layers → hyper-head/norm/LM-head topology and the existing `default_loss` two-array int32 batch contract. Loss is scalar float32, token count is scalar int32, and masked cross-entropy/token arithmetic matches `default_loss` exactly.
+3. Return the exact entry `model.trainable_parameters()` container/path/order/shape/dtype schema. Every raw gradient leaf is present; unused leaves are exact zeros; tied/shared/repeated uses are summed exactly once per use; no cast, broadcast, omission, key reorder, sanitization, or auxiliary output is allowed.
+4. Forward execution partitions decoder layers into contiguous segments of at most `segment_size`, materializes each boundary, and retains only evaluated boundary plus minimal stochastic replay state. Reverse execution starts from the real end-to-end loss cotangent, processes segments in reverse order, recomputes one segment, produces parameter contributions plus the preceding boundary adjoint, materializes both, then releases that graph before the next segment.
+5. Plain boundary detachment, per-layer local losses, summed segment losses, forward-order reverse, duplicated/omitted layers, or Story 13.3b-5h sequential diagnostic semantics are forbidden. Embedding, head/tail, residual, nested-state, tied/shared, unused-leaf, and uneven-final-segment contributions remain mathematically complete.
+6. Independent tracked oracles compare exact schema/token count and elementwise loss, every parameter leaf, embedded-input adjoint, and every segment-boundary adjoint. Float32 uses `atol=rtol=1e-5`; float16/bfloat16 observations use `atol=rtol=5e-3` with exact returned dtype; a minimal float32 finite-difference directional oracle uses error at most `1e-3`.
+7. Required synthetic matrix covers `D={1,2,3,5,8}` against valid `S={1,2,3,4}` plus short-depth/final-tail cells; nonadjacent tied/shared parameters; unused/repeated leaves; residuals; nested dict/list/tuple state; float32/float16/bfloat16; two-seed stochastic replay; a DS4-structured tiny fixture with test-local routed substitution and no production Metal dispatch; and direct Story 14.1 integration at accumulation `1`, greater than `1`, and failure after prior accumulation.
+8. Successful stochastic execution advances MLX random state exactly as one monolithic forward; reverse recomputation replays rather than resamples. Every injected setup/forward/head/reverse/assembly/materialization failure restores direct-provider random/model state exactly and reaches no immutable trainer phase 2.
+9. Graph lifetime is observable and load-bearing: at most `S` differentiated decoder layers and one reverse segment may be live; each boundary/segment output is evaluated before the next graph. Fresh-process MLX active-memory cells at `D={2,4,8,16}`, `S={1,2}` must satisfy the canonical byte inequality in the requirements. Wall-clock/RSS/final-cache proxies are insufficient.
+10. Controlled monolithic, detach/local-loss, tied-gradient overwrite, unused-leaf omission, delayed-materialization/retention, stochastic resample/state-drift, tree cast/reorder, token/mask, NaN sanitization, extra-result, and provider-owned trainer-semantics mutations must fail named tracked tests by intended assertions.
+11. Story 14.1 trainer source/test, pin, default path, host gate, random rollback, accumulation/update graph, and staged evidence remain byte-intact. Direct integration proves provider acceptance while optimizer, distributed averaging, accumulation, validation, reporting, callbacks, checkpoint, final save, and failure effects stay trainer-owned.
+12. Functional/test scope is exactly new `python-envs/mlx/src/ds4_ft_mlx/segmented_loss_and_grad.py`, new `tests/test_ds4_segmented_loss_and_grad.py`, and a narrow `tests/test_mlx_lm_source.py` semantic-manifest repin. No existing MLX source, fork, model, routed primitive, parity, LoRA-target, plugin, script, CLI, package, environment, architecture/technical-spec, ADR, or production-backend edit is authorized without an exact amendment.
+13. The sentinel repin preserves the old 19-file/`8881561e...` baseline when excluding the new provider, proves that provider is the only added semantic path, and pins the new exact 20-file digest. Every verdict source/test/evidence file is tracked and staged; pin/hash/scope/artifact checks are independent.
+14. Tiny in-memory synthetic fixtures only. No real model/GGUF/checkpoint/shard/tokenizer/dataset/sample/adapter, Path A report regeneration, smoke, training, inference, production Metal/CUDA/distributed job, network/install/environment mutation, commit, or push.
+
+**Architect GO gate:** GO only if a public-API feasibility probe proves the immutable Story 14.1 compiled provider wrapper preserves real segment materialization/release boundaries; current model boundaries need no edit; stochastic replay, full-tree assembly, every boundary oracle, structural/active-memory bounds, monolithic mutation kill, and exact three-file scope are feasible. GO authorizes synthetic TDD only.
+
+**Immediate STOP:** outer provider compile coalesces one whole-depth graph; trainer/fork/model/MLX/Metal/source-selector edit needed; any loss/token/parameter/input/boundary mismatch; non-independent or aggregate-only oracle; tied/unused/residual/nested/dtype drift; stochastic or rollback mismatch; more than `S` live layers or one live reverse segment; byte-bound failure or surviving monolithic mutation; NaN/Inf sanitization; provider-owned trainer behavior; public diagnostic/telemetry/semantic variant; untracked verdict file; unexplained sentinel repin; predecessor/Path A/protected drift; real/heavy work; OOM/smoke/training-readiness claim; commit/push. STOP never authorizes a reduced matrix, relaxed tolerance, larger segment cap, diagnostic mode, trainer edit, or real fallback.
+
+**Allowed proof claims after double-green:** exact provider schema, synthetic reverse-mode equivalence over the tracked matrix, synthetic bounded graph lifetime/MLX active-memory inequality, and direct programmatic Story 14.1 seam compatibility. No real checkpoint correctness, sequence-4096 behavior, command-buffer repair, real peak-memory reduction, OOM fix, throughput, convergence, smoke readiness, or training readiness claim.
+
+**Story 14.3 boundary:** Story 14.2 double-green (now achieved) was necessary but never sufficient for activation or real execution. Story 14.3 is now opened as a separately reviewed activation-wiring slice plus one bounded real-smoke contract. See Story 14.3 below for requirements and authorization gate.
+
+**Acceptance criteria:**
+
+1. Exact provider/factory/input/output/dtype/segment-size contract with no alternate mode or extra result.
+2. Exact default loss/token semantics and full trainable-tree schema, including tied/shared sums and unused zeros.
+3. Strict segmented forward and reverse-boundary-adjoint propagation; no local-loss/detach substitute.
+4. Every required depth/segment/feature/dtype/stochastic cell matches independent loss/token/every-leaf/input/boundary oracles at pinned tolerances.
+5. Successful random cadence equals one forward; all injected failures roll back and reach no trainer phase 2.
+6. Structural lifetime and MLX active-memory byte bounds pass; whole-depth and delayed-materialization mutations fail.
+7. Direct immutable Story 14.1 integration preserves trainer-owned accumulation/distributed/update/validation/report/callback/save/failure behavior.
+8. All required mutations fail intended tracked tests; no sanitization or semantic approximation survives.
+9. Exact three-file functional/test scope, deterministic 20-file sentinel repin, tracked/staged verdict evidence, predecessor hashes/pin, Path A evidence, and adapter absence pass independently.
+10. No real asset/heavy execution/environment mutation/commit/push and no OOM/smoke/training-readiness claim.
+11. Independent Reviewer PASS plus Test Manager GREEN close Story 14.2.
+12. Story 14.3 remains closed pending separate explicit authorization.
+
+### Story 14.2a — host-executed custom-provider seam amendment — **Status: [x] COMPLETE 2026-07-15 — Reviewer r2 PASS + Test Manager r2 GREEN; synthetic seam amendment only**
+
+As a DS4 fine-tuning maintainer (WHO), I want the optional custom loss-and-gradient provider invoked directly by the host once per microbatch while the default trainer path and trainer-owned safeguards remain unchanged (WHAT), so that a provider can orchestrate its own bounded compiled transforms with public materialization boundaries without acquiring optimizer, accumulation, distributed, reporting, callback, checkpoint, or save ownership (WHY).
+
+**Canonical requirements:** `agent-output/cmux-14-2a/requirements.md`.
+
+**Predecessor and amendment boundary:** Story 14.1 remains double-green at inner pin/gitlink `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`, staged trainer SHA-256 `7eda0fd4436a4e191b813ae6f6c4a4346e8cbe0c769d2fd75111182632382221`, and staged trainer-test SHA-256 `11035cfb0c8ab224772ca018e92fa75f195bea785fa58a07fa9c280b6f3dc5e9`. Story 14.2a supersedes only Story 14.1's custom-provider outer-compilation topology. Public signature/result schema, default path, validation, host finite gate, random rollback, compiled trainer phase 2, and all trainer-owned semantics remain binding.
+
+**Final closure identities:**
+- Reviewer PASS: `agent-output/cmux-14-2a/review.md` (r2)
+- Test Manager GREEN: `agent-output/cmux-14-2a/test-report.md` (r2)
+- Staged trainer SHA-256: `42e5ee2d13aad0ae31d6ebf63300ed260f186291ef80bf416d3395e40503468f`
+- Staged trainer-test SHA-256: `275d6f3ad7dd32458baed4a2df48e2b46e5edaee86956f155467392ec11dbcf2`
+- Masked default-path trainer SHA-256: `b53bdc549ff24b71c0b33224dbaaa30b67e42b7222e75e88e4ab87b6ad887126`
+- Inner artifact SHA-256: `e5cda46105d86bd81612daa66916a1c936bc15cdbfd4528f427176e459ccfff9`
+- Mutation matrix: `16/16 RED`; tuner: `36 passed, 74 subtests`; finetune: `15 passed`; source: `13 passed`; py_compile: PASS; masked hash: PASS.
+
+**Requirements:**
+
+1. Retain the exact nine positional-or-keyword `train` parameters, defaults, old eight-positional call, ninth-positional provider call, and `loss_and_grad=` form. Provider protocol remains exactly `loss_and_grad(model, *batch) -> ((loss, token_count), gradients)` with no extra result or protocol surface.
+2. Default mode remains byte-, behavior-, compile-, and synchronization-identical: one `nn.value_and_grad`, one compiled `step`, one existing post-step `mx.eval`, no custom validation/tree walk/random snapshot/finite scan/graph split/extra work. The deterministic custom-branch-masked trainer SHA-256 remains `b53bdc549ff24b71c0b33224dbaaa30b67e42b7222e75e88e4ab87b6ad887126`.
+3. Custom mode calls `loss_and_grad(model, *batch)` directly from host Python exactly once per attempted microbatch. No trainer-owned `mx.compile`, `mx.vmap`, `mx.checkpoint`, value-and-gradient transform, preflight, retry, duplicate call, cached-result reuse, or fallback may enclose or replace that invocation.
+4. A generic provider may construct/reuse its own bounded public compiled transforms and call public `mx.eval` between them. Trainer adds no mode flag, capability bit, registry, provider class, model/DS4 dispatch, CLI/config/environment wiring, alternate loop, or provider-specific fallback.
+5. Immediately after provider return, trainer retains the exact Story 14.1 static schema/dtype validation, then host-materializes output/random state and rejects nonfinite loss/gradient leaves before phase 2. Exact exception classes/messages, validation order, no-coercion policy, and token-count policy remain unchanged.
+6. Success leaves random state exactly after one direct provider execution; validation and phase 2 add no advance. Provider, validation, materialization, or finite failure restores phase-1 entry state exactly, propagates the exact exception, performs no retry, and never invokes/traces phase 2 for that microbatch.
+7. Custom mode compiles only trainer-owned `update_step`. Accumulation, prior-gradient addition, distributed averaging, scaling, optimizer update/reset, no-trailing-flush behavior, post-step synchronization, accounting, validation, cache/UI, callbacks, rank behavior, periodic/final saves, and failure effects remain exact.
+8. On every phase-1 failure after prior accumulation, the actual retained non-`None` accumulator tree, model, optimizer, accounting, UI, callbacks, and saves remain unchanged relative to failing-microbatch entry. Provider purity remains a protocol precondition; trainer does not claim to sandbox malicious Python side effects.
+9. Functional fork scope is exactly `vendor/mlx-lm/mlx_lm/tuner/trainer.py` and `vendor/mlx-lm/tests/test_tuner_trainer.py`; expected production edit remains inside the custom branch body. Canonical/role scope is `docs/backlog.md` plus named `agent-output/cmux-14-2a/` handoffs. Any additional functional or durable-doc need requires a precise amendment before coding.
+10. Story 14.2a is now COMPLETE double-green. The fresh Story 14.2 Architect feasibility gate was issued GO and Story 14.2 closed double-green. Story 14.3 is now opened as a separately authorized activation-wiring slice.
+
+**Mutation-sensitive acceptance:**
+
+1. RED on the current staged seam: a provider-owned bounded compiled transform followed by public `mx.eval` fails with the exact outer-transformation error; two same-shape microbatches do not produce two direct Python provider executions; custom compile topology still includes `provider_step`.
+2. GREEN on the amended seam: the same provider succeeds through real `train`; provider body executes exactly once per attempted microbatch; trainer custom compile topology is only `update_step`; event order is provider/barriers → trainer validation/materialization/finite gate → phase 2 → baseline synchronization/cache/UI.
+3. Disposable outer-compile mutation fails the named provider-`mx.eval` test by the intended transformation-boundary assertion. Duplicate/omitted/cached provider calls, pre-gate phase 2, rollback removal, phase-2 random advance, retained-accumulator mutation, default extra synchronization, default prior-gradient/topology drift, signature/schema drift, and mode/dispatch additions each fail a named tracked test.
+4. Existing Story 14.1 malformed/nonfinite/materialization/provider-failure, actual retained-accumulator, random rollback/retry, accumulation, distributed, validation, accounting, callback, save/rank, default accumulation-one/greater-than-one, exception, positional compatibility, and adapter-purity gates remain GREEN and mutation-sensitive.
+5. Inner cached paths remain exactly the two authorized files; inner unstaged/untracked paths are empty; final worktree/index hashes match; inner `HEAD`/outer gitlink remain pinned; `vendor/mlx-lm/adapters.safetensors` remains absent; all verdict tests/handoffs are tracked and staged; protected Story 14.1/14.2/Path A evidence and canonical architecture/spec remain intact.
+6. Tiny synthetic arrays only. No real model/GGUF/checkpoint/shard/tokenizer/dataset/sample/adapter, smoke, training, inference, production Metal/CUDA/distributed job, install/network/source/environment mutation, commit, push, memory/OOM claim, or readiness claim.
+
+**Immediate STOP:** any default-path drift; public signature/schema change; trainer-owned outer provider transformation; provider call count other than one per attempted microbatch; provider public `mx.eval` still blocked; weakened/reordered host validation/finite gate; phase 2 or trainer effect after phase-1 failure; random/accumulator/model/optimizer/accounting/callback/save drift; selection machinery or DS4 dispatch; file outside exact scope; untracked verdict evidence; pin/protected/artifact drift; Story 14.2 coding; real/heavy work; commit/push.
+
+**Acceptance criteria:**
+
+1. Story 14.2 is now canonically COMPLETE with final r10 Reviewer PASS and Test Manager GREEN.
+2. Host provider execution, one-call cadence, provider-owned compiled-transform plus `mx.eval` success, and outer-compile mutation kill pass.
+3. Exact default masked hash plus independent default behavior/compile/synchronization tests pass.
+4. Unchanged validation, finite gate, random rollback, phase-2 accumulation/update, and all trainer ownership/failure matrices pass.
+5. Exact two-file functional scope, named handoffs, tracking/staging, final hashes, pin, protected evidence, whitespace, and adapter-absence gates pass.
+6. No selection machinery, DS4 implementation, real asset/heavy job, environment mutation, commit/push, or memory/readiness claim occurs.
+7. Independent Reviewer PASS plus Test Manager GREEN close Story 14.2a only.
+8. Story 14.2 received a fresh Architect adjudication after double-green and is now COMPLETE. Story 14.3 is opened as a separately authorized activation-wiring slice; see Story 14.3 below.
+
+### Story 14.3 — DS4 segmented provider activation and bounded real-smoke contract — **Status: [x] COMPLETE 2026-07-16 — activation wiring + bounded real smoke succeeded; no convergence/OOM/throughput/full-readiness claim**
+
+As a DS4 fine-tuning operator (WHO), I want the DS4 segmented loss-and-gradient provider activated through a dedicated training entry point that explicitly passes it to the Story 14.1 trainer seam while the default MLX-LM training commands remain unchanged (WHAT), so that one bounded real-model smoke can prove the provider runs a forward/backward pass against real 4096-token data without OOM and produces finite loss/gradients through the immutable trainer-owned pipeline (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-3/requirements.md`.
+
+**Predecessor closure:** Story 14.1 is double-green and immutable. Story 14.2a is double-green (Reviewer PASS: `agent-output/cmux-14-2a/review.md`; Test Manager GREEN: `agent-output/cmux-14-2a/test-report.md`; trainer SHA-256 `42e5ee2d13aad0ae31d6ebf63300ed260f186291ef80bf416d3395e40503468f`; masked default hash `b53bdc549ff24b71c0b33224dbaaa30b67e42b7222e75e88e4ab87b6ad887126`). Story 14.2 is double-green (registered revision `14-2-r10-coder-r10`; functional hash `75786d9e99184fe30cf752d2e2eb180612252ba0566ad8b5624fdd564fa3d74d`; Reviewer PASS: `custom-handoffs/14-2-r11/review.md`; Test Manager GREEN: `agent-output/cmux-14-2/test-report-r10.md`). Path A remains permanently stopped.
+
+**Current activation gap:** `scripts/finetune_ds4.py` has zero references to `loss_and_grad`, `segmented_loss_and_grad`, or any custom-provider selection mechanism. The existing `smoke-train` step uses `mlx_lm.lora` CLI which exposes no custom `loss_and_grad` passthrough. The provider module `python-envs/mlx/src/ds4_ft_mlx/segmented_loss_and_grad.py` exists and is tracked but is completely unwired.
+
+**Requirements:**
+
+1. Add a new MLX step (e.g., `ds4-segmented-smoke`) to `scripts/finetune_ds4.py` that activates the segmented provider by constructing `make_ds4_segmented_loss_and_grad(segment_size=1)` and passing it to `train(..., loss_and_grad=provider)` through a Python entry point. The default `smoke-train`, `full-train`, and `continue-train` steps remain unchanged in source, behavior, and identity.
+2. No generic registry, mode flag, capability bit, CLI/config/environment selector, monkey patch, model-type dispatch, alternate trainer loop, or permanent semantic variant in the fork, CLI, or generic trainer. The segmented provider is constructed and passed explicitly by the activation entry point only.
+3. No change to any `vendor/mlx-lm` inner file (`mlx_lm/tuner/trainer.py` and `tests/test_tuner_trainer.py` remain at the pinned 14.2a hashes). Inner `HEAD` and outer gitlink remain `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe`.
+4. No change to `segmented_loss_and_grad.py` (blob SHA-256 `20572191316e36ce228d5a7b5f1cdd396e4d796c4b620696d10f3c33937f3518`), `test_ds4_segmented_loss_and_grad.py` (blob SHA-256 `618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6`), or `test_mlx_lm_source.py` (blob SHA-256 `dec2c2b5a7644540a7ec339712968593647abd64c70b821abddc97f9b6ff5d65`).
+5. One bounded 4096-token smoke is specified: one iteration, batch-size 1, learning-rate 1e-5, max-seq-length 4096, mask-prompt, grad-checkpoint, segment-size 1, timeout 600 seconds, no retry/fallback. Exact asset paths, abort conditions, artifact destinations, and validation policy are pinned in `custom-handoffs/14-3/requirements.md` R14.3-3 and R14.3-4.
+6. The smoke is not executed during implementation. Phase 1 (synthetic wiring + tests) must be complete with Reviewer PASS + Tester GREEN before Phase 2 (real smoke) may begin. Phase 2 requires explicit operator authorization and the exact pinned command from R14.3-4.
+7. Provider-selection evidence: the segmented provider is used exactly once; default path is unchanged; accumulation/update/save/callback/distributed/optimization ownership stays trainer-owned.
+8. Success reports only measured finite loss/gradient/token facts and wall-clock time. Failure preserves evidence, declares terminal STOP, and does not authorize retry, fallback, redesign, full training, or Path A reopening.
+9. Every verdict file is tracked and staged. No `git commit` or `git push`. Path A 365-file evidence manifest, ADR 0028, Story 14.1/14.2/14.2a protected hashes, and the Epic 13 canonical evidence remain intact.
+
+**Acceptance criteria:**
+
+1. `custom-handoffs/14-3/requirements.md` contains testable activation, asset, smoke, abort, artifact, claim, rollback, and authorization requirements with no unresolved placeholder.
+2. `docs/backlog.md` contains exact final predecessor identities and a Story 14.3 user story in the form `As a [type of user] (WHO), I want [some goal] (WHAT), so that [some reason] (WHY).`
+3. Default release/fork behavior remains unchanged unless DS4 activation is explicitly selected; no provider-specific trainer ownership or fallback.
+4. Exactly one bounded 4096 smoke is specified but not executed; no real asset is read during BA work.
+5. Path A permanent STOP and the single already-exhausted Path A smoke remain unchanged.
+6. Any missing asset identity, command parameter, safety limit, or ownership proof produces STOP/NEEDS-INFO rather than guessed authorization.
+7. All BA verdict files and backlog edits are tracked/staged; no commit or push.
+
+**Execution authorization gate:**
+
+Implementation may use synthetic fixtures only until Coder implementation + Reviewer PASS + Tester GREEN. No real asset (`/Volumes/Data NVME/...`) may be read, listed, mapped, stat'd, or opened before: (a) implementation is complete and tracked, (b) Reviewer returns PASS, (c) Tester returns GREEN, (d) supervisor presents the exact pinned command/limits from R14.3-4, and (e) operator gives explicit authorization to execute.
+
+**Immediate STOP:** any activation that changes default path; fork inner edit; provider/trainer/model/source/MLX-core mutation; generic registry/mode/flag/variant; Path A reopening; unbounded/ambiguous smoke; real asset read during BA/architecture/implementation phase; missing asset identity; OOM claim; convergence/throughput claim; untracked verdict evidence; commit/push.
+
+### Story 14.3a — Filtered smoke dataset repin — **Status: [x] COMPLETE 2026-07-16 — filter applied; smoke reached trainer startup but timed out at 600s; 14.3b timeout repin to 1200s resolved; bounded smoke succeeded**
+
+As a DS4 fine-tuning operator (WHO), I want the bounded real-smoke contract repinned from the original dataset path to the pre-filtered `mlx-4096-smoke` copy so every row passes the <=4096 token bound (WHAT), so that the single authorized Phase 2 real-model smoke can execute preflight without aborting on a long row and prove the segmented provider runs forward/backward against real 4096-token data through the trainer-owned pipeline (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-3-filtered/requirements.md`.
+
+**Context:** The original pinned dataset
+`/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096`
+failed preflight because `train.jsonl` line 56 was approximately 8,520 tokens,
+exceeding the 4096 max-seq-length bound (evidence:
+`agent-output/cmux-14-3/smoke-report.json` with `failure_code: "preflight"`
+and `failure_message: "train.jsonl line 56: approx 8520 tokens > 4096"`).
+The operator authorized and created a separate filtered copy at
+`/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`
+with the same train/valid/test filenames; 66 rows excluded using the smoke
+preflight fallback (whitespace-token conservative bound at 4096); all
+remaining rows pass the <=4096 fallback bound. The original dataset is
+untouched and remains immutable.
+
+**Repinned dataset path:**
+`/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`
+
+**Changes (exhaustive):**
+
+1. The pinned dataset path constant in `scripts/ds4_segmented_smoke.py`
+   (`_PINNED_SMOKE_PATHS["data"]`) changes from `mlx-4096` to `mlx-4096-smoke`.
+2. The `ds4-segmented-smoke` command catalog entry in `scripts/finetune_ds4.py`
+   changes the `--data` argument value if it embeds the pinned path.
+3. `docs/backlog.md` records the repinned dataset path and this user story.
+4. `docs/architecture.md` pinned dataset path updates if the Architect
+   determines it is a durable boundary.
+5. `custom-handoffs/14-3/requirements.md` R14.3-3 asset identity table updates
+   the dataset row to `mlx-4096-smoke` with the filter provenance note. This is
+   a contract amendment recording the operator-authorized repin, not a
+   relaxation of any test, bound, or safety gate.
+6. New or updated tracked synthetic tests in `tests/test_ds4_segmented_smoke.py`
+   that verify the new path is enforced at the entry point and the
+   original/default path behavior is not silently changed outside explicit
+   segmented-smoke activation.
+
+**Preserved (all unchanged):**
+
+- `--iters 1`, `--batch-size 1`, `--learning-rate 1e-5`, `--max-seq-length 4096`,
+  `--mask-prompt`, `--grad-checkpoint`, `--segment-size 1`, timeout 600 seconds.
+- Model path: `/Volumes/Data NVME/mlx-ft/ds4/model-4bit`.
+- Adapter path: `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-smoke`.
+- Config path: `/Volumes/Data NVME/mlx-ft/ds4/lora-config.json`.
+- No retry, no fallback, provider call count exactly 1, instance lock required,
+  all R14.3-4 abort conditions preserved.
+- Default `smoke-train`, `full-train`, and `continue-train` command catalog
+  entries unchanged in source, behavior, and identity.
+- `segmented_loss_and_grad.py` (blob SHA-256 `20572191316e36ce228d5a7b5f1cdd396e4d796c4b620696d10f3c33937f3518`),
+  `test_ds4_segmented_loss_and_grad.py` (blob SHA-256 `618a0f22d350ed368e7bf7f782728ad2f6a11486e19a4c97c5e85228aea784c6`),
+  `test_mlx_lm_source.py` unless the source-sentinel manifest needs repinning for
+  the edited `scripts/finetune_ds4.py` (Architect adjudicates).
+- No `vendor/mlx-lm/` inner file changes; inner HEAD and outer gitlink remain
+  15b522f593b7ca5fbc0cac6f7572d40859d2d8fe.
+- Path A permanent STOP, 365-file evidence manifest, ADR 0028, all Story
+  14.1/14.2/14.2a protected hashes, and Epic 13 canonical evidence intact.
+
+**Filter provenance:**
+- Archived at `agent-output/cmux-14-3/filtered-dataset-provenance.json` (operator-created, tracked).
+- Split counts: train 15170/15108/62, valid 819/816/3, test 824/823/1; total excluded 66.
+- Original dataset (immutable): `mlx-4096` with source SHA-256 per split in provenance.
+- Filtered copy: `mlx-4096-smoke` with filtered SHA-256 per split in provenance.
+- 66 rows excluded using the smoke preflight fallback (whitespace-token conservative bound at 4096); excluded-row manifest in provenance.
+- All remaining rows pass the <=4096 fallback bound.
+- Same file schema (`{"prompt": ..., "completion": ...}`) and split filenames.
+
+**Acceptance criteria:**
+
+1. `scripts/ds4_segmented_smoke.py` `_PINNED_SMOKE_PATHS["data"]` equals
+   `/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`.
+2. The `ds4-segmented-smoke` command catalog entry in `scripts/finetune_ds4.py`
+   references `mlx-4096-smoke` as the dataset path.
+3. The default `smoke-train`, `full-train`, and `continue-train` command catalog
+   entries are byte-identical to their pre-slice state.
+4. `docs/backlog.md` records the filtered-dataset repin user story and updates
+   the Story 14.3 dataset path.
+5. `custom-handoffs/14-3/requirements.md` R14.3-3 asset identity table records
+   the repinned dataset path and the filter provenance (66 rows excluded,
+   original untouched, all remaining rows <=4096).
+6. Tracked synthetic tests prove: (a) the new path is enforced at the entry
+   point, (b) the original dataset path is rejected, (c) the default command
+   catalog entries are unchanged.
+7. Protected hashes (provider source, provider test, source sentinel, ADR
+   0028, Path A 365-file digest, vendor inner files) all remain intact.
+8. Every verdict-contributing file is tracked and staged prior to
+   Reviewer/Test Manager verdict.
+9. No real asset read, smoke execution, training, inference, Metal/CUDA/
+   distributed job, install, or network mutation during this slice.
+10. No `git commit` or `git push`.
+
+**Forbidden:**
+- Modifying the original dataset at `mlx-4096`.
+- Changing any pinned smoke parameter other than the dataset path.
+- Changing default command catalog entries.
+- Modifying `vendor/mlx-lm/` inner files, `segmented_loss_and_grad.py`, or
+  `test_ds4_segmented_loss_and_grad.py`.
+- Reopening Path A or touching `agent-output/cmux-13-3b/` evidence.
+- Running real smoke, training, inference, or accessing `/Volumes/Data NVME/...`
+  during BA or implementation.
+- Relaxing any pinned bound, no-retry, no-fallback, or abort condition.
+- `git commit` or `git push`.
+
+### Story 14.3b — Smoke timeout repin from 600s to 1200s — **Status: [x] COMPLETE 2026-07-16 — Reviewer PASS (r4) + Test Manager GREEN (r4); bounded real smoke succeeded (loss 19.334, 1102 tokens, 96 gradient leaves, finite, 1 provider call, 1025.6s wall clock)**
+
+As a DS4 fine-tuning operator (WHO), I want the bounded real-smoke hard timeout repinned from 600 seconds to 1200 seconds (WHAT), so that the single authorized smoke attempt has enough wall-clock time to complete one forward/backward pass against the real 4096-token model and dataset without premature timeout (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-3-timeout/requirements.md`
+
+**Context:** Story 14.3a filtered-dataset smoke reached trainer startup (trainable parameters reported, progress bar visible 0/1) but timed out at 600s with zero completed iterations. Evidence: `agent-output/cmux-14-3/smoke-log.txt` (0%, 0/1 iters), `agent-output/cmux-14-3/smoke-report.json` (`failure_code: timeout`, `wall_clock_seconds: 603.2`), adapter output empty, lock released. Operator authorized minimal timeout-only repin to 1200s.
+
+**Change (exhaustive):** `SMOKE_TIMEOUT_SECONDS` in `scripts/ds4_segmented_smoke.py` from `600` to `1200`. Timeout handler message runtime-derived from the constant. No other constant, parameter, path, function, control flow, catalog entry, or file changed.
+
+**Preserved (exhaustive):** filtered dataset path `mlx-4096-smoke`, model `model-4bit`, config `lora-config.json`, adapter output `adapters-segmented-smoke`, max-seq-length 4096, iters=1, batch=1, lr=1e-5, mask-prompt, grad-checkpoint, segment-size=1, lock timeout 60s, abort timeout 2s, preflight checks, report schema, abort conditions (now referencing 1200s), no-retry, no-fallback, default command catalog entries, `vendor/mlx-lm/` gitlink, all protected source/test hashes.
+
+**Acceptance criteria:**
+1. `custom-handoffs/14-3-timeout/requirements.md` exists with testable R14.3b-* requirements and no unresolved placeholder.
+2. `docs/backlog.md` contains Story 14.3b user story in form `As a [type of user] (WHO), I want [some goal] (WHAT), so that [some reason] (WHY).`
+3. Only production change: `SMOKE_TIMEOUT_SECONDS` 600→1200 in `scripts/ds4_segmented_smoke.py`; all other parameters/paths/locks/abort/catalog explicitly preserved.
+4. No real smoke, training, inference, or `/Volumes/Data NVME/...` access during BA, architecture, or implementation.
+5. Repin does not claim convergence, OOM repair, or correctness beyond one bounded attempt.
+6. All BA verdict files and backlog edits tracked/staged; no commit or push.
+
+## Closeout evidence — Story 14.3 / 14.3a / 14.3b triple-complete (2026-07-16)
+
+**Reviewer PASS (r4):** `custom-handoffs/14-3-timeout/task-reviewer-r4.md` — registered coder slice `14-3b-coder-r4`, functional hash `8bb8dd5640f11e6082d1e58c33e63c10221c67ead14fec94b44e60efd8cd25a82`. 1200s timeout sole production change; watchdog mutation oracle exact; Path A 365-file digest `7241924d6f9be2eb0df974fdcb1717728c71b6ee77d41dea3fe8a8af55ebb2af` intact; vendor gitlink `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` pinned; ADR 0029 staged; all protected source/test hashes intact.
+
+**Test Manager GREEN (r4):** `custom-handoffs/14-3-timeout/test-report.md` — exact-fork pytest: 246 passed, 3 skipped, 1 warning, 2 subtests passed. py_compile passed. Provenance excluded total 66.
+
+**Bounded real smoke result:** `agent-output/cmux-14-3/smoke-report.json`:
+- Status: `ok`
+- Loss: `19.33367156982422` (finite float32)
+- Token count: `1102` (positive, matches default_loss mask sum)
+- Gradient leaf count: `96` (16 layers x 6 targets: q_a, q_a_lora_b, q_b_lora_a, q_b_lora_b, kv_lora_a, kv_lora_b)
+- Finite: `true` (no NaN/Inf in any gradient leaf)
+- Provider call count: `1` (exactly one forward/backward)
+- Wall clock: `1025.6024819999002` seconds (under 1200s timeout)
+- Gradient paths: `model.layers[27-42].self_attn.{q_a_proj,q_b_proj,kv_proj}.lora_{a,b}`
+- Gradient dtypes: all `mlx.core.float32`
+
+**Smoke log:** `agent-output/cmux-14-3/smoke-log.txt` shows 100% complete, 1/1 iterations, val loss 19.553, train loss 19.334.
+
+**Success marker:** `.ds4-segmented-smoke-ok` written.
+
+**Adapter checkpoint:** `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-smoke/` contains `adapters.safetensors` and `adapter_config.json` (evidence only, not promoted for further training).
+
+**Explicit non-claims (preserved from R14.3-6 / R14.3b-4):** This smoke does NOT prove convergence, loss quality, generalization, OOM repair, command-buffer lifetime fix, throughput, speed, full-training readiness, real-data correctness of segmented math (synthetic equivalence was proven in Story 14.2), or any result extrapolated beyond one bounded 4096-token microbatch. The adapter checkpoint is evidence only and must NOT be reused for further training.
+
+*No commit or push was performed. All changes remain staged in the local worktree. The supervisor/operator owns the commit/push decision.*
+
+**EOF Epic 14**

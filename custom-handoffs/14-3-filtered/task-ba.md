@@ -1,0 +1,7 @@
+# Story 14.3 filtered smoke dataset repin — BA
+
+User authorized a separate filtered smoke dataset after the original pinned dataset failed preflight because train.jsonl line 56 was approximately 8,520 tokens. Existing filtered copy:
+`/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`
+Created from original with same train/valid/test filenames; 66 rows excluded using the smoke preflight fallback; all remaining rows pass <=4096 fallback bound. Original dataset untouched.
+
+Read docs/backlog.md, custom-handoffs/14-3/requirements.md, architecture.md, current r12 review PASS and test GREEN. Define a new narrow contract for the filtered smoke dataset path. Preserve 4096 max sequence length, one iteration, batch 1, lr 1e-5, mask-prompt, grad-checkpoint, segment-size 1, and all no-fallback/no-retry/real-smoke safety gates. State that filtered dataset is a derived execution fixture, provenance and filter-report path, excluded counts, and original dataset remains immutable. Update canonical docs/backlog.md for this slice using exact user-story format; do not edit production code. Write requirements.md and marker when complete; STOP if provenance or acceptance criteria are unclear.

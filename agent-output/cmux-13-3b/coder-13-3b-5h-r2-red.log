@@ -1,0 +1,52 @@
+..FF....                                                                 [100%]
+=================================== FAILURES ===================================
+_ test_interaction_ablation_active_baseline_is_pinned_immediately_before_vjp_graph _
+
+    def test_interaction_ablation_active_baseline_is_pinned_immediately_before_vjp_graph():
+        h = _helper_module()
+        for fn_name in ("_run_interaction_one_graph", "_run_interaction_materialized"):
+            source = inspect.getsource(getattr(h, fn_name))
+            vjp_pos = source.index("value, grads = mx.value_and_grad")
+            baseline_pos = source.rfind('row["active_baseline"] = mx.get_active_memory()', 0, vjp_pos)
+>           assert baseline_pos > source.index('row["peak_forward"] = mx.get_peak_memory()')
+E           assert 402 > 691
+E            +  where 691 = <built-in method index of str object at 0xbe054d800>('row["peak_forward"] = mx.get_peak_memory()')
+E            +    where <built-in method index of str object at 0xbe054d800> = 'def _run_interaction_one_graph(cell: dict[str, Any], row: dict[str, Any], mx: Any) -> dict[str, Any]:\n    from mlx_l...finite_array(input_grad, mx)\n    _finalize_interaction_success(row, keys, key_hash, input_grad, mx)\n    return row\n'.index
+
+tests/test_deepseek_v4_nn_interaction_ablation.py:112: AssertionError
+_ test_interaction_ablation_materialized_parity_uses_elementwise_allclose_counterexample _
+
+    def test_interaction_ablation_materialized_parity_uses_elementwise_allclose_counterexample():
+        result = _run_helper_snippet(
+            """
+    mx = h._setup_mlx()
+    a = mx.array([1.5e-5, 1.0], dtype=mx.float32)
+    b = mx.array([0.0, 1.0], dtype=mx.float32)
+    array_abs, array_rel, array_allclose = h._max_array_diff(a, b, mx)
+    grad_abs, grad_rel, keys_equal, grad_allclose, keys, key_hash, mismatches = h._max_grad_diff({"leaf": a}, {"leaf": b}, mx)
+    print(json.dumps({
+        "array_abs": array_abs,
+        "array_rel": array_rel,
+        "array_allclose": array_allclose,
+        "grad_abs": grad_abs,
+        "grad_rel": grad_rel,
+        "keys_equal": keys_equal,
+        "grad_allclose": grad_allclose,
+        "mismatches": mismatches,
+    }))
+    """
+        )
+>       assert result["array_abs"] == 1.5e-5
+E       assert 1.4999999621068127e-05 == 1.5e-05
+
+tests/test_deepseek_v4_nn_interaction_ablation.py:141: AssertionError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_interaction_ablation.py::test_interaction_ablation_active_baseline_is_pinned_immediately_before_vjp_graph
+FAILED tests/test_deepseek_v4_nn_interaction_ablation.py::test_interaction_ablation_materialized_parity_uses_elementwise_allclose_counterexample
+2 failed, 6 passed, 1 warning in 7.96s

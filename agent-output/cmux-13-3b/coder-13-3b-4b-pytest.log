@@ -1,0 +1,38 @@
+
+==================================== ERRORS ====================================
+______________ ERROR collecting tests/test_convert_lora_to_ds4.py ______________
+ImportError while importing test module '/Users/spotted/projects/ds4-finetuning/tests/test_convert_lora_to_ds4.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13.5-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_convert_lora_to_ds4.py:7: in <module>
+    from scripts import convert_lora_to_ds4 as conv
+E   ModuleNotFoundError: No module named 'scripts'
+__________ ERROR collecting tests/test_deepseek_v4_dequant_parity.py ___________
+ImportError while importing test module '/Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_dequant_parity.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../.local/share/uv/python/cpython-3.13.5-macos-aarch64-none/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_deepseek_v4_dequant_parity.py:20: in <module>
+    from scripts import shim_ds4_safetensors as shim
+E   ModuleNotFoundError: No module named 'scripts'
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_convert_lora_to_ds4.py
+ERROR tests/test_deepseek_v4_dequant_parity.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
+2 warnings, 2 errors in 0.37s
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

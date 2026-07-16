@@ -1,0 +1,758 @@
+# Story 13.3b-5h full tracked baseline
+timestamp_utc=2026-07-14T17:20:51Z
+pwd=/Users/spotted/projects/ds4-finetuning
+python=Python 3.13.5
+tracked_test_file_count=46
+
+## contributing tracked test files
+tests/test_13_3b_1_dispatch_additive.py
+tests/test_13_3b_3_nn_mixed_layers_forward.py
+tests/test_attention_real_mlx_hca_parity.py
+tests/test_compress_rope_oracle.py
+tests/test_csa_attention_real_mlx_parity.py
+tests/test_csa_compressor_real_mlx_parity.py
+tests/test_deepseek_v4_attention_parity.py
+tests/test_deepseek_v4_checkpoint.py
+tests/test_deepseek_v4_dequant_parity.py
+tests/test_deepseek_v4_forward_parity_11_15h.py
+tests/test_deepseek_v4_fp4_dequant_mlx.py
+tests/test_deepseek_v4_fp4_dequant_python_ref.py
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py
+tests/test_deepseek_v4_mlx_port.py
+tests/test_deepseek_v4_moe_parity.py
+tests/test_deepseek_v4_nn_backward.py
+tests/test_deepseek_v4_nn_construct.py
+tests/test_deepseek_v4_nn_forward.py
+tests/test_deepseek_v4_nn_fp4_parity.py
+tests/test_deepseek_v4_nn_hash_forward.py
+tests/test_deepseek_v4_nn_interaction_ablation.py
+tests/test_deepseek_v4_nn_load_weights_override.py
+tests/test_deepseek_v4_nn_lora.py
+tests/test_deepseek_v4_nn_model_type_wiring.py
+tests/test_deepseek_v4_nn_moe_construct.py
+tests/test_deepseek_v4_nn_moe_forward.py
+tests/test_deepseek_v4_nn_moe_quantize.py
+tests/test_deepseek_v4_nn_multilayer_peak.py
+tests/test_deepseek_v4_nn_quantize.py
+tests/test_deepseek_v4_nn_remap_module.py
+tests/test_deepseek_v4_nn_routed_fp4_metal.py
+tests/test_deepseek_v4_nn_sanitize.py
+tests/test_deepseek_v4_nn_sparse_routed_backward.py
+tests/test_deepseek_v4_real_config_reference_forward.py
+tests/test_ds4_gguf_base_smoke.py
+tests/test_finetune_ds4.py
+tests/test_finetune_ds4_conversion_plan.py
+tests/test_finetune_ds4_forward_parity_readiness.py
+tests/test_hca_compressor_mlx_parity.py
+tests/test_indexer_mlx_parity.py
+tests/test_indexer_scorer_mlx_parity.py
+tests/test_key_remap_loads_shimmed_ckpt.py
+tests/test_numpy_real_forward_reference_composition.py
+tests/test_remap_ds4_nn_weights_keyset.py
+tests/test_remap_ds4_nn_weights_load.py
+tests/test_remap_ds4_nn_weights_regression.py
+
+## tracked-file verification
+all_contributing_test_files_tracked=yes
+
+## pytest command
+python-envs/mlx/.venv/bin/python -m pytest -q $(git ls-files 'tests/test_*.py')
+
+## pytest output
+..............................................................................................s.................................................................... [ 31%]
+.sss..............sss......s.........s....................... [ 43%]
+................................................................ [ 56%]
+........................................................................ [ 70%]
+.....................................sss.............................. [ 84%]
+..................................................s......... [ 96%]
+....ss..............                                                     [100%]
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+495 passed, 15 skipped, 2 warnings, 86 subtests passed in 84.53s (0:01:24)
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+pytest_exit_code=0
+
+## git diff --check
+git_diff_check_exit_code=0
+
+## git diff --cached --check
+git_diff_cached_check_exit_code=0
+
+## final status short
+MD .cmux-status/coder.done
+ M .gitignore
+ M AGENTS.md
+ M agent-output/cmux-13-1/coder-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5g-make.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5g-probe-run.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-pytest.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r2-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r3-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r4-focused-and-compile-orders.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r4-make-diff-tracking.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r4-tracked-baseline.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-scope-checks.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-tracked-pytest.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-diff-tracking-hashes.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-focused-and-compile-orders.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-make.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5h-tracked-baseline.log
+A  agent-output/cmux-13-3b/interaction-ablation-report.json
+A  agent-output/cmux-13-3b/multilayer-peak-report.json
+A  agent-output/cmux-13-3b/test-13-3b-5g-r3-isolation-focused.log
+A  agent-output/cmux-13-3b/test-13-3b-5g-r3-isolation-make.log
+A  agent-output/cmux-13-3b/test-13-3b-5g-r3-isolation-orders.log
+A  agent-output/cmux-13-3b/test-13-3b-5g-r3-isolation-tracked-baseline.log
+ M docs/adr/0028-opaque-packed-fp4-metal-training-primitive.md
+ M docs/backlog.md
+ M docs/technical-spec.md
+A  tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+A  tests/helpers/routed_fp4_multilayer_peak_probe.py
+A  tests/test_deepseek_v4_nn_interaction_ablation.py
+A  tests/test_deepseek_v4_nn_multilayer_peak.py
+?? .pi/
+?? adapter-converter-implementation-gpt55.md
+?? agent-output/13-1/
+?? agent-output/backlog-consolidation.md
+?? agent-output/cmux-11-14/
+?? agent-output/cmux-11-15-final/
+?? agent-output/cmux-11-15/
+?? agent-output/cmux-11-15b/
+?? agent-output/cmux-11-15c/
+?? agent-output/cmux-11-15d/
+?? agent-output/cmux-11-15e/
+?? agent-output/cmux-11-15g/
+?? agent-output/cmux-11-15h-r2/
+?? agent-output/cmux-11-15h-r3/
+?? agent-output/cmux-11-15h-r4/
+?? agent-output/cmux-11-15h-r5/
+?? agent-output/cmux-11-15h-r6/
+?? agent-output/cmux-11-15h-resume/
+?? agent-output/cmux-11-15h/
+?? agent-output/cmux-11-16/
+?? agent-output/cmux-11-17/
+?? agent-output/cmux-11-18/
+?? agent-output/cmux-11-19/
+?? agent-output/cmux-11-20/
+?? agent-output/cmux-11-21/
+?? agent-output/cmux-11-22/
+?? agent-output/cmux-11-23/
+?? agent-output/cmux-11-24/
+?? agent-output/cmux-11-25/
+?? agent-output/cmux-11-26/
+?? agent-output/cmux-11-27/
+?? agent-output/cmux-11-28/
+?? agent-output/cmux-11-29/
+?? agent-output/cmux-11-30/
+?? agent-output/cmux-11-31/
+?? agent-output/cmux-11-32/
+?? agent-output/cmux-11-33/
+?? agent-output/cmux-11-34/
+?? agent-output/cmux-11-35/
+?? agent-output/cmux-11-36/
+?? agent-output/cmux-11-37/
+?? agent-output/cmux-11-38/
+?? agent-output/cmux-11-39/
+?? agent-output/cmux-11-40/
+?? agent-output/cmux-11-41/
+?? agent-output/cmux-11-42/
+?? agent-output/cmux-11-43/
+?? agent-output/cmux-11-44/
+?? agent-output/cmux-11-45/
+?? agent-output/cmux-11-46/
+?? agent-output/cmux-11-47/
+?? agent-output/cmux-11-48/
+?? agent-output/cmux-11-49/
+?? agent-output/cmux-11-50/
+?? agent-output/cmux-11-51/
+?? agent-output/cmux-11-52/
+?? agent-output/cmux-11-53/
+?? agent-output/cmux-11-54/
+?? agent-output/cmux-11-54r2/
+?? agent-output/cmux-11-55/
+?? agent-output/cmux-12-1/
+?? agent-output/cmux-12-2/
+?? agent-output/cmux-12-3/
+?? agent-output/cmux-13-0/
+?? agent-output/cmux-13-1/architecture.md
+?? agent-output/cmux-13-1/requirements.md
+?? agent-output/cmux-13-1/review-r2.md
+?? agent-output/cmux-13-1/review.md
+?? agent-output/cmux-13-1/task-architect-clarify.md
+?? agent-output/cmux-13-1/task-architect-microrev.md
+?? agent-output/cmux-13-1/task-architect.md
+?? agent-output/cmux-13-1/task-ba.md
+?? agent-output/cmux-13-1/task-coder-r1.md
+?? agent-output/cmux-13-1/task-coder.md
+?? agent-output/cmux-13-1/task-reviewer-r1.md
+?? agent-output/cmux-13-1/task-reviewer-r2.md
+?? agent-output/cmux-13-1/task-tester-r1.md
+?? agent-output/cmux-13-1/test-report-r1.md
+?? agent-output/cmux-13-2/
+?? agent-output/cmux-13-3/
+?? agent-output/cmux-13-3a/
+?? agent-output/cmux-13-3b/architect-13-3b-5c.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5d.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5e.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5f-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5f.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5g-checkpoint-probe.log
+?? agent-output/cmux-13-3b/architect-13-3b-5g-commit-manifest.log
+?? agent-output/cmux-13-3b/architect-13-3b-5g-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5g.dispatch-epoch
+?? agent-output/cmux-13-3b/architect-13-3b-5h.dispatch-epoch
+?? agent-output/cmux-13-3b/architecture-13-3b-5-model-4bit-path.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5b-backward-safe-blockbias.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5c-memory-safe-backward.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5d-routed-fp4-backward.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5e-peak-adjudication.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5f-metal-primitive.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5f-r3-reduction.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5g-first-backward-oom.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5g-r2-contract.md
+?? agent-output/cmux-13-3b/architecture-13-3b-5h-classification.md
+?? agent-output/cmux-13-3b/architecture.md
+?? agent-output/cmux-13-3b/ba-13-3b-5-stop.md
+?? agent-output/cmux-13-3b/ba-13-3b-5c.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5d.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5f-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5f.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5g-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5g.dispatch-epoch
+?? agent-output/cmux-13-3b/ba-13-3b-5h.dispatch-epoch
+?? agent-output/cmux-13-3b/bench_routed_fp4_tiled.py
+?? agent-output/cmux-13-3b/coder-13-3b-4b-convert-trust.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-convert.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-load-forward.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-pytest-pypath-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-pytest-pypath-r3.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-pytest-pypath.log
+?? agent-output/cmux-13-3b/coder-13-3b-4b-pytest.log
+?? agent-output/cmux-13-3b/coder-13-3b-5-notes.md
+?? agent-output/cmux-13-3b/coder-13-3b-5-smoke-train.log
+?? agent-output/cmux-13-3b/coder-13-3b-5-smoke-train.pid
+?? agent-output/cmux-13-3b/coder-13-3b-5-smoke-train.rc
+?? agent-output/cmux-13-3b/coder-13-3b-5-stop.md
+?? agent-output/cmux-13-3b/coder-13-3b-5b-notes.md
+?? agent-output/cmux-13-3b/coder-13-3b-5b-resume.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train-2048.log
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train-2048.pid
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train-resource-contention.log
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train.log
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train.pid
+?? agent-output/cmux-13-3b/coder-13-3b-5b-smoke-train.rc
+?? agent-output/cmux-13-3b/coder-13-3b-5b-stop.md
+?? agent-output/cmux-13-3b/coder-13-3b-5c-finalize.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5c-memory400-stop.md
+?? agent-output/cmux-13-3b/coder-13-3b-5c-memory400.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5c-memory400.log
+?? agent-output/cmux-13-3b/coder-13-3b-5c-memory400.pid
+?? agent-output/cmux-13-3b/coder-13-3b-5c-memory400.rc
+?? agent-output/cmux-13-3b/coder-13-3b-5d-followup.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5d-review-fixes.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5d.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5f-final-light-checks.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-final-staging-check.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-first-green-attempt.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-fixed-e-memory.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-pytest-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-pytest.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-routed-tests-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-routed-tests.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-two-files-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-focused-two-files.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-forward-parity-fix.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-fp4-parity-after-fma.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-fp4-parity-small-serial.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-full-pytest-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-full-pytest-r3.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-full-pytest.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-make-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-make.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-memory-probe-json.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-memory-probes.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-metrics.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-primitive-parity-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-primitive-parity.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r2-fixes.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-doc-check.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-focused-redgreen.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-fp4-parity.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-make.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-routed-bench.json
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-scope-checks.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-stage-docs.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-tracked-pytest-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-tracked-pytest.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3-two-files.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5f-real-dim-timing.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-red-primitive-absent.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-review-fixes.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5f-scope-checks-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-scope-checks.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-sparse-memory-r3.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-sparse-regression-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-sparse-regression.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-tiled-compile-smoke.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-tiled-p50-p95.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-tiled-primitive-parity.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-tracked-pytest-r2.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f-tracked-pytest.log
+?? agent-output/cmux-13-3b/coder-13-3b-5f.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5g-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5g-r3-isolation.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5g-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5g-r4.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5g.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5h-full-baseline.dispatch-epoch
+?? agent-output/cmux-13-3b/coder-13-3b-5h-full-tracked-baseline.log
+?? agent-output/cmux-13-3b/coder-13-3b-5h.dispatch-epoch
+?? agent-output/cmux-13-3b/requirements-13-3b-1.md
+?? agent-output/cmux-13-3b/requirements-13-3b-2a.md
+?? agent-output/cmux-13-3b/requirements-13-3b-2b.md
+?? agent-output/cmux-13-3b/requirements-13-3b-3.md
+?? agent-output/cmux-13-3b/requirements-13-3b-4.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5c-memory400.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5d-routed-fp4.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5f-metal-primitive.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5f-r3-reduction.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5g-r2-contract.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5g-synthetic-peak.md
+?? agent-output/cmux-13-3b/requirements-13-3b-5h-interaction-ablation.md
+?? agent-output/cmux-13-3b/review-13-3b-1.md
+?? agent-output/cmux-13-3b/review-13-3b-2a.md
+?? agent-output/cmux-13-3b/review-13-3b-2b.md
+?? agent-output/cmux-13-3b/review-13-3b-3.md
+?? agent-output/cmux-13-3b/review-13-3b-4-r2.md
+?? agent-output/cmux-13-3b/review-13-3b-4.md
+?? agent-output/cmux-13-3b/review-13-3b-4b.md
+?? agent-output/cmux-13-3b/review-13-3b-5d.md
+?? agent-output/cmux-13-3b/review-13-3b-5f-r2.md
+?? agent-output/cmux-13-3b/review-13-3b-5f-r3.md
+?? agent-output/cmux-13-3b/review-13-3b-5f-r4.md
+?? agent-output/cmux-13-3b/review-13-3b-5f.md
+?? agent-output/cmux-13-3b/review-13-3b-5g-r2.md
+?? agent-output/cmux-13-3b/review-13-3b-5g-r3.md
+?? agent-output/cmux-13-3b/review-13-3b-5g-r4.md
+?? agent-output/cmux-13-3b/review-13-3b-5g.md
+?? agent-output/cmux-13-3b/reviewer-13-3b-4-blocked.md
+?? agent-output/cmux-13-3b/reviewer-13-3b-5d.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5f-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5f-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5f-r4.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5f.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5g-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5g-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5g-r4.dispatch-epoch
+?? agent-output/cmux-13-3b/reviewer-13-3b-5g.dispatch-epoch
+?? agent-output/cmux-13-3b/run-coder-13-3b-5-smoke-train.sh
+?? agent-output/cmux-13-3b/run-coder-13-3b-5b-smoke-train-2048.sh
+?? agent-output/cmux-13-3b/run-coder-13-3b-5b-smoke-train.sh
+?? agent-output/cmux-13-3b/run-smoke-4096-routed-fp4.sh
+?? agent-output/cmux-13-3b/run_smoke_4096_routed_fp4.py
+?? agent-output/cmux-13-3b/sequence-length-retention-analysis.md
+?? agent-output/cmux-13-3b/smoke-4096-routed-fp4-20260714-135103.log
+?? agent-output/cmux-13-3b/smoke-4096-routed-fp4.latest
+?? agent-output/cmux-13-3b/smoke-4096-routed-fp4.pid
+?? agent-output/cmux-13-3b/smoke-4096-routed-fp4.rc
+?? agent-output/cmux-13-3b/subslice-breakdown.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5b.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5c-memory-r2.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5d-routed-fp4.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5e-peak-adjudication.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5f-metal-primitive.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5f-r3-reduction.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5g-first-backward-oom.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5g-r2-contract.md
+?? agent-output/cmux-13-3b/task-architect-13-3b-5h-classification.md
+?? agent-output/cmux-13-3b/task-architect.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-1.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-2a.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-2b.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-3.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-4.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5-r2.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5c-memory-repin.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5d-routed-fp4.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5f-metal-primitive.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5f-r3-reduction.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5g-r2-contract.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5g-synthetic-peak.md
+?? agent-output/cmux-13-3b/task-ba-13-3b-5h-interaction-ablation.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-1.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-2a.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-2b.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-3.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-4-r2.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-4.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-4b.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5b-resume.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5b.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5c-memory400-finalize-stop.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5c-memory400-run.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5d-followup.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5d-review-fixes.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5d-routed-fp4.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5f-metal-primitive.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5f-r2-fixes.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5f-r3-simd.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5f-r3-stage-docs.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5f-review-fixes.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-r2-fixes.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-r2-marker-flush.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-r3-fixes.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-r3-isolation.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-r4-mask-tests.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5g-synthetic-peak.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5h-full-baseline.md
+?? agent-output/cmux-13-3b/task-coder-13-3b-5h-interaction-ablation.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-1.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-2a.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-2b.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-3.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-4-r2.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-4.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-4b.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5d.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5f-r2.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5f-r3.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5f-r4.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5f.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5g-r2.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5g-r3.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5g-r4.md
+?? agent-output/cmux-13-3b/task-reviewer-13-3b-5g.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-1.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-2a.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-2b.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-3.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-4-r2.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-4.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-4b.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5d.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5f-r2.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5f-r3.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5f-r4-marker-flush.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5f-r4.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5f.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g-r2.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g-r3-execute.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g-r3.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g-r4-marker-flush.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g-r4.md
+?? agent-output/cmux-13-3b/task-tester-13-3b-5g.md
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-cached-diff-check.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-compile-alone.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-diff-check.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-focused.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-make.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-order-a.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-order-b.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-order-c.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-execute-tracked-baseline.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-focused.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-make.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r3-tracked-baseline.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-diff-tracking-hashes.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-focused.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-make.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-mutation-mask.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-order-a.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-order-b.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-order-c.log
+?? agent-output/cmux-13-3b/test-13-3b-5g-r4-tracked-baseline.log
+?? agent-output/cmux-13-3b/test-manager-13-3b-4-r2-report.md
+?? agent-output/cmux-13-3b/test-manager-13-3b-4-report.md
+?? agent-output/cmux-13-3b/test-manager-13-3b-4b-report.md
+?? agent-output/cmux-13-3b/test-report-13-3b-1.md
+?? agent-output/cmux-13-3b/test-report-13-3b-2a.md
+?? agent-output/cmux-13-3b/test-report-13-3b-2b.md
+?? agent-output/cmux-13-3b/test-report-13-3b-3.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5d.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5f-r2.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5f-r3.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5f-r4.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5f.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5g-r3.md
+?? agent-output/cmux-13-3b/test-report-13-3b-5g-r4.md
+?? agent-output/cmux-13-3b/tester-13-3b-5d.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5f-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5f-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5f-r4.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5f.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5g-r2.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5g-r3.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5g-r4.dispatch-epoch
+?? agent-output/cmux-13-3b/tester-13-3b-5g.dispatch-epoch
+?? agent-output/cmux-role-pipeline-continuous-wait/
+?? agent-output/cmux-status.sh
+?? agent-output/deepseek-v4-checkpoint-header-report.json
+?? agent-output/deepseek-v4-selected-tensor-dry-run.json
+?? agent-output/deepseek-v4-selected-tensor-real-execute.json
+?? agent-output/point1-architecture-dossier-implementer.md
+?? agent-output/point3-attention-parity-implementer.md
+?? agent-output/point4-moe-semantics-implementer.md
+?? agent-output/point5-dequant-parity-implementer.md
+?? agent-output/point6-lora-allowlist-implementer.md
+?? agent-output/point8-mtp-policy-implementer.md
+?? agent-output/research-deepseek-mla-dsa.md
+?? agent-output/story-11-10-attention.md
+?? agent-output/story-11-10-compressor-indexer.md
+?? agent-output/story-11-10-csa-compressor.md
+?? agent-output/story-11-10-indexer.md
+?? agent-output/story-11-11-hyperconnection-final.md
+?? agent-output/story-11-11-hyperconnection.md
+?? agent-output/story-11-11-hyperhead.md
+?? agent-output/story-11-12-dequant.md
+?? agent-output/story-11-12-i8-dequant.md
+?? agent-output/story-11-12-i8-moe-integration.md
+?? agent-output/story-11-12-index-scan.md
+?? agent-output/story-11-12-metadata.md
+?? agent-output/story-11-14-mlx-compressor-scout.md
+?? agent-output/story-11-7-integrated-forward.md
+?? agent-output/story-11-bounded-model-checkpoint-load-real-dry-run.json
+?? agent-output/story-11-bounded-model-checkpoint-load.md
+?? agent-output/story-11-bounded-model-shape-compat-real-dry-run.json
+?? agent-output/story-11-bounded-model-shape-compat.md
+?? agent-output/story-11-checkpoint-header.md
+?? agent-output/story-11-compressor-indexer-attention.md
+?? agent-output/story-11-compressor-indexer-reconcile.md
+?? agent-output/story-11-compressor-indexer.md
+?? agent-output/story-11-load-forward.md
+?? agent-output/story-11-mlx-array-model.md
+?? agent-output/story-11-moe-shape-compat.md
+?? agent-output/story-11-moe-topk-synthetic.md
+?? agent-output/story-11-multihead-attention-plan.md
+?? agent-output/story-11-multihead-attention-scout.md
+?? agent-output/story-11-multihead-attention-slice1.md
+?? agent-output/story-11-multihead-attention-slice2-rope.md
+?? agent-output/story-11-multihead-attention-slice3-disabled-sinks.md
+?? agent-output/story-11-multihead-attention-slice4-sinks.md
+?? agent-output/story-11-multihead-attention-slice5-groups.md
+?? agent-output/story-11-multihead-attention-slice6-model.md
+?? agent-output/story-11-multihead-shape-compat-real-dry-run.json
+?? agent-output/story-11-multihead-shape-compat.md
+?? agent-output/story-11-multilayer-followup.md
+?? agent-output/story-11-multilayer-synthetic.md
+?? agent-output/story-11-real-hc-mult.md
+?? agent-output/story-11-real-hyperhead.md
+?? agent-output/story-11-selected-tensor-loader.md
+?? context.md
+?? custom-handoffs/
+?? docs/adr/0001-metal-graph-is-production-path.md
+?? docs/adr/0002-parity-first-fail-closed-gates.md
+?? docs/adr/0003-isolated-fine-tuning-environments.md
+?? docs/adr/0004-project-local-pi-agent-scaffolding.md
+?? docs/adr/0005-agent-output-is-not-canonical.md
+?? docs/adr/0006-canonical-backlog.md
+?? docs/adr/0007-expert-block-geometry-shape-authoritative.md
+?? docs/adr/0008-two-track-parity-gguf-vs-mlx.md
+?? docs/adr/0009-stateful-decode-readiness-diagnostic.md
+?? docs/adr/0010-b1-hc-mult-multilayer-readiness-diagnostic.md
+?? docs/adr/0011-b2-i8-dequant-realmode-moe-integration-proof.md
+?? docs/adr/0012-b2-i8-dequant-realmode-moe-multilayer-integration-proof.md
+?? docs/adr/0013-b2-i8-dequant-realmode-moe-topk-multi-expert-integration-proof.md
+?? docs/adr/0014-b2-real-checkpoint-payload-readiness-diagnostic.md
+?? docs/adr/0015-b2-routed-dequant-trusted-reference-readiness-diagnostic.md
+?? docs/adr/0016-b2-ds4-cpu-harness-independence-adjudication.md
+?? docs/adr/0017-b2-metal-carry-forward.md
+?? docs/adr/0018-test-purity-snapshot-diff.md
+?? docs/adr/0019-fusion-primary-adapter-serving.md
+?? docs/adr/0020-story-12-3-ac4-hypothesis-retrospective.md
+?? docs/adr/0021-loader-paired-tensor-synthesis-i8-e8m0.md
+?? docs/adr/0022-key-remap-adapter-fp4-expert-packing-contract.md
+?? docs/adr/0022-strategic-pivot-local-mlx-qlora-parity-marker-retired.md
+?? docs/adr/0023-post-fuse-generation-coherence-cross-check.md
+?? docs/adr/README.md
+?? docs/deepseek-v4-architecture-dossier.md
+?? docs/deepseek-v4-mtp-policy.md
+?? ds4_agent_test
+?? next-internal-lora-plan-gpt55.md
+?? next-internal-lora-scout-gpt55.md
+?? progress.md
+?? python-envs/legacy-trans/
+?? python-envs/mlx/src/ds4_ft_mlx/__init__.py
+?? python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_attention_spec.py
+?? python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_checkpoint.py
+?? python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_mapping.py
+?? python-envs/mlx/src/ds4_ft_mlx/deepseek_v4_moe_spec.py
+?? python-envs/mlx/src/ds4_ft_mlx/lora_targets.py
+?? python-envs/mlx/src/ds4_ft_mlx/mlx_lm_plugin.py
+?? python-envs/mlx/src/ds4_ft_mlx/numpy_real_forward_reference.py
+?? python-envs/mlx/src/ds4_ft_mlx/vendor/__init__.py
+?? python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/__init__.py
+?? python-envs/mlx/src/sitecustomize.py
+?? python-envs/mlx/uv.lock
+?? python-envs/torch/
+?? review-plan-backend-selector-gpt55.md
+?? review-xhigh-agent-policy-tdd-gpt55.md
+?? review-xhigh-deepseek-v4-mlx-architecture-gpt55.md
+?? review-xhigh-deepseek-v4-mlx-gate-binding-gpt55.md
+?? review-xhigh-deepseek-v4-mlx-slice1-gpt55.md
+?? review-xhigh-deepseek-v4-mlx-slice2-fixes-gpt55.md
+?? review-xhigh-deepseek-v4-mlx-slice2-gpt55.md
+?? review-xhigh-ds4-adapter-inspect-fix-gpt55.md
+?? review-xhigh-ds4-adapter-inspect-minors-gpt55.md
+?? review-xhigh-env-policy-gpt55.md
+?? review-xhigh-failfast-fixes-gpt55.md
+?? review-xhigh-final-lora-gpt55.md
+?? review-xhigh-fixes-gpt55.md
+?? review-xhigh-fixes-round2-gpt55.md
+?? review-xhigh-forward-parity-direct-gpt55.md
+?? review-xhigh-forward-partials-followup-gpt55.md
+?? review-xhigh-forward-partials-gpt55.md
+?? review-xhigh-internal-lora-gpt55.md
+?? review-xhigh-mlx-fp8-emulation-fixes-gpt55.md
+?? review-xhigh-mlx-fp8-emulation-gpt55.md
+?? review-xhigh-mlx-fp8-emulation-round2-gpt55.md
+?? review-xhigh-mlx-fp8-help-examples-gpt55.md
+?? review-xhigh-next-plan-final-gpt55.md
+?? review-xhigh-next-plan-stories-gpt55.md
+?? review-xhigh-next-plan-stories-round2-gpt55.md
+?? review-xhigh-one-step-lora-gate-gpt55.md
+?? review-xhigh-one-step-lora-gate-round2-gpt55.md
+?? review-xhigh-parallel-integration-fixes-gpt55.md
+?? review-xhigh-plan-sanity-check.md
+?? review-xhigh-point1-architecture-dossier.md
+?? review-xhigh-point3-attention-parity.md
+?? review-xhigh-point4-moe-semantics.md
+?? review-xhigh-point5-dequant-parity.md
+?? review-xhigh-point6-lora-allowlist.md
+?? review-xhigh-point8-mtp-policy.md
+?? review-xhigh-real-v4-feasibility-docfix-gpt55.md
+?? review-xhigh-real-v4-feasibility-final-docfix-gpt55.md
+?? review-xhigh-real-v4-feasibility-final-wording-gpt55.md
+?? review-xhigh-real-v4-feasibility-gpt55.md
+?? review-xhigh-real-v4-feasibility-historical-wording-gpt55.md
+?? review-xhigh-real-v4-feasibility-round2-gpt55.md
+?? review-xhigh-route-fixes-gpt55.md
+?? review-xhigh-runtime-lora-gpt55.md
+?? review-xhigh-setup-env-fixes-gpt55.md
+?? review-xhigh-story-11-10-attention-followup.md
+?? review-xhigh-story-11-10-attention.md
+?? review-xhigh-story-11-10-compressors-final.md
+?? review-xhigh-story-11-10-compressors-indexer-final.md
+?? review-xhigh-story-11-10-hca-compressor.md
+?? review-xhigh-story-11-11-hyperconnection-final.md
+?? review-xhigh-story-11-11-hyperconnection-followup.md
+?? review-xhigh-story-11-11-hyperconnection.md
+?? review-xhigh-story-11-12-dequant-followup.md
+?? review-xhigh-story-11-12-dequant.md
+?? review-xhigh-story-11-12-i8-dequant.md
+?? review-xhigh-story-11-12-i8-moe-final.md
+?? review-xhigh-story-11-12-index-scan-final.md
+?? review-xhigh-story-11-12-index-scan-followup.md
+?? review-xhigh-story-11-12-index-scan.md
+?? review-xhigh-story-11-12-metadata-followup.md
+?? review-xhigh-story-11-12-metadata.md
+?? review-xhigh-story-11-7-integrated-forward-final.md
+?? review-xhigh-story-11-7-integrated-forward-followup.md
+?? review-xhigh-story-11-7-integrated-forward.md
+?? review-xhigh-story-11-bounded-model-checkpoint-load.md
+?? review-xhigh-story-11-bounded-model-shape-compat.md
+?? review-xhigh-story-11-checkpoint-header-followup.md
+?? review-xhigh-story-11-checkpoint-header.md
+?? review-xhigh-story-11-compressor-indexer-attention.md
+?? review-xhigh-story-11-compressor-indexer-reconcile.md
+?? review-xhigh-story-11-compressor-indexer-reconciled.md
+?? review-xhigh-story-11-compressor-indexer.md
+?? review-xhigh-story-11-i8-mlx-moe-followup.md
+?? review-xhigh-story-11-i8-mlx-moe.md
+?? review-xhigh-story-11-load-forward-final.md
+?? review-xhigh-story-11-mlx-array-model.md
+?? review-xhigh-story-11-moe-shape-compat.md
+?? review-xhigh-story-11-moe-topk-synthetic-followup.md
+?? review-xhigh-story-11-moe-topk-synthetic.md
+?? review-xhigh-story-11-multihead-attention-plan.md
+?? review-xhigh-story-11-multihead-attention-slice1-followup.md
+?? review-xhigh-story-11-multihead-attention-slice1.md
+?? review-xhigh-story-11-multihead-attention-slice2-rope-followup.md
+?? review-xhigh-story-11-multihead-attention-slice2-rope.md
+?? review-xhigh-story-11-multihead-attention-slice3-disabled-sinks.md
+?? review-xhigh-story-11-multihead-attention-slice3-final.md
+?? review-xhigh-story-11-multihead-attention-slice3-followup.md
+?? review-xhigh-story-11-multihead-attention-slice4-sinks.md
+?? review-xhigh-story-11-multihead-attention-slice5-groups.md
+?? review-xhigh-story-11-multihead-attention-slice6-followup.md
+?? review-xhigh-story-11-multihead-attention-slice6-model.md
+?? review-xhigh-story-11-multihead-shape-compat-followup.md
+?? review-xhigh-story-11-multihead-shape-compat.md
+?? review-xhigh-story-11-multilayer-followup.md
+?? review-xhigh-story-11-multilayer-synthetic-followup.md
+?? review-xhigh-story-11-multilayer-synthetic.md
+?? review-xhigh-story-11-real-hc-mult-followup.md
+?? review-xhigh-story-11-real-hc-mult.md
+?? review-xhigh-story-11-real-hyperhead.md
+?? review-xhigh-story-11-selected-loader-real-smoke-final.md
+?? review-xhigh-story-11-selected-loader-shape-final.md
+?? review-xhigh-story-11-selected-loader-synthetic-nbytes-final.md
+?? review-xhigh-story-11-selected-tensor-loader-followup.md
+?? review-xhigh-story-11-selected-tensor-loader-offsets-final.md
+?? review-xhigh-story-11-selected-tensor-loader.md
+?? review-xhigh-story-11-zero-bias-default.md
+?? review-xhigh-torch-smoke-fixes-gpt55.md
+?? scripts/convert_lora_to_ds4.py
+?? scripts/fuse_lora_hf.py
+?? scripts/make_synth_lora.py
+?? scripts/smoke_fuse_serve.sh
+?? shim-review-gpt55.md
+?? tests/_fuse_fixture.py
+?? tests/ds4_e8m0_ocp_witness.py
+?? tests/ds4_f8_e4m3_e8m0_ocp_witness.py
+?? tests/ds4_lora_test
+?? tests/test_convert_lora_to_ds4.py
+?? tests/test_deepseek_v4_forward_parity.py
+?? tests/test_deepseek_v4_lora_targets.py
+?? tests/test_deepseek_v4_validate_real_mode_relaxation.py
+?? tests/test_ds4_metal_routed_i8_e8m0_isolation.py
+?? tests/test_finetune_ds4_b1_hc_mult_multilayer_readiness.py
+?? tests/test_finetune_ds4_b2_real_checkpoint_payload_readiness.py
+?? tests/test_finetune_ds4_b2_routed_dequant_trusted_reference_readiness.py
+?? tests/test_finetune_ds4_csa_topk_primitive.py
+?? tests/test_finetune_ds4_fuse_hf_gate.py
+?? tests/test_finetune_ds4_fused_gate_perf.py
+?? tests/test_finetune_ds4_i8_dequant_integration.py
+?? tests/test_finetune_ds4_stateful_decode_readiness.py
+?? tests/test_fuse_lora_hf.py
+?? tests/test_make_synth_lora.py
+?? tests/test_q4k_dot
+?? tests/test_real_forward_intermediate_dump.py
+?? tests/test_shim_ds4_safetensors.py
+?? tests/test_smoke_fuse_serve_ac7_template_relative.sh
+?? training-backend-bakeoff-gpt55.md
+?? training-local-gates-gpt55.md
+?? training-next-status.md
+
+## post-notes-and-marker staging checks
+timestamp_utc=2026-07-14T17:23:39Z
+## git diff --check (post notes/marker)
+post_git_diff_check_exit_code=0
+
+## git diff --cached --check (post notes/marker/log staging)
+post_git_diff_cached_check_exit_code=0
+
+## git ls-files verification for full baseline log and notes
+100644 99e2bf4d0558c335012942934439aef7a08e8d97 0	.cmux-status/coder.done
+100644 a94cc457e28f425179837fc3342c10737ea0f407 0	agent-output/cmux-13-3b/coder-13-3b-5h-full-tracked-baseline.log
+100644 649054a22aad16ee191704bdeb918e5430f86514 0	agent-output/cmux-13-3b/coder-13-3b-5h-notes.md
+
+## final scoped status short
+M  .cmux-status/coder.done
+AM agent-output/cmux-13-3b/coder-13-3b-5h-full-tracked-baseline.log
+A  agent-output/cmux-13-3b/coder-13-3b-5h-notes.md

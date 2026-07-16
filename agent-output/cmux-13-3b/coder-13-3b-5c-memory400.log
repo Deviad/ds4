@@ -1,0 +1,13 @@
+MLX memory limit: previous=522268023193 selected=400000000000
+Loading configuration file lora-config.json
+Loading pretrained model
+Loading datasets
+Training
+Trainable parameters: 0.004% (5.571M/154430.069M)
+Starting training..., iters: 20
+Calculating loss...:   0%|          | 0/1 [00:00<?, ?it/s]Calculating loss...: 100%|██████████| 1/1 [01:38<00:00, 98.06s/it]Calculating loss...: 100%|██████████| 1/1 [01:38<00:00, 98.06s/it]
+Iter 1: Val loss 18.110, Val took 98.094s
+libc++abi: terminating due to uncaught exception of type std::runtime_error: [METAL] Command buffer execution failed: Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)
+bash: line 18: 85314 Abort trap: 6           python -c 'import mlx.core as mx; limit=400_000_000_000; previous=mx.set_memory_limit(limit); print(f"MLX memory limit: previous={previous} selected={limit}", flush=True); from mlx_lm.lora import main; main()' --config lora-config.json --model model-4bit --train --data "/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096" --adapter-path adapters-smoke-memory400 --fine-tune-type lora --iters 20 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint --val-batches 1 --steps-per-report 1
+/Users/spotted/.brew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/resource_tracker.py:475: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-rp8x8gj3'}
+  warnings.warn(

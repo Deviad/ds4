@@ -1,0 +1,46 @@
+tracked_test_files=45
+..............................................................................................s.................................................................... [ 32%]
+.sss..............sss......s.........s....................... [ 44%]
+................................................................ [ 57%]
+.................................................................F...... [ 71%]
+...............................sss.................................... [ 85%]
+............................................s.............ss [ 97%]
+..............                                                           [100%]
+=================================== FAILURES ===================================
+________________ test_compiled_host_routing_fails_as_documented ________________
+
+    def test_compiled_host_routing_fails_as_documented():
+        """MLX 0.31.2: eval inside compile is forbidden; verify exact error."""
+        import mlx.core as mx
+    
+        def _inner():
+            x = mx.ones((2, 3, 16), dtype=mx.float32)
+            # Simulate host materialization + eval inside compile
+            @mx.compile
+            def bad(x):
+                y = mx.stop_gradient(x)
+                mx.eval(y)
+                return y
+    
+            return bad(x)
+    
+        try:
+            _inner()
+>           pytest.fail("expected ValueError for eval inside compile")
+E           Failed: expected ValueError for eval inside compile
+
+tests/test_deepseek_v4_nn_sparse_routed_backward.py:1149: Failed
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_sparse_routed_backward.py::test_compiled_host_routing_fails_as_documented
+1 failed, 488 passed, 15 skipped, 2 warnings, 86 subtests passed in 64.25s (0:01:04)
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

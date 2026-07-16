@@ -1,0 +1,435 @@
+{
+  "archived_at": "2026-07-16",
+  "destination": "/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke",
+  "excluded_total": 66,
+  "filter_rule": "keep exact prompt/completion rows when whitespace-token approximation <=4096 and not (chars/token density >50 and total chars >4096)",
+  "max_tokens": 4096,
+  "method": "smoke-preflight-fallback",
+  "provenance": "operator-created filtered smoke copy; original files not modified by this operation",
+  "source": "/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096",
+  "splits": {
+    "test.jsonl": {
+      "excluded": 1,
+      "excluded_rows": [
+        {
+          "approx_tokens": 13107,
+          "density_chars_per_token": 5.45,
+          "line": 475,
+          "total_chars": 71403
+        }
+      ],
+      "filtered_sha256": "6acfc05c5c8e5c22c5d77e40aa8c8664968139602090e947fea7ca2221cd77fa",
+      "input": 824,
+      "kept": 823,
+      "source_sha256": "175ab0e22d0a69b43f7aef0a32068eb6f2fbd59128dd5eade227af3c0a602c8b"
+    },
+    "train.jsonl": {
+      "excluded": 62,
+      "excluded_rows": [
+        {
+          "approx_tokens": 8520,
+          "density_chars_per_token": 4.3,
+          "line": 56,
+          "total_chars": 36615
+        },
+        {
+          "approx_tokens": 6119,
+          "density_chars_per_token": 4.02,
+          "line": 135,
+          "total_chars": 24604
+        },
+        {
+          "approx_tokens": 11139,
+          "density_chars_per_token": 6.19,
+          "line": 163,
+          "total_chars": 68924
+        },
+        {
+          "approx_tokens": 7891,
+          "density_chars_per_token": 3.7,
+          "line": 187,
+          "total_chars": 29166
+        },
+        {
+          "approx_tokens": 12673,
+          "density_chars_per_token": 4.84,
+          "line": 438,
+          "total_chars": 61354
+        },
+        {
+          "approx_tokens": 11827,
+          "density_chars_per_token": 5.71,
+          "line": 536,
+          "total_chars": 67521
+        },
+        {
+          "approx_tokens": 13126,
+          "density_chars_per_token": 5.43,
+          "line": 782,
+          "total_chars": 71280
+        },
+        {
+          "approx_tokens": 10322,
+          "density_chars_per_token": 5.17,
+          "line": 845,
+          "total_chars": 53380
+        },
+        {
+          "approx_tokens": 9131,
+          "density_chars_per_token": 5.06,
+          "line": 996,
+          "total_chars": 46166
+        },
+        {
+          "approx_tokens": 10822,
+          "density_chars_per_token": 4.6,
+          "line": 1027,
+          "total_chars": 49745
+        },
+        {
+          "approx_tokens": 10951,
+          "density_chars_per_token": 5.63,
+          "line": 1262,
+          "total_chars": 61634
+        },
+        {
+          "approx_tokens": 9381,
+          "density_chars_per_token": 5.18,
+          "line": 1359,
+          "total_chars": 48611
+        },
+        {
+          "approx_tokens": 14111,
+          "density_chars_per_token": 5.7,
+          "line": 1378,
+          "total_chars": 80381
+        },
+        {
+          "approx_tokens": 10247,
+          "density_chars_per_token": 4.04,
+          "line": 1462,
+          "total_chars": 41382
+        },
+        {
+          "approx_tokens": 12350,
+          "density_chars_per_token": 5.12,
+          "line": 1738,
+          "total_chars": 63243
+        },
+        {
+          "approx_tokens": 12743,
+          "density_chars_per_token": 5.14,
+          "line": 1767,
+          "total_chars": 65517
+        },
+        {
+          "approx_tokens": 12836,
+          "density_chars_per_token": 5.43,
+          "line": 2042,
+          "total_chars": 69667
+        },
+        {
+          "approx_tokens": 13042,
+          "density_chars_per_token": 5.18,
+          "line": 2088,
+          "total_chars": 67515
+        },
+        {
+          "approx_tokens": 12315,
+          "density_chars_per_token": 5.73,
+          "line": 2444,
+          "total_chars": 70531
+        },
+        {
+          "approx_tokens": 13576,
+          "density_chars_per_token": 5.64,
+          "line": 2787,
+          "total_chars": 76528
+        },
+        {
+          "approx_tokens": 9876,
+          "density_chars_per_token": 5.24,
+          "line": 3816,
+          "total_chars": 51797
+        },
+        {
+          "approx_tokens": 10218,
+          "density_chars_per_token": 4.38,
+          "line": 4436,
+          "total_chars": 44760
+        },
+        {
+          "approx_tokens": 12456,
+          "density_chars_per_token": 5.4,
+          "line": 5679,
+          "total_chars": 67216
+        },
+        {
+          "approx_tokens": 6981,
+          "density_chars_per_token": 4.1,
+          "line": 5715,
+          "total_chars": 28641
+        },
+        {
+          "approx_tokens": 14929,
+          "density_chars_per_token": 4.96,
+          "line": 6023,
+          "total_chars": 74102
+        },
+        {
+          "approx_tokens": 13143,
+          "density_chars_per_token": 5.23,
+          "line": 6205,
+          "total_chars": 68688
+        },
+        {
+          "approx_tokens": 5428,
+          "density_chars_per_token": 5.0,
+          "line": 6481,
+          "total_chars": 27154
+        },
+        {
+          "approx_tokens": 12902,
+          "density_chars_per_token": 6.0,
+          "line": 6814,
+          "total_chars": 77452
+        },
+        {
+          "approx_tokens": 13998,
+          "density_chars_per_token": 5.02,
+          "line": 6933,
+          "total_chars": 70233
+        },
+        {
+          "approx_tokens": 9336,
+          "density_chars_per_token": 4.5,
+          "line": 7177,
+          "total_chars": 41991
+        },
+        {
+          "approx_tokens": 14264,
+          "density_chars_per_token": 6.04,
+          "line": 7289,
+          "total_chars": 86174
+        },
+        {
+          "approx_tokens": 10947,
+          "density_chars_per_token": 5.05,
+          "line": 7298,
+          "total_chars": 55266
+        },
+        {
+          "approx_tokens": 5428,
+          "density_chars_per_token": 3.05,
+          "line": 7783,
+          "total_chars": 16570
+        },
+        {
+          "approx_tokens": 13206,
+          "density_chars_per_token": 5.06,
+          "line": 8005,
+          "total_chars": 66837
+        },
+        {
+          "approx_tokens": 9027,
+          "density_chars_per_token": 4.71,
+          "line": 8928,
+          "total_chars": 42549
+        },
+        {
+          "approx_tokens": 13005,
+          "density_chars_per_token": 4.97,
+          "line": 9110,
+          "total_chars": 64595
+        },
+        {
+          "approx_tokens": 9118,
+          "density_chars_per_token": 5.84,
+          "line": 9312,
+          "total_chars": 53256
+        },
+        {
+          "approx_tokens": 8123,
+          "density_chars_per_token": 5.22,
+          "line": 9392,
+          "total_chars": 42427
+        },
+        {
+          "approx_tokens": 4268,
+          "density_chars_per_token": 9.17,
+          "line": 9728,
+          "total_chars": 39152
+        },
+        {
+          "approx_tokens": 5405,
+          "density_chars_per_token": 7.97,
+          "line": 9800,
+          "total_chars": 43087
+        },
+        {
+          "approx_tokens": 7056,
+          "density_chars_per_token": 8.24,
+          "line": 9910,
+          "total_chars": 58116
+        },
+        {
+          "approx_tokens": 7899,
+          "density_chars_per_token": 7.89,
+          "line": 9920,
+          "total_chars": 62318
+        },
+        {
+          "approx_tokens": 7151,
+          "density_chars_per_token": 7.96,
+          "line": 9944,
+          "total_chars": 56892
+        },
+        {
+          "approx_tokens": 5468,
+          "density_chars_per_token": 7.6,
+          "line": 9962,
+          "total_chars": 41554
+        },
+        {
+          "approx_tokens": 5138,
+          "density_chars_per_token": 8.26,
+          "line": 9980,
+          "total_chars": 42463
+        },
+        {
+          "approx_tokens": 11548,
+          "density_chars_per_token": 5.25,
+          "line": 10270,
+          "total_chars": 60636
+        },
+        {
+          "approx_tokens": 11946,
+          "density_chars_per_token": 5.9,
+          "line": 10798,
+          "total_chars": 70507
+        },
+        {
+          "approx_tokens": 11495,
+          "density_chars_per_token": 4.75,
+          "line": 10872,
+          "total_chars": 54627
+        },
+        {
+          "approx_tokens": 5053,
+          "density_chars_per_token": 7.8,
+          "line": 11447,
+          "total_chars": 39403
+        },
+        {
+          "approx_tokens": 4324,
+          "density_chars_per_token": 7.43,
+          "line": 11517,
+          "total_chars": 32112
+        },
+        {
+          "approx_tokens": 5583,
+          "density_chars_per_token": 7.32,
+          "line": 11605,
+          "total_chars": 40842
+        },
+        {
+          "approx_tokens": 4802,
+          "density_chars_per_token": 8.78,
+          "line": 11748,
+          "total_chars": 42145
+        },
+        {
+          "approx_tokens": 4438,
+          "density_chars_per_token": 7.9,
+          "line": 12609,
+          "total_chars": 35058
+        },
+        {
+          "approx_tokens": 4826,
+          "density_chars_per_token": 7.34,
+          "line": 12649,
+          "total_chars": 35435
+        },
+        {
+          "approx_tokens": 4477,
+          "density_chars_per_token": 7.3,
+          "line": 12658,
+          "total_chars": 32687
+        },
+        {
+          "approx_tokens": 4265,
+          "density_chars_per_token": 7.31,
+          "line": 12724,
+          "total_chars": 31167
+        },
+        {
+          "approx_tokens": 4384,
+          "density_chars_per_token": 8.87,
+          "line": 13768,
+          "total_chars": 38896
+        },
+        {
+          "approx_tokens": 5335,
+          "density_chars_per_token": 9.65,
+          "line": 13890,
+          "total_chars": 51463
+        },
+        {
+          "approx_tokens": 4389,
+          "density_chars_per_token": 9.67,
+          "line": 14809,
+          "total_chars": 42459
+        },
+        {
+          "approx_tokens": 4560,
+          "density_chars_per_token": 9.21,
+          "line": 14816,
+          "total_chars": 42006
+        },
+        {
+          "approx_tokens": 5285,
+          "density_chars_per_token": 8.35,
+          "line": 14860,
+          "total_chars": 44110
+        },
+        {
+          "approx_tokens": 5978,
+          "density_chars_per_token": 8.15,
+          "line": 14961,
+          "total_chars": 48748
+        }
+      ],
+      "filtered_sha256": "a2c6a4af982c1a803005a37d3bc12574a4c5f23ab4c6e7bad4860ef9d0efb3df",
+      "input": 15170,
+      "kept": 15108,
+      "source_sha256": "0ab9d457dbae39fe5bd49b9ca93dba81a3cd7c4fd9916272c854508147157d52"
+    },
+    "valid.jsonl": {
+      "excluded": 3,
+      "excluded_rows": [
+        {
+          "approx_tokens": 11541,
+          "density_chars_per_token": 5.59,
+          "line": 122,
+          "total_chars": 64509
+        },
+        {
+          "approx_tokens": 10535,
+          "density_chars_per_token": 5.16,
+          "line": 303,
+          "total_chars": 54362
+        },
+        {
+          "approx_tokens": 7869,
+          "density_chars_per_token": 10.25,
+          "line": 653,
+          "total_chars": 80689
+        }
+      ],
+      "filtered_sha256": "8fa3041670afeab76e3d58034a844d651e34bcfc14e6a1d274203604f47c2b45",
+      "input": 819,
+      "kept": 816,
+      "source_sha256": "5d3f2c79505570ad2fdb333541494291152f41491969c6b7cf2ad843378ff055"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+--- make ---
+make: Nothing to be done for `all'.
+--- git diff --check ---
+--- tracked files used ---
+tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json
+tests/helpers/routed_fp4_multilayer_peak_probe.py
+tests/test_deepseek_v4_nn_multilayer_peak.py
+--- staged r4 files tracked/indexed ---
+100644 bfd16616294430f77135f7fdc21d5892bdbb6840 0	agent-output/cmux-13-3b/coder-13-3b-5g-r3-notes.md
+100644 8872fd480351f9540ce6fdf6ef31cf69e6736306 0	agent-output/cmux-13-3b/coder-13-3b-5g-r4-focused-and-compile-orders.log
+100644 c147e1789c013d2b2b0454e3ce91f91bd77cc213 0	agent-output/cmux-13-3b/coder-13-3b-5g-r4-make-diff-tracking.log
+100644 fee8cb273c75d3d6d85edc6e80c70392fd3b87d0 0	agent-output/cmux-13-3b/coder-13-3b-5g-r4-tracked-baseline.log
+100644 85bbee5add47b74ab0fdce3c52c7047cecff9040 0	tests/test_deepseek_v4_nn_multilayer_peak.py
+--- unstaged r4 files ---
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r3-notes.md
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r4-focused-and-compile-orders.log
+AM agent-output/cmux-13-3b/coder-13-3b-5g-r4-make-diff-tracking.log
+A  agent-output/cmux-13-3b/coder-13-3b-5g-r4-tracked-baseline.log
+A  tests/test_deepseek_v4_nn_multilayer_peak.py
+--- helper/report worktree-index byte checks ---
+tests/helpers/routed_fp4_multilayer_peak_probe.py c085c77d10c763aa99d6f145c2a3361a6978d762
+index c085c77d10c763aa99d6f145c2a3361a6978d762
+agent-output/cmux-13-3b/multilayer-peak-report.json 5b3dc98226384aa8764e06a939a2c7ae18876217
+index 5b3dc98226384aa8764e06a939a2c7ae18876217
+tests/fixtures/deepseek_v4_nn_multilayer_peak_topology.json b8374586bbb8d6a90cba05e14440b9933666f561
+index b8374586bbb8d6a90cba05e14440b9933666f561
+--- r4 production diff names ---
+agent-output/cmux-13-3b/multilayer-peak-report.json
+tests/helpers/routed_fp4_multilayer_peak_probe.py
+--- r4 scope note ---
+r4 edits are limited to tests/test_deepseek_v4_nn_multilayer_peak.py plus r4 evidence appended to coder notes/logs.
+Helper/report/fixture hashes above are worktree/index byte-identical; their cached presence predates this r4 mask-test-only edit.

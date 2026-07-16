@@ -1,0 +1,20 @@
+tracked_test_files=45
+..............................................................................................s.................................................................... [ 32%]
+.sss..............sss......s.........s....................... [ 44%]
+................................................................ [ 57%]
+........................................................................ [ 71%]
+................................sss................................... [ 85%]
+.............................................s.............s [ 97%]
+s..............                                                          [100%]
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_fp4_dequant_real_ckpt.py:32: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+490 passed, 15 skipped, 2 warnings, 86 subtests passed in 74.85s (0:01:14)
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

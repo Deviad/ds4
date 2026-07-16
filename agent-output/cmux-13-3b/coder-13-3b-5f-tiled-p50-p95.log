@@ -1,0 +1,6 @@
+H=4096 I=2048 reps=9 warm=3
+R=1 forward_p50=0.001010s forward_p95=0.001401s input_vjp_p50=0.001612s input_vjp_p95=0.002028s
+R=8 forward_p50=0.001012s forward_p95=0.001090s input_vjp_p50=0.001624s input_vjp_p95=0.001780s
+R=32 forward_p50=0.002489s forward_p95=0.002546s input_vjp_p50=0.004213s input_vjp_p95=0.004296s
+R=96 forward_p50=0.006039s forward_p95=0.006441s input_vjp_p50=0.010583s input_vjp_p95=0.010859s
+R=96 extrapolated_256x43x20_p50=3659.499s (1.017h) p95=3808.838s (1.058h)

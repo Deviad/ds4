@@ -1,0 +1,231 @@
+.....FFF.F......                                                         [100%]
+=================================== FAILURES ===================================
+_ test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u1 == +limit-1.0-0-1.0] _
+
+case = 'u1 == +limit', w1_scale = 1.0, w3_code = 0, x0 = 1.0
+
+    @pytest.mark.parametrize(
+        "case,w1_scale,w3_code,x0",
+        [
+            ("u1 == +limit", 1.0, 0x00, 1.0),
+            ("u3 == +limit", 0.5, 0x02, 1.0),
+            ("u3 == -limit", 0.5, 0x0A, 1.0),
+        ],
+    )
+    def test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative(case, w1_scale, w3_code, x0):
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_input_vjp_one
+    
+        H, I, limit = 32, 1, 1.0
+        x = np.zeros((1, H), dtype=np.float32); x[0, 0] = x0
+        g = np.zeros_like(x); g[0, 0] = 1.0
+        rows = np.array([0], dtype=np.int32)
+        factor = np.array([1.0], dtype=np.float32)
+        w1, s1 = _one_fp4_row(0x02, rows=I, logical_cols=H, scale=w1_scale)
+        w3, s3 = _one_fp4_row(w3_code, rows=I, logical_cols=H, scale=1.0)
+        w2, s2 = _one_fp4_row(0x02, rows=H, logical_cols=I, scale=1.0)
+    
+        _, hidden, W1, W3, W2, u1, u3 = _forward_np(x, rows, w1, s1, w3, s3, w2, s2, H=H, I=I, limit=limit)
+        ge = g[rows]
+        gu = ge @ W2
+        gate = np.minimum(u1, limit)
+        up = np.clip(u3, -limit, limit)
+        sig = 1.0 / (1.0 + np.exp(-gate))
+        silu = gate * sig
+        dhidden = factor[:, None] * gu
+        dup = dhidden * silu * ((u3 > -limit) & (u3 < limit))
+        dgate = dhidden * up * (sig + gate * sig * (1.0 - sig)) * (u1 < limit)
+        dx_ref = dgate @ W1 + dup @ W3
+        a_ref = np.sum(hidden * gu, axis=-1)
+    
+        dx, a = packed_fp4_input_vjp_one(
+            mx.array(x, dtype=mx.float32), mx.array(g, dtype=mx.float32), mx.array(rows, dtype=mx.int32), mx.array(factor, dtype=mx.float32),
+            mx.array(w1, dtype=mx.uint8), mx.array(s1, dtype=mx.bfloat16), mx.array(w3, dtype=mx.uint8), mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8), mx.array(s2, dtype=mx.bfloat16), hidden_size=H, intermediate_size=I, limit=limit,
+        )
+>       mx.eval(dx, a)
+E       RuntimeError: [metal::Device] Unable to build metal library from source
+E       mlx/backend/metal/kernels/utils.h:523:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w1_tile[j][lane] = in_bounds ? ds4_fp4_weight(w1, s1, w1_strides, s1_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+E       mlx/backend/metal/kernels/utils.h:524:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w3_tile[j][lane] = in_bounds ? ds4_fp4_weight(w3, s3, w3_strides, s3_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:261: RuntimeError
+_ test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u3 == +limit-0.5-2-1.0] _
+
+case = 'u3 == +limit', w1_scale = 0.5, w3_code = 2, x0 = 1.0
+
+    @pytest.mark.parametrize(
+        "case,w1_scale,w3_code,x0",
+        [
+            ("u1 == +limit", 1.0, 0x00, 1.0),
+            ("u3 == +limit", 0.5, 0x02, 1.0),
+            ("u3 == -limit", 0.5, 0x0A, 1.0),
+        ],
+    )
+    def test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative(case, w1_scale, w3_code, x0):
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_input_vjp_one
+    
+        H, I, limit = 32, 1, 1.0
+        x = np.zeros((1, H), dtype=np.float32); x[0, 0] = x0
+        g = np.zeros_like(x); g[0, 0] = 1.0
+        rows = np.array([0], dtype=np.int32)
+        factor = np.array([1.0], dtype=np.float32)
+        w1, s1 = _one_fp4_row(0x02, rows=I, logical_cols=H, scale=w1_scale)
+        w3, s3 = _one_fp4_row(w3_code, rows=I, logical_cols=H, scale=1.0)
+        w2, s2 = _one_fp4_row(0x02, rows=H, logical_cols=I, scale=1.0)
+    
+        _, hidden, W1, W3, W2, u1, u3 = _forward_np(x, rows, w1, s1, w3, s3, w2, s2, H=H, I=I, limit=limit)
+        ge = g[rows]
+        gu = ge @ W2
+        gate = np.minimum(u1, limit)
+        up = np.clip(u3, -limit, limit)
+        sig = 1.0 / (1.0 + np.exp(-gate))
+        silu = gate * sig
+        dhidden = factor[:, None] * gu
+        dup = dhidden * silu * ((u3 > -limit) & (u3 < limit))
+        dgate = dhidden * up * (sig + gate * sig * (1.0 - sig)) * (u1 < limit)
+        dx_ref = dgate @ W1 + dup @ W3
+        a_ref = np.sum(hidden * gu, axis=-1)
+    
+        dx, a = packed_fp4_input_vjp_one(
+            mx.array(x, dtype=mx.float32), mx.array(g, dtype=mx.float32), mx.array(rows, dtype=mx.int32), mx.array(factor, dtype=mx.float32),
+            mx.array(w1, dtype=mx.uint8), mx.array(s1, dtype=mx.bfloat16), mx.array(w3, dtype=mx.uint8), mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8), mx.array(s2, dtype=mx.bfloat16), hidden_size=H, intermediate_size=I, limit=limit,
+        )
+>       mx.eval(dx, a)
+E       RuntimeError: [metal::Device] Unable to build metal library from source
+E       mlx/backend/metal/kernels/utils.h:523:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w1_tile[j][lane] = in_bounds ? ds4_fp4_weight(w1, s1, w1_strides, s1_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+E       mlx/backend/metal/kernels/utils.h:524:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w3_tile[j][lane] = in_bounds ? ds4_fp4_weight(w3, s3, w3_strides, s3_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:261: RuntimeError
+_ test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u3 == -limit-0.5-10-1.0] _
+
+case = 'u3 == -limit', w1_scale = 0.5, w3_code = 10, x0 = 1.0
+
+    @pytest.mark.parametrize(
+        "case,w1_scale,w3_code,x0",
+        [
+            ("u1 == +limit", 1.0, 0x00, 1.0),
+            ("u3 == +limit", 0.5, 0x02, 1.0),
+            ("u3 == -limit", 0.5, 0x0A, 1.0),
+        ],
+    )
+    def test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative(case, w1_scale, w3_code, x0):
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_input_vjp_one
+    
+        H, I, limit = 32, 1, 1.0
+        x = np.zeros((1, H), dtype=np.float32); x[0, 0] = x0
+        g = np.zeros_like(x); g[0, 0] = 1.0
+        rows = np.array([0], dtype=np.int32)
+        factor = np.array([1.0], dtype=np.float32)
+        w1, s1 = _one_fp4_row(0x02, rows=I, logical_cols=H, scale=w1_scale)
+        w3, s3 = _one_fp4_row(w3_code, rows=I, logical_cols=H, scale=1.0)
+        w2, s2 = _one_fp4_row(0x02, rows=H, logical_cols=I, scale=1.0)
+    
+        _, hidden, W1, W3, W2, u1, u3 = _forward_np(x, rows, w1, s1, w3, s3, w2, s2, H=H, I=I, limit=limit)
+        ge = g[rows]
+        gu = ge @ W2
+        gate = np.minimum(u1, limit)
+        up = np.clip(u3, -limit, limit)
+        sig = 1.0 / (1.0 + np.exp(-gate))
+        silu = gate * sig
+        dhidden = factor[:, None] * gu
+        dup = dhidden * silu * ((u3 > -limit) & (u3 < limit))
+        dgate = dhidden * up * (sig + gate * sig * (1.0 - sig)) * (u1 < limit)
+        dx_ref = dgate @ W1 + dup @ W3
+        a_ref = np.sum(hidden * gu, axis=-1)
+    
+        dx, a = packed_fp4_input_vjp_one(
+            mx.array(x, dtype=mx.float32), mx.array(g, dtype=mx.float32), mx.array(rows, dtype=mx.int32), mx.array(factor, dtype=mx.float32),
+            mx.array(w1, dtype=mx.uint8), mx.array(s1, dtype=mx.bfloat16), mx.array(w3, dtype=mx.uint8), mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8), mx.array(s2, dtype=mx.bfloat16), hidden_size=H, intermediate_size=I, limit=limit,
+        )
+>       mx.eval(dx, a)
+E       RuntimeError: [metal::Device] Unable to build metal library from source
+E       mlx/backend/metal/kernels/utils.h:523:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w1_tile[j][lane] = in_bounds ? ds4_fp4_weight(w1, s1, w1_strides, s1_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+E       mlx/backend/metal/kernels/utils.h:524:44: error: no matching function for call to 'ds4_fp4_weight'
+E                   w3_tile[j][lane] = in_bounds ? ds4_fp4_weight(w3, s3, w3_strides, s3_strides, i, k) : 0.0f;
+E                                                  ^~~~~~~~~~~~~~
+E       mlx/backend/metal/kernels/utils.h:468:14: note: candidate function not viable: cannot pass pointer to address space 'constant' as a pointer to address space 'device' in 2nd argument
+E       inline float ds4_fp4_weight(
+E                    ^
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:261: RuntimeError
+___ test_exported_outer_graph_contains_custom_kernel_not_dequant_arithmetic ____
+
+tmp_path = PosixPath('/private/var/folders/bf/bg8nrdrx27z4cmyv4bm5z5_m0000gn/T/.ctx-mode-B6eySX/pytest-of-spotted/pytest-0/test_exported_outer_graph_cont0')
+
+    def test_exported_outer_graph_contains_custom_kernel_not_dequant_arithmetic(tmp_path):
+        from ds4_ft_mlx.routed_fp4_metal import packed_fp4_forward_one
+    
+        H, I = 32, 8
+        x, rows, w1, s1, w3, s3, w2, s2 = _fixture(H, I, T=3)
+>       y = packed_fp4_forward_one(
+            mx.array(x, dtype=mx.float32), mx.array(rows[:2], dtype=mx.int32),
+            mx.array(w1, dtype=mx.uint8), mx.array(s1, dtype=mx.bfloat16), mx.array(w3, dtype=mx.uint8), mx.array(s3, dtype=mx.bfloat16),
+            mx.array(w2, dtype=mx.uint8), mx.array(s2, dtype=mx.bfloat16), hidden_size=H, intermediate_size=I, limit=1.7,
+        )
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:288: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:197: in packed_fp4_forward_one
+    R, H, I = _validate_one(
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:165: in _validate_one
+    rows_values = _rows_list(rows, int(T))
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+rows = array([0, 3], dtype=int32), T = 3
+
+    def _rows_list(rows: mx.array, T: int) -> list[int]:
+        _check_rank_dtype("rows", rows, 1, mx.int32)
+        values = [int(v) for v in rows.tolist()]
+        if any(v < 0 or v >= T for v in values):
+>           raise ValueError("rows must be in [0,T)")
+E           ValueError: rows must be in [0,T)
+
+python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py:136: ValueError
+=============================== warnings summary ===============================
+python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345
+  /Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:381
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_nn_routed_fp4_metal.py:381: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+tests/test_deepseek_v4_nn_routed_fp4_metal.py:398
+  /Users/spotted/projects/ds4-finetuning/tests/test_deepseek_v4_nn_routed_fp4_metal.py:398: PytestUnknownMarkWarning: Unknown pytest.mark.slow - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.slow
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u1 == +limit-1.0-0-1.0]
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u3 == +limit-0.5-2-1.0]
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_input_vjp_exact_clip_boundaries_match_strict_zero_derivative[u3 == -limit-0.5-10-1.0]
+FAILED tests/test_deepseek_v4_nn_routed_fp4_metal.py::test_exported_outer_graph_contains_custom_kernel_not_dequant_arithmetic
+4 failed, 12 passed, 2 deselected, 3 warnings in 2.08s
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

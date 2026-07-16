@@ -1,0 +1,5 @@
+# Story 14.3b — BA timeout repin
+
+User explicitly authorized a new reviewed smoke contract after the filtered-dataset smoke reached trainer startup but timed out at 600s with 0/1 iterations. Evidence: `agent-output/cmux-14-3/smoke-log.txt` shows 0%, fail marker says `smoke timed out after 600s`; adapter output directory empty; lock released.
+
+Propose minimal timeout-only repin from 600s to 1200s (20 minutes). Preserve filtered dataset path, model/config/adapter paths, 4096 max length, iters=1, batch=1, lr=1e-5, mask-prompt, grad-checkpoint, segment-size=1, lock/preflight/report/abort/no-retry/no-fallback semantics. State this does not claim convergence, OOM repair, or correctness beyond one bounded attempt. Update docs/backlog.md with exact user-story format and acceptance criteria. No production code edits, real smoke, training, commit, or push. Write requirements.md and marker.

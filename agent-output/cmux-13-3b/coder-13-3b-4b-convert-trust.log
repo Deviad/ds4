@@ -1,0 +1,84 @@
+[transformers] You are using a model of type `deepseek_v4_nn` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+[transformers] PreTrainedConfig got `key=rope_scaling` in kwargs but hasn't set it as attribute. For RoPE standardization you need to set `self.rope_parameters` in model's config. 
+[INFO] Loading
+Traceback (most recent call last):
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/models/auto/configuration_auto.py", line 407, in from_pretrained
+    config_class = CONFIG_MAPPING[config_dict["model_type"]]
+                   ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/models/auto/configuration_auto.py", line 107, in __getitem__
+    raise KeyError(key)
+KeyError: 'deepseek_v4_nn'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/models/auto/tokenization_auto.py", line 716, in from_pretrained
+    config = AutoConfig.from_pretrained(
+        pretrained_model_name_or_path, trust_remote_code=trust_remote_code, **kwargs
+    )
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/models/auto/configuration_auto.py", line 409, in from_pretrained
+    raise ValueError(
+    ...<8 lines>...
+    )
+ValueError: The checkpoint you are trying to load has model type `deepseek_v4_nn` but Transformers does not recognize this architecture. This could be because of an issue with the checkpoint, or because your version of Transformers is out of date.
+
+You can update Transformers with the command `pip install --upgrade transformers`. If this does not work, and the checkpoint is very new, then there may not be a release version that supports this model yet. In this case, you can get the most up-to-date code by installing Transformers from source with the command `pip install git+https://github.com/huggingface/transformers.git`
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/bin/mlx_lm.convert", line 10, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/mlx_lm/convert.py", line 259, in main
+    convert(**vars(args))
+    ~~~~~~~^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/mlx_lm/convert.py", line 112, in convert
+    model, tokenizer, config = load(
+                               ~~~~^
+        hf_path,
+        ^^^^^^^^
+    ...<3 lines>...
+        lazy=True,
+        ^^^^^^^^^^
+    )
+    ^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/mlx_lm/utils.py", line 495, in load
+    tokenizer = load_tokenizer(
+        model_path, tokenizer_config, eos_token_ids=config.get("eos_token_id", None)
+    )
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/mlx_lm/utils.py", line 446, in load_tokenizer
+    return _load_tokenizer(
+        model_path,
+        tokenizer_config_extra,
+        eos_token_ids=eos_token_ids,
+    )
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/mlx_lm/tokenizer_utils.py", line 614, in load
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path, **(tokenizer_config_extra or {})
+    )
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/models/auto/tokenization_auto.py", line 720, in from_pretrained
+    config = PreTrainedConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/configuration_utils.py", line 667, in from_pretrained
+    return cls.from_dict(config_dict, **kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/configuration_utils.py", line 844, in from_dict
+    config = cls(**config_dict)
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/huggingface_hub/dataclasses.py", line 275, in init_with_validate
+    initial_init(self, *args, **kwargs)  # type: ignore [call-arg]
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/huggingface_hub/dataclasses.py", line 190, in __init__
+    self.__post_init__(**additional_kwargs)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/configuration_utils.py", line 287, in __post_init__
+    kwargs = self.convert_rope_params_to_dict(**kwargs)
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/modeling_rope_utils.py", line 726, in convert_rope_params_to_dict
+    self.standardize_rope_params()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/modeling_rope_utils.py", line 760, in standardize_rope_params
+    self.rope_parameters.setdefault("original_max_position_embeddings", self.max_position_embeddings)
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/spotted/projects/ds4-finetuning/python-envs/mlx/.venv/lib/python3.13/site-packages/transformers/configuration_utils.py", line 436, in __getattribute__
+    return super().__getattribute__(key)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+AttributeError: 'PreTrainedConfig' object has no attribute 'max_position_embeddings'

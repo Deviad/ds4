@@ -1,0 +1,4 @@
+primitive_forward_max_abs=6.821210263296962e-13
+primitive_dx_max_abs=4.547473508864641e-13
+primitive_a_max_abs=3.410605131648481e-13
+formula_envelope_mib=1504 headroom_mib=544

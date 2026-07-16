@@ -1,0 +1,5 @@
+schema_version=1
+preset=coding
+preset_version=1
+class=full
+goal=Repin bounded smoke dataset to filtered 4096-safe copy

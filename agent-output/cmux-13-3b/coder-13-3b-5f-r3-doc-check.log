@@ -1,0 +1,44 @@
+--- backlog 13.3b-5f clauses
+4036-STOP-rules: S-orphan / S-shape / S-frozen / S-strict (requirements-13-3b-4.md §5). NONE fired
+4039:#### Story 13.3b-5 — MILESTONE: opaque packed-FP4 Metal/MLX training primitive, then smoke-train 43-layer real — **Status: [ ] IN PROGRESS — BA re-pin 13.3b-5f; GO to Architect for durable primitive/VJP ADR, then one TDD RED→GREEN implementation slice; Python custom-VJP Path A STOPPED; real 4096 smoke only after Reviewer PASS + Test Manager GREEN**
+4048-> MLX 0.31.2 Python `forward_one` + nested `mx.vjp` composition remains STOPPED because outer transforms
+4087-> failure means STOP and re-entry through Architect; no automatic 3072/2048/1536/1024 retry.
+4097-> **Q1 history (now moot) — `ba-13-3b-5-stop.md`.** First BA run STOPPED: model-4bit absent, no
+4116-   `abs(got-ref) <= 2e-6 + 1e-6*abs(ref)`, all outputs are finite, shape/dtype/token order are exact,
+4117-   and NRMSE is `<=1e-6`. Report maximum absolute error and maximum relative error where
+4118-   `max(abs(got),abs(ref)) > 1e-6`; raw maximum absolute error above `1e-6` is not independently a
+4119-   failure when the element-wise combined bound and NRMSE both pass.
+4121-   and score/gate cotangents match independent ordinary-MLX/dense references at `atol=rtol=1e-5`,
+4153-    `simd_sum`, and lane 0 alone writes. K1/K4 use the same lane mapping, FMA order, `simd_sum`
+4155-    evidence must require `simd_sum` in K1-K5 and reject lane-0 32-wide serial dots and every
+4158-    projection probe requires input and score gradients at `atol=rtol=1e-5` against the independent
+4159-    path; projected logits satisfy the AC 2 combined element-wise bound and NRMSE `<=1e-6`; top-1 is
+4163-    measured repeats after warm-up. At `R=96`, forward p50 is `<=0.0080 s`, input-VJP p50 is
+4169---batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint
+4171-PID, and MLX cache/active/peak telemetry after validation and every completed step. STOP before first
+4176-STOP conditions carried unchanged from Architect 13.3b-5e §10:
+4189:Additional 13.3b-5f STOP: primitive requires production inference/additional FROZEN edits; changes any
+4194-update, or fails adapter validation → STOP and return to Architect. No approximation, C++, native
+4197-Architect r3 reduction STOP — STOP and return to Architect if any occurs:
+4198-- SIMD forward fails the combined bound or NRMSE gate;
+4199-- independent input/score gradients fail `atol=rtol=1e-5`;
+4202-- the downstream proxy changes top-1 without a reference tie or fails its numerical gates;
+4203-- R=96 exceeds any performance gate above;
+4204-- a shape-selected/lane-0 serial semantic variant is reintroduced;
+4206-- canonical backlog remains at absolute-only `1e-6` when Coder requests r3 review;
+4209-No real 4096 smoke is authorized by this adjudication.
+4216-> **GATED on 13.3b complete (was Story 13.3; BA 2026-06-26, cmux-13-3 STOP-ESCALATE).** NOT a RUN slice
+4218-> STOP rationale (Blocker A: parity-fixture not nn.Module; Blocker B: hash_moe
+4224-1. `mlx_lm.lora --train --iters 20 --batch-size 1 --learning-rate 1e-5
+4228-   decrease over last 10" — BA Q5: 20 iters @ LR 1e-5 bs=1 is too noisy for
+--- ADR 0028 clauses
+57:All dot products accumulate in FP32. `hidden` and `y_e` are FP32; the public primitive output is `y_e[R_e,H]` FP32, matching the current FP32-dequantized MLX path. Metal uses FP32 and `metal::precise::exp` for sigmoid. Because deterministic SIMD and ordinary-MLX reductions may associate the same FP32 products differently, forward parity against an independent ADR 0024 reference uses the scale-aware elementwise bound `abs(got-ref) <= 2e-6 + 1e-6*abs(ref)` and NRMSE `<=1e-6`. Tests report maximum absolute error and maximum relative error above scale `1e-6`; a raw maximum absolute error above `1e-6` is not independently a failure.
+104:Use six cached Metal kernels. Every matrix kernel uses `BM=8`, `BN=8`, `BK=32`, `threadgroup=(256,1,1)`, eight SIMDgroups per threadgroup, FP32 lane accumulators, and a 32-logical-input dequant tile in threadgroup memory. A threadgroup owns an `8x8` output tile; one SIMDgroup owns one token row. The first SIMDgroup loads and dequantizes the `8x32` weight tile, all row SIMDgroups reuse it, and `simd_sum` reduces the K lanes. Lane `l` accumulates coordinates `l,l+32,l+64,...` with FP32 `metal::fma` in increasing block order; after all K blocks every lane participates in `simd_sum`, and lane 0 alone writes. `pair_swiglu_forward` and `pair_swiglu_vjp_terms` must use the same lane mapping, FMA order, final reduction, and reduced `u1/u3` values for clamp decisions. `BK=32` aligns exactly with one ADR 0024 scale block. Lane-0 serial tile dots and shape-selected reduction variants are forbidden.
+173:- Six launches per non-empty expert trade launch overhead for a small exact implementation. The `8x8x32` weight-reuse tile keeps the design credible for the gated 43-layer/20-iteration smoke and avoids the prohibited quadratic recomputation. Before Reviewer round 3, a tracked 25-repeat benchmark at `R=96` must show forward p50 `<=0.0080s`, input-VJP p50 `<=0.0140s`, and `256x43x20` extrapolation `<=1.25h` p50 / `<=1.35h` p95. These are review gates, not authorization for the later 5,000-iteration run.
+--- technical spec clauses
+645:Python nested-`mx.vjp` routed FP4 training path. No real 4096-token training smoke is
+652:one final `simd_sum`, and lane 0 writes. Forward and VJP recomputation must use
+655:`abs(got-ref) <= 2e-6 + 1e-6*abs(ref)` plus NRMSE `<=1e-6`; VJP/score parity
+657:Reviewer round 3, the tracked 25-repeat `R=96` benchmark must report forward
+658:p50 `<=0.0080s`, input-VJP p50 `<=0.0140s`, and `256x43x20` extrapolation
+659:`<=1.25h` p50 / `<=1.35h` p95. These gates do not authorize the full

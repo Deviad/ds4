@@ -1,0 +1,5 @@
+# Story 14.3 filtered smoke dataset repin — Architect
+
+After BA requirements exist, read them in full plus docs/architecture.md, docs/technical-spec.md, relevant ADRs, current scripts/ds4_segmented_smoke.py and scripts/finetune_ds4.py, and r12 PASS/GREEN handoffs.
+
+Design minimal safe repin from original dataset path to `/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`. Keep original dataset immutable; preserve exact 4096 bounded command and all preflight/lock/report/abort semantics. Define how the derived filter-report provenance is verified before real smoke, whether path constant/config and command catalog/docs/backlog need updates, and how synthetic tests prove original/default behavior is not silently changed outside explicit segmented-smoke activation. No real training/smoke or asset reads beyond the already-created filter report; no code edits. Write architecture.md and marker; STOP on ambiguity.

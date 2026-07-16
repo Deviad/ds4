@@ -1,0 +1,9 @@
+layer_count=43
+pipeline_layer_count=43
+unique_layer_types=['DecoderLayerNN']
+all_decoder_layers=True
+class_call_changed=True
+all_layers_share_checkpointed_class_call=True
+checkpoint_wrapper_name=checkpointed_fn
+checkpoint_wrapper_freevars=('fn',)
+trainer_callsite=grad_checkpoint(model.layers[0])

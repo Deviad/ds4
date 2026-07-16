@@ -1,0 +1,36 @@
+5dee4ce7037902c9787b523373ca46d40aaf6de0
+c1d3bf0945624e07eaf669a125cc2156023e1ad2
+Davide Pugliese
+2026-07-14T13:40:55+02:00
+feat: add packed FP4 MLX training path
+
+M	agent-output/cmux-13-3b/coder-13-3b-3-notes.md
+M	agent-output/cmux-13-3b/coder-13-3b-4-notes.md
+M	agent-output/cmux-13-3b/coder-13-3b-4-r2-notes.md
+M	agent-output/cmux-13-3b/coder-13-3b-4b-notes.md
+A	agent-output/cmux-13-3b/coder-13-3b-5d-notes.md
+A	agent-output/cmux-13-3b/coder-13-3b-5d-stop.md
+A	agent-output/cmux-13-3b/coder-13-3b-5f-notes.md
+A	agent-output/cmux-13-3b/coder-13-3b-5f-r2-red.log
+A	agent-output/cmux-13-3b/coder-13-3b-5f-r2-routed-bench.json
+A	agent-output/cmux-13-3b/coder-13-3b-5f-r2-tracked-pytest.log
+A	docs/adr/0025-real-trainable-nn-module-deepseek-v4-port.md
+A	docs/adr/0026-csa-hca-indexer-mlx-real-port.md
+A	docs/adr/0028-opaque-packed-fp4-metal-training-primitive.md
+A	docs/architecture.md
+A	docs/backlog.md
+A	docs/technical-spec.md
+A	python-envs/mlx/pyproject.toml
+A	python-envs/mlx/src/ds4_ft_mlx/metal/ds4_routed_fp4_train.metal
+M	python-envs/mlx/src/ds4_ft_mlx/real_forward_intermediate_dump.py
+A	python-envs/mlx/src/ds4_ft_mlx/routed_fp4_metal.py
+M	python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4.py
+M	python-envs/mlx/src/ds4_ft_mlx/vendor/mlx_lm_models/deepseek_v4_nn.py
+A	scripts/apply_passthrough_chat_template.py
+A	tests/helpers/routed_fp4_bench.py
+A	tests/helpers/routed_fp4_memory_probe.py
+M	tests/test_deepseek_v4_nn_fp4_parity.py
+A	tests/test_deepseek_v4_nn_routed_fp4_metal.py
+A	tests/test_deepseek_v4_nn_sparse_routed_backward.py
+M	tests/test_deepseek_v4_real_config_reference_forward.py
+M	tests/test_numpy_real_forward_reference_composition.py
