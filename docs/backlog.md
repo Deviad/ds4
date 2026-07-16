@@ -4810,7 +4810,7 @@ As a DS4 fine-tuning operator (WHO), I want the bounded real-smoke hard timeout 
 
 *No commit or push was performed. All changes remain staged in the local worktree. The supervisor/operator owns the commit/push decision.*
 
-### Story 14.4 — Repository reproducibility and stale-file cleanup — **Status: [ IMPLEMENTED — local cleanup staged; inner commit 80fab4e; inner branch story-14-loss-and-grad-seam pushed to origin; outer commit pending final gates; remote reachability RESOLVED ]**
+### Story 14.4 — Repository reproducibility and stale-file cleanup — **Status: [x] COMPLETE 2026-07-16 — Reviewer PASS (final) + Test Manager GREEN (final); Commit 1 `94a93d5`; fresh-clone 246 passed; vendor `80fab4e` reachable; 111 stale root files deleted; 21 tracked runtime-state paths removed; 174 Path A evidence preserved; no outer push**
 
 As a DS4 fine-tuning repository maintainer (WHO), I want untracked implementation files committed and stale generated/ephemeral files removed from version control (WHAT), so that a fresh clone reproduces the full Epic 14 test baseline without missing imports or carrying transient junk (WHY).
 
@@ -4894,5 +4894,47 @@ As a DS4 fine-tuning repository maintainer (WHO), I want untracked implementatio
 - Commit 1: reviewed implementation (hygiene, manifests, pre-gate handoffs, vendor pin) — current staged index
 - Commit 2: final gate evidence (Reviewer report, Test Manager GREEN report, backlog closeout) — after both gates PASS
 - Final gate placeholder files removed from Commit 1 index; completed Test Manager report on disk under ignored `custom-handoffs/` for Commit 2
+
+## Closeout evidence — Story 14.4 complete (2026-07-16)
+
+**Reviewer PASS (final):** `custom-handoffs/14-4-repo-hygiene/review-final.md`
+- Reviewed staged tree: `cb7560973525a9445b972592d8e7b79a66ef86c2`
+- Exact staged counts: 116 A, 12 M, 21 D, total 149
+- Portable-wrapper gate: 14 `.pi/agents/bin/*.sh` wrappers all PASS (index `100755`, working-tree `0755`, `bash -n`, no hardcoded paths, sourced mode, exec mode, missing-target diagnostics, `AGENT_SKILLS_DIR` precedence, `PI_AGENT_SKILLS_DIR` fallback, non-spotted `HOME` fallback)
+- Synthetic fresh-clone gate: independent `git clone --no-local --no-checkout`, outer HEAD checkout, recursive remote submodule init → exact five-file suite `246 passed, 3 skipped, 1 warning, 2 subtests passed in 23.66s`; exit `0`
+- Vendor gate: outer gitlink `80fab4e419a57f9465bb9e2f4e90010d645e124c`; parent `15b522f...`; inner commit changes exactly `trainer.py` + `test_tuner_trainer.py`; remote `refs/heads/story-14-loss-and-grad-seam` advertises exact commit; `git show --check` exit `0`
+- Commit manifest addition/modification/deletion sets equal cached index exactly; no duplicates; lists sorted
+- Deletion manifest: 21 unique sorted paths, equals cached deletion set exactly
+- `git diff --cached --check`: exit `0`; unstaged tracked changes: 0; nonignored untracked: 0; binary blobs: 0; symlinks: 0
+- Active-memory repair: `_log_path.parent.mkdir(parents=True, exist_ok=True)` added; hash cascade updated; provider source/test/source-sentinel SHA-256 verified; Path A digest `7241924d...` intact; ADR 0028 `0aa743b...` intact
+- Stale deletion: all 21 index removals preserved locally and ignored; all 111 declared historical root Markdown files absent; `python-envs/legacy-trans/` absent; ambiguous `context.md` + `adapter-converter-implementation-gpt55.md` preserved locally, untracked, ignored; generated binaries preserved locally, untracked, ignored, absent from index
+- Findings: none
+
+**Test Manager GREEN (final):** `custom-handoffs/14-4-repo-hygiene/test-report-final.md`
+- Synthetic commit: `f62acbca2413cb1975ee3e551c76e9cfb3839050`
+- Portable wrappers: sourced mode OK, exec mode OK, missing target FATAL + exit 1, `AGENT_SKILLS_DIR` override OK
+- Fresh clone + recursive submodule fetch: OK
+- Exact five-file Epic 14 suite: `246 passed, 3 skipped, 1 warning, 2 subtests passed`
+- Path A: 365 / `7241924d...` digest intact
+- Vendor gitlink reachable
+- `git diff --cached --check`: OK
+- Zero nonignored untracked files
+- Smoke/protected hashes unchanged
+
+**Commit 1 SHA:** `94a93d5121707384d79bb93cc536d2769540a12e` (message: "Make DS4 fine-tuning checkout reproducible")
+
+**Vendor resolution:** Inner `80fab4e419a57f9465bb9e2f4e90010d645e124c` committed at parent `15b522f...`, remotely reachable on `refs/heads/story-14-loss-and-grad-seam` at `git@github.com:Deviad/mlx-lm.git`. Outer gitlink updated to match.
+
+**Stale cleanup executed:**
+- 111 historical root scratch Markdown files physically deleted
+- 21 tracked runtime-state paths removed from index (`.dispatch-epoch`, `.pipeline-slice.v1`, `.cmux-status/coder.done` outside Path A)
+- 174 Path A stale-looking tracked evidence files deliberately preserved as frozen evidence under permanent STOP
+- `python-envs/legacy-trans/` deleted (obsolete)
+- Generated binaries (`ds4_agent_test`, `tests/ds4_lora_test`, `tests/test_q4k_dot`) preserved locally, untracked, ignored, absent from index
+- Ambiguous `context.md` and `adapter-converter-implementation-gpt55.md` preserved locally, untracked, ignored
+
+**Non-claims (preserved):** This cleanup proves repository reproducibility and fresh-clone test baseline only. It does NOT prove convergence, OOM repair, throughput, full-training readiness, or any result beyond the existing Story 14.3 bounded smoke. Story 14.3 smoke evidence (`agent-output/cmux-14-3/smoke-report.json`, `smoke-log.txt`, `filtered-dataset-provenance.json`) remains intact at index blobs equal to `HEAD`.
+
+**No outer push.** Commit 1 is local. The supervisor/operator owns the push decision.
 
 **EOF Epic 14**
