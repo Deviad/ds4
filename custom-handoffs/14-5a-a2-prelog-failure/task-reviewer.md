@@ -1,0 +1,3 @@
+# A2 pre-log failure closeout — Reviewer
+
+Review requirements.md, failure evidence, and canonical docs diff. Confirm exact error/version diagnosis, zero calls/updates, all pinned A2/B2 paths absent except diagnostic markdown, no retry/cleanup, authorization consumed, B2 blocked, no overclaim. Verify code/test hashes remain c910d1b. Write review.md PASS/BLOCKED + marker. Direct only; no delegate/edit/real execution.

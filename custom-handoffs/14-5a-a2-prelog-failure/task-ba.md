@@ -1,0 +1,3 @@
+# Story 14.5a A2 pre-log failure — BA closeout
+
+Read agent-output/cmux-14-5-attempt-2/phase-a2-prelog-failure.md and current canonical docs. Update docs/backlog.md and training-next-status.md (technical-spec only if needed) to record exact authorized A2 invocation failure: commit c910d1b, exit 1, launch-check `MLX version mismatch: None`, canonical interpreter has mlx distribution 0.31.2 but module __version__ None, 0 training/provider calls/updates, no log/report/markers/adapter/final paths, no retry, namespace otherwise clean, A2 authorization consumed. State fresh reviewed repair/repin + explicit authorization required; B2 blocked. No repair/code edit/commit/push. Write requirements.md + marker.
