@@ -1,0 +1,3 @@
+# Story 14.5 — Reviewer r5 final
+
+Review latest r4 blockers against coder r5. Direct, no delegate. Probe actual lock fsync+unlink and release-unlink ownership/retry; Event/thread/watchdog rollback alarm(0); true run_phase boundary injections; Phase A/B success/failure/final aggregation; fs trap resolved tmp containment; one-attempt/tombstones. Resolve the two deselected real-trainer tests using canonical pinned PYTHONPATH/vendor environment—do not accept environment-based deselection if verdict-contributing. Run focused/exact suite and protected gates. PASS/BLOCKED to standby review + marker.

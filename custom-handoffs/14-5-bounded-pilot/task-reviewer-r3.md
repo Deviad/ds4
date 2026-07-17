@@ -1,0 +1,3 @@
+# Story 14.5 — Reviewer r3 final
+
+Read exact latest blocked review and coder-notes-r3. Work directly, no delegate. Verify all r2 blockers closed in executable path: real nested provider shape/dtypes/schema/token/finiteness; parser fields; tree_flatten+real MLX save; seed order; immutable pretraining Phase B identity and full contract binding; runtime/vendor/provenance gates; checkpoint schema/cardinality; callback order; report/marker payload/order; terminal mutation coverage. Run probes/focused/exact suites. Confirm no markers staged/real access/protected drift/doc overclaim. Write review-r3.md PASS/BLOCKED and marker.

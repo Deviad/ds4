@@ -190,3 +190,7 @@ Use ADRs for durable decisions; use `progress.md` and `training-next-status.md` 
 - `docs/backlog.md` — canonical Requirements, trackable user stories, and acceptance criteria. BA owns updates. User story format: `As a [type of user] (WHO), I want [some goal] (WHAT), so that [some reason] (WHY).`
 - `training-next-status.md` — current implementation status.
 - `AGENTS.md` — agent workflow and quality rules.
+
+### Story 14.5 bounded segmented pilot
+
+The bounded pilot is a separate, non-default entry point in `scripts/ds4_segmented_pilot.py`; it does not alter the frozen Story 14.3 smoke or default training commands. MLX-LM remains owner of optimizer updates and checkpoint cadence. The r4 candidate adds dynamic workspace resolution, fail-atomic success-evidence rollback, mutation-boundary tests, and byte-exact catalog guards around the existing nested provider result, pinned dataset namespace, flattened trainable saves, per-phase seeds, immutable asset identity, and dynamic resource observations. Terminal-evidence closure remains pending until those mutation-sensitive gates are independently verified. Phase A performs exactly two updates and Phase B performs one fresh-process update after loading the Phase A step-2 adapter. Resume evidence proves adapter-weight equality by canonical tensor digest only; it makes no optimizer-state, RNG, dataset-cursor, scheduler, global-step, convergence, or full-training-readiness claim. Independent Reviewer PASS and Test Manager GREEN remain required; real execution stays blocked until those gates pass.

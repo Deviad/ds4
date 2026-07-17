@@ -4426,11 +4426,13 @@ AC:
 
 > **Separate successor authorization (operator, 2026-07-14):** Epic 14 was authorized after Story 13.3b-5i permanently stopped Path A. It does not reopen Path A, rewrite its evidence, or change the historical fact that the 13.3b-5i closure itself authorized no successor. Epic 14 begins from a separately reviewed fork-bootstrap contract.
 
-### Story 14.0 — pinned fork and isolated source-selection bootstrap — **Status: [ ] READY FOR ARCHITECTURE — bootstrap only; no fork patch, real smoke, or training authorized**
+### Story 14.0 — pinned fork and isolated source-selection bootstrap — **Status: [x] COMPLETE 2026-07-16 — bootstrap implemented and verified; initial `15b522f...` pin advanced by Story 14.4 to reachable `80fab4e...`; historical no-fork-edit/no-real-execution scope preserved**
 
 As a DS4 fine-tuning maintainer (WHO), I want the authorized Deviad/mlx-lm fork pinned as a reproducible submodule with explicit isolated-environment source selection and verification (WHAT), so that later architecture work can evaluate a trainer-level successor without reopening Path A, silently changing MLX core, or touching real training assets (WHY).
 
 **Canonical requirements:** `agent-output/cmux-14-0/requirements.md`.
+
+**Status correction evidence (Story 14.5 BA, 2026-07-16):** Prior `READY FOR ARCHITECTURE` label was stale, not a historical reopening. Story 14.0 bootstrap is complete: `.gitmodules` and mode-160000 `vendor/mlx-lm` submodule exist; source selection/verification shipped; downstream Stories 14.1–14.4 completed; Story 14.4 Reviewer PASS and Test Manager GREEN verified remote recursive submodule initialization and exact fresh-clone suite `246 passed, 3 skipped`. Story 14.0's initial pin `15b522f593b7ca5fbc0cac6f7572d40859d2d8fe` remains the historical bootstrap identity; Story 14.4 later advanced the reviewed gitlink to remotely reachable `80fab4e419a57f9465bb9e2f4e90010d645e124c` on `story-14-loss-and-grad-seam`. This correction does not rewrite Story 14.0's bootstrap-only no-fork-edit/no-real-asset/no-training boundary.
 
 **Acceptance criteria:**
 
@@ -4936,5 +4938,41 @@ As a DS4 fine-tuning repository maintainer (WHO), I want untracked implementatio
 **Non-claims (preserved):** This cleanup proves repository reproducibility and fresh-clone test baseline only. It does NOT prove convergence, OOM repair, throughput, full-training readiness, or any result beyond the existing Story 14.3 bounded smoke. Story 14.3 smoke evidence (`agent-output/cmux-14-3/smoke-report.json`, `smoke-log.txt`, `filtered-dataset-provenance.json`) remains intact at index blobs equal to `HEAD`.
 
 **No outer push.** Commit 1 is local. The supervisor/operator owns the push decision.
+
+### Story 14.5 — Bounded multi-step training + resume pilot — **Status: [x] SYNTHETIC IMPLEMENTATION COMPLETE — Reviewer r7 PASS + Tester r7 GREEN; 71 focused passed; exact six-file suite 317 passed + 3 authorized skips; real Phase A awaiting separate explicit operator authorization**
+
+As a DS4 fine-tuning operator (WHO), I want a two-phase bounded segmented training pilot with two initial optimizer updates followed by one verified adapter-weight resume update (WHAT), so that checkpoint creation and continuation from prior trained adapter weights are proven before any larger training run (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-5-bounded-pilot/requirements.md`
+
+**Synthetic implementation closeout:** Story 14.3 smoke entry point remains intentionally frozen to one iteration, one provider call, fixed smoke paths, absent output directory, and one-observation report. Dedicated `scripts/ds4_segmented_pilot.py`, explicit non-default catalog steps, and tracked synthetic tests are complete. Existing `--resume-adapter-file` still loads adapter weights only; it does not restore optimizer, RNG, dataset cursor, scheduler, or global-step state. Reviewer r7 PASS and Tester r7 GREEN are final. Evidence: 71 focused tests passed; exact six-file suite 317 passed + 3 authorized protected real-GGUF skips. No real model, dataset, adapter, training, inference, CUDA, distributed, network, or protected GGUF execution occurred. Real Phase A remains blocked pending separate explicit operator authorization.
+
+**Exact shared identity:** model `/Volumes/Data NVME/mlx-ft/ds4/model-4bit`; filtered dataset `/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke`; config `/Volumes/Data NVME/mlx-ft/ds4/lora-config.json`; same DS4 segmented provider; max sequence 4096; batch 1; LR 1e-5; mask-prompt; grad-checkpoint; segment-size 1; gradient accumulation 1; seed 0; world size 1; no retry/fallback.
+
+**Phase A:** exactly 2 iterations / 2 provider calls / 2 optimizer updates; save/report cadence 1; eval cadence 2 (mandatory first/final validation preserved); output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a`; checkpoints `phase-a-start.safetensors`, `0000001_adapters.safetensors`, `0000002_adapters.safetensors`, final `adapters.safetensors`, `adapter_config.json`; hard timeout 2700s.
+
+**Phase B:** exactly 1 iteration / 1 provider call / 1 optimizer update; resume source Phase A `0000002_adapters.safetensors`; separate output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-b`; save/report/eval cadence 1; local step 1 maps global step 2→3; hard timeout 1500s. Before update, `resume-start.safetensors` canonical tensor digest must equal Phase A step-2 digest and differ from Phase A initial digest; after update, final digest must differ from resume-start.
+
+**Budget derivation:** Story 14.3 measured 1025.602482s for one iteration including 816.30s validation; derived non-validation remainder 209.302482s. Phase A estimate `2×816.30 + 2×209.302482 = 2051.204964s`; ×1.25 and round → 2700s. Phase B `1025.602482×1.25`, rounded → 1500s. Total active hard budget 4200s (70 minutes).
+
+**Evidence:** per-step finite float32 loss, positive/matching int32 token count, complete gradient paths/shapes/dtypes and all-finite result, provider/update ordinals, checkpoint file SHA-256 + canonical tensor digest, local/global progression, phase wall clocks, lock/cleanup state. Final `agent-output/cmux-14-5/pilot-report.json` must prove provider calls and updates `2+1=3`, Phase A checkpoint progression, Phase B resume equality, and Phase B post-resume change.
+
+**Execution gate:** Synthetic implementation gate closed with Reviewer r7 PASS + Tester r7 GREEN. Real Phase A remains unauthorized until separate explicit operator authorization. Any later real run uses visible cmux/panel execution, exact commands shown before each phase, separate operator authorization for Phase A then Phase B, one attempt per phase, existing 60s lock/preflight/abort semantics, fail-atomic success evidence, and durable phase/final reports and markers.
+
+**Acceptance criteria:**
+1. Story 14.0 status corrected to COMPLETE without rewriting its initial-pin/bootstrap-only history.
+2. Story 14.5 user story uses exact WHO/WHAT/WHY form.
+3. Phase A exactly 2 calls/updates; Phase B exactly 1 resumed call/update; total 3.
+4. Model/data/config/provider/training identity and distinct phase paths exactly pinned.
+5. Save cadence 1; resume source exact; checkpoint existence/hashes mandatory.
+6. Hard budgets exactly 2700s, 1500s, total 4200s with measured derivation recorded.
+7. Resume-start digest equals Phase A step-2 and differs from Phase A initial; Phase B final differs from resume-start.
+8. Reviewer PASS + Test Manager GREEN required before real authorization.
+9. One attempt per phase; no automatic retry/fallback, smoke rerun, alternate backend, Path A reopening, CUDA, or distributed change.
+10. Visible cmux/panel execution and final report required for any future real run.
+11. Claims limited to three bounded updates and adapter-weight continuity; no convergence, quality, throughput, OOM repair, full-readiness, optimizer/RNG/data-cursor continuity, or interruption-recovery claim.
+12. No training, inference, real-asset access, commit, or push during this slice.
+
+**STOP/ESCALATE:** Any inability to prove adapter-weight continuity before Phase B update, config/pin/path drift, required vendor-trainer semantic change, protected Story 14.3/Path A evidence mutation, budget increase, real-asset need during implementation, or untracked verdict file requires BA + Architect repin before execution.
 
 **EOF Epic 14**

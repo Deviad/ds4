@@ -75,6 +75,8 @@ MLX_STEPS = (
     "splice",
     "ds4-smoke",
     "ds4-segmented-smoke",
+    "ds4-segmented-pilot-phase-a",
+    "ds4-segmented-pilot-phase-b",
 )
 TORCH_MPS_STEPS = (
     "torch-env-create",
@@ -106,7 +108,7 @@ BACKEND_STEPS: dict[str, tuple[str, ...]] = {
 DEFAULT_BACKEND_STEPS: dict[str, tuple[str, ...]] = {
     # Raw `convert` is kept as an explicit diagnostic step, but the default
     # local path must route through FP8 emulation before mlx-lm conversion.
-    "local-mlx": tuple(step for step in MLX_STEPS if step not in ("convert", "ds4-segmented-smoke")),
+    "local-mlx": tuple(step for step in MLX_STEPS if step not in ("convert", "ds4-segmented-smoke", "ds4-segmented-pilot-phase-a", "ds4-segmented-pilot-phase-b")),
     "local-torch-mps": TORCH_MPS_STEPS,
     "remote-cuda": REMOTE_CUDA_STEPS,
     "cpu-check": CPU_CHECK_STEPS,
@@ -1314,10 +1316,37 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
     torch_real_v4_script = mlx_work / "torch_real_v4_feasibility.py"
     adapter_ds4 = path_arg(getattr(args, "adapter_ds4", None)) if getattr(args, "adapter_ds4", None) else mlx_work / "adapter.ds4.safetensors"
     lora_config = mlx_work / "lora-config.json"
+    pilot_work = pathlib.Path("/Volumes/Data NVME/mlx-ft/ds4")
+    pilot_model = pilot_work / "model-4bit"
+    pilot_data = pathlib.Path("/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke")
+    pilot_script = pathlib.Path("/Users/spotted/projects/ds4-finetuning/scripts/ds4_segmented_pilot.py")
     project_root = pathlib.Path(__file__).resolve().parent.parent
     scripts_dir = project_root / "scripts"
     script_path = pathlib.Path(__file__).resolve()
     setup_release_selector = mlx_lm_source_commands("release", mlx_work, project_root, script_path)[0]
+
+    def pilot_command(phase: str) -> str:
+        quote = lambda value: '"' + str(value).replace('"', '\\"') + '"'
+        continuation = " " + chr(92) + "\n"
+        phase_b = phase == "phase-b"
+        phase_path = pilot_work / ("adapters-segmented-pilot-phase-b" if phase_b else "adapters-segmented-pilot-phase-a")
+        log_path = project_root / "agent-output" / "cmux-14-5" / ("phase-b-log.txt" if phase_b else "phase-a-log.txt")
+        resume = continuation + "  --resume-adapter-file " + quote(pilot_work / "adapters-segmented-pilot-phase-a" / "0000002_adapters.safetensors") if phase_b else ""
+        iters, eval_steps = (1, 1) if phase_b else (2, 2)
+        return (f"bash -lc 'set -o pipefail\ncd {quote(project_root)}\nunset SSLKEYLOGFILE\n"
+                f"PYTHONUNBUFFERED=1 PYTHONPATH={quote(str(project_root / 'python-envs' / 'mlx' / 'src') + ':' + str(project_root / 'vendor' / 'mlx-lm'))}{continuation}"
+                f"{quote(pilot_work / '.venv' / 'bin' / 'python')}{continuation}{quote(pilot_script)}{continuation}"
+                f"  --phase {phase}{continuation}  --model {quote(pilot_model)}{continuation}"
+                f"  --data {quote(pilot_data)}{continuation}  --adapter-path {quote(phase_path)}{continuation}"
+                f"  --config {quote(pilot_work / 'lora-config.json')}{resume}{continuation}"
+                f"  --train --fine-tune-type lora --num-layers 16{continuation}"
+                f"  --iters {iters} --batch-size 1 --learning-rate 1e-5{continuation}"
+                f"  --max-seq-length 4096 --mask-prompt --grad-checkpoint{continuation}"
+                f"  --grad-accumulation-steps 1 --seed 0 --optimizer adam{continuation}"
+                f"  --val-batches 25 --steps-per-report 1 --steps-per-eval {eval_steps}{continuation}"
+                f"  --save-every 1 --segment-size 1{continuation}"
+                f"  2>&1 | tee {quote(log_path)}'")
+
     return {
         "setup-env": [f"mkdir -p {q(mlx_work)} && cd {q(mlx_work)} && {{ test -d .venv || uv venv --seed .venv; }} && {activate} && pip install -U pip && pip install -e {q(project_root / 'python-envs' / 'mlx')} && python -c {q('from ds4_ft_mlx.mlx_lm_plugin import install_startup_pth_hook; print(install_startup_pth_hook())')}", setup_release_selector],
         "mlx-lm-source": mlx_lm_source_commands(getattr(args, "mlx_lm_source", "release"), mlx_work, project_root, script_path),
@@ -1353,6 +1382,8 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
         "splice-dry-run": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)} --dry-run"],
         "splice": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)}"],
         "ds4-smoke": [f"cd {q(ds4_root)} && ./ds4 -m {q(mixed)} -p {q('Explain why deduplicating by question matters for supervised fine-tuning.')} -n 300"],
+        "ds4-segmented-pilot-phase-a": [pilot_command("phase-a")],
+        "ds4-segmented-pilot-phase-b": [pilot_command("phase-b")],
         "ds4-segmented-smoke": [f"cd {q(mlx_work)} && unset SSLKEYLOGFILE && . {q(mlx_work / '.venv/bin/activate')} && PYTHONPATH={q(project_root / 'python-envs' / 'mlx' / 'src')}:{q(project_root / 'vendor' / 'mlx-lm')} python {q(project_root / 'scripts' / 'ds4_segmented_smoke.py')} --model {q(mlx_work / 'model-4bit')} --data {q(dataset_root / "mlx-4096-smoke")} --adapter-path {q(mlx_work / 'adapters-segmented-smoke')} --config {q(lora_config)} --iters 1 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint --segment-size 1 > {q(project_root / 'agent-output' / 'cmux-14-3' / 'smoke-log.txt')} 2>&1"],
         "torch-env-create": [
             f"mkdir -p {q(mlx_work)}",

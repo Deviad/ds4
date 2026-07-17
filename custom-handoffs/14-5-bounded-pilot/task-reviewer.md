@@ -1,0 +1,5 @@
+# Story 14.5 — Reviewer
+
+Review staged implementation against requirements.md/architecture.md and coder-notes.md. Work directly; no delegation. Do not edit production.
+
+Verify TDD legitimacy and mutation sensitivity; exact phase specs/commands/paths/budgets; trainer API semantics; save names/cadence; adapter load occurs before fresh optimizer/update; canonical digest/schema proves exact resume equality and post-update change; exact provider/update/checkpoint cardinality; fail-closed identity/report/marker/lock/timeout/one-attempt/no-retry behavior; atomic ordering; no unsupported optimizer/RNG/cursor claims. Verify no real assets accessed. Check smoke bytes/default catalogs/Path A/provider/vendor/CUDA/distributed/Metal invariants. Ensure all verdict files and required handoffs tracked and no `.cmux-status` markers staged. Run focused/exact regressions. Write review.md PASS/BLOCKED and marker.

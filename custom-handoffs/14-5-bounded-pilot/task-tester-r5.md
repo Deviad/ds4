@@ -1,0 +1,3 @@
+# Story 14.5 — Test Manager r5 final
+
+Validate r5 directly, no delegate/real assets. Use canonical `PYTHONPATH=$PWD/vendor/mlx-lm:$PWD/python-envs/mlx/src:$PWD` and project MLX interpreter so real trainer tests run, not deselect. Run focused suite, exact six-file suite, lock/watchdog/path/terminal probes, pycompile/diff/tracking/Path A/smoke/provider/vendor/catalog gates. GREEN only with zero unexplained failures/deselections. Write test-report-r5.md and marker.

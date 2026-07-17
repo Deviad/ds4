@@ -1,0 +1,3 @@
+# Story 14.5 — Test Manager r3 final
+
+Validate r3 directly, no delegate/edits/real assets. Run focused 28 pilot tests, exact Epic 14 274-pass suite, real-shape provider probe, real nested MLX save probe, parser namespace, seed ordering, Phase B pretraining identity mutation, contract/digest/provenance/checkpoint/callback/terminal injections, py_compile/diff/tracking/Path A/smoke/provider/vendor/catalog gates. GREEN only if executable synthetic path and mutation oracles pass. Write test-report-r3.md and marker.

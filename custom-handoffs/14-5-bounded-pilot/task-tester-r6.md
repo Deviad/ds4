@@ -1,0 +1,3 @@
+# Story 14.5 — Test Manager r6 final
+
+Validate r6 in canonical environment, direct/no real assets. Run focused 71 tests, both real-trainer targets (no unexplained deselection), exact six-file suite, retained-lock/quarantine probe, report path/content substitution, ordered partial-progress/path containment, pycompile/diff/tracking/Path A/smoke/provider/vendor/catalog. GREEN/BLOCKED to test-report-r6.md and marker.

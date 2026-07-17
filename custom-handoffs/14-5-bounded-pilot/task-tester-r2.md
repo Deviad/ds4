@@ -1,0 +1,3 @@
+# Story 14.5 — Test Manager r2 final
+
+Independently validate r2 synthetic implementation. No edits/delegation/real assets. Run focused 21-test pilot suite, exact Epic 14 suite, py_compile, diff/tracking, Path A exact 365/digest (not filesystem top-level count), smoke/provider/vendor hashes, catalog dry-run only. Exercise terminal-path and mutation-sensitive fakes for vendor calls, continuity/checkpoints, dependency bindings, digest malformed schemas, resources, cardinality, lock/report/marker ordering, timeout/no retry/fallback. Write test-report-r2.md GREEN/BLOCKED and marker.

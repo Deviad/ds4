@@ -1,0 +1,3 @@
+# Story 14.5 — Reviewer r7 final
+
+Review r7 against latest r6 blocked report. Direct, no delegate. Probe single-byte snapshot hash+strict parse under replacement race and duplicate keys; AST/meta tmp-guard coverage plus representative terminal runs; retained partial lock; report binding; exact focused 71, direct real-trainer 2, documented six-file 317 suite; protected/tracking/diff/docs. PASS/BLOCKED to standby review and marker.

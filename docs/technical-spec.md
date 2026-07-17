@@ -731,3 +731,25 @@ Code review always goes through the dedicated `xhigh-reviewer` agent (fresh
 context, `system-prompt: replace`, model `openai-codex/gpt-5.5`). File-mutating
 coding dispatches are kept serial: one worker slice at a time, reviewed before
 the next.
+
+## Story 14.5 — bounded two-phase checkpoint/resume pilot
+
+`ds4_segmented_pilot.py` is an explicit operator-only entry point. It is excluded from `DEFAULT_BACKEND_STEPS["local-mlx"]`; `ds4-segmented-smoke`, its report, marker, provider, and source bytes remain frozen.
+
+Pinned phases:
+
+- Phase A: `iters=2`, `steps_per_eval=2`, `save_every=1`, timeout `2700s`, output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a`, report `agent-output/cmux-14-5/phase-a-report.json`, log `agent-output/cmux-14-5/phase-a-log.txt`.
+- Phase B: `iters=1`, `steps_per_eval=1`, `save_every=1`, timeout `1500s`, output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-b`, resume source `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a/0000002_adapters.safetensors`, report `agent-output/cmux-14-5/phase-b-report.json`, log `agent-output/cmux-14-5/phase-b-log.txt`.
+- Common contract: `max_seq_length=4096`, `batch_size=1`, `learning_rate=1e-5`, prompt masking and gradient checkpointing enabled, `segment_size=1`, gradient accumulation `1`, seed `0`, LoRA, Adam, `num_layers=16`, `val_batches=25`, report/save cadence `1`, total active budget `4200s`.
+
+Catalog commands use the pinned interpreter, `bash -lc`, `set -o pipefail`, unbuffered output, and `tee`. Both phase output directories and markers are one-attempt gates: existing paths fail closed and are never deleted. Phase B requires a durable Phase A OK report/marker binding and exact resume checkpoint file and canonical tensor digest. Safetensors identity uses chunked file SHA-256 plus canonical tensor digest v1 over sorted tensor name, dtype, shape, and raw bytes, excluding metadata.
+
+Each phase must record finite per-step loss, positive token count, gradient schema/finiteness, provider-call and callback cardinality, checkpoint hashes, and local/global mapping (`1,2` → `1,2`; resumed `1` → `3`). Reports and markers use same-directory temporary files, `fsync`, and `os.replace`; success markers follow durable reports. Success publication is fail-atomic at the evidence level: any report or marker write failure removes every success marker before failure reports are written, and surviving failure markers bind to the report they name. Any lock, timeout, identity, schema, checkpoint, resource, report, or marker failure is terminal. There is no retry, fallback, reduced-length rerun, alternate backend, or smoke rerun. The r4 mutation matrix and path-isolation gates remain pending independent Reviewer PASS and Test Manager GREEN; this section does not authorize real execution.
+
+The synthetic gate is:
+
+```bash
+PYTHONPATH="$PWD/vendor/mlx-lm:$PWD/python-envs/mlx/src:$PWD" PYTHONDONTWRITEBYTECODE=1 python-envs/mlx/.venv/bin/python -m pytest -q tests/test_ds4_segmented_pilot.py tests/test_ds4_segmented_smoke.py tests/test_finetune_ds4.py tests/test_mlx_lm_source.py tests/test_ds4_segmented_loss_and_grad.py tests/test_ds4_gguf_base_smoke.py
+```
+
+No real model, dataset, adapter, training, inference, CUDA, or distributed execution is part of implementation or review. Future execution requires separate operator authorization for each phase in a visible panel, with report/marker/checkpoint verification between phases. Adapter-weight continuity does not imply optimizer, RNG, dataset-cursor, scheduler, or trainer-global-step continuity, and the pilot makes no quality, convergence, throughput, or full-training-readiness claim.
