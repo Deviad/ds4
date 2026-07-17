@@ -1,0 +1,3 @@
+# Story 14.5b — Test Manager
+
+Validate exact staged revision canonical vendor-first. Run targeted 26 and six-file suite expected 534+3 skips; pycompile/diff/tracking/protected hashes; generated wrapper mutation/no-write tests; verify no real namespace paths touched and attempt-1 evidence unchanged via constants/synthetic boundary. Write test-report.md GREEN/BLOCKED + marker. Direct only; no delegate/real execution.

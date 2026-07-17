@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import hashlib
 import json
 import math
@@ -1703,9 +1704,16 @@ def _runtime_preflight(args: argparse.Namespace, phase: dict[str, Any], config: 
     try:
         import mlx
         import mlx_lm
-        mlx_version = getattr(mlx, "__version__", None)
+        try:
+            mlx_version = importlib.metadata.version("mlx")
+        except importlib.metadata.PackageNotFoundError as exc:
+            raise PilotError("MLX distribution metadata unavailable") from exc
+        except Exception as exc:
+            raise PilotError(f"MLX distribution metadata error: {type(exc).__name__}") from exc
+        if type(mlx_version) is not str or not mlx_version:
+            raise PilotError("MLX distribution metadata malformed: expected non-empty string")
         if mlx_version != "0.31.2":
-            raise PilotError(f"MLX version mismatch: {mlx_version}")
+            raise PilotError(f"MLX distribution metadata version mismatch: {mlx_version!r}")
         mlx_lm_path = pathlib.Path(mlx_lm.__file__).resolve()
         vendor_root = (REPO_ROOT / "vendor/mlx-lm").resolve()
         try:

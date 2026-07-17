@@ -1,0 +1,3 @@
+# Story 14.5b — Coder
+
+Read requirements.md and architecture.md in full. TDD RED→GREEN exact scope: scripts/ds4_segmented_pilot.py, tracked tests/test_ds4_segmented_pilot.py, docs/technical-spec.md, coder-notes.md. Add module `import importlib.metadata`; use `importlib.metadata.version("mlx")` as sole authoritative exact 0.31.2 source with explicit fail-closed missing/error/malformed diagnostics; never read mlx.__version__. Preserve identity key/schema and fixed attempt-2 namespace. Add full production preflight/direct launch/generated wrapper mutation matrix and no-write/no-call assertions. Keep scripts/finetune_ds4.py and all protected files byte-identical. No real assets/training/cleanup/commit/push/delegate/cmux. Stage slice files, write coder-notes.md + marker.

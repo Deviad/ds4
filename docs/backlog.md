@@ -5020,4 +5020,31 @@ Phase A2 requires all attempt-2 phase/final paths absent before its log opens. B
 
 **STOP/ESCALATE:** Any attempt-1 mutation, broader exception skip, resource-threshold change, attempt-2 path conflict, identity/budget change, automatic retry/fallback, Phase B2 dependency on attempt-1 evidence, protected-path drift, real-asset need, or untracked verdict file requires BA + Architect repin before execution.
 
+### Story 14.5b — Canonical MLX version source + A2 reauthorization — **Status: REQUIREMENTS READY; SYNTHETIC REPAIR ONLY; REAL A2/B2 BLOCKED**
+
+**User story:** As a DS4 fine-tuning operator (WHO), I want the Phase A2 launch check to verify the installed MLX distribution through its canonical metadata and preserve one-shot authorization lineage (WHAT), so that a legitimate MLX `0.31.2` installation can proceed without weakening fail-closed version, namespace, or retry controls (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-5b-mlx-version-source/requirements.md`
+
+**Failure basis:** The authorized A2 invocation at `c910d1ba33912236ee87f3f9bdfb5b31edece6e7` remains closed as exit `1`, pre-log `MLX version mismatch: None`, with `0` training/provider calls/updates and every A2/final destination absent. Canonical interpreter evidence is `importlib.metadata.version("mlx") == "0.31.2"` and `mlx.__version__ is None`. Its authorization remains consumed; no retry occurred.
+
+**Minimal repair contract:** `scripts/ds4_segmented_pilot.py::_runtime_preflight()` must use `importlib.metadata.version("mlx")` as the sole authoritative actual-version source and require exact string equality with `0.31.2`. `mlx` import remains mandatory, but absent, `None`, incorrect, or spoofed `mlx.__version__` is ignored. Mismatch, missing distribution, malformed metadata, or any metadata exception fails closed with no module-attribute, environment, shell, package-map, alternate-distribution, normalization, compatible-range, or newer-version fallback. Immutable identity `mlx_version` records the accepted distribution value.
+
+**Mutation-sensitive/no-write proof:** Tracked temp-only tests must isolate correct metadata against absent/spoofed module attributes; mismatch against a spoofed-correct attribute; missing distribution; generic metadata error; and empty/non-string metadata. Negative cases must reach production preflight and prove direct launch-check plus generated attempt-2 wrapper reject before phase log/output creation, with zero training/provider/update activity and no A2 checkpoint/config/log/report/phase-marker/final-marker write. Wrapper collision-before-write, launch-check-before-log/training, FD logging, and exit propagation remain unchanged.
+
+**Namespace decision:** Reuse the still-empty fixed attempt-2 namespace; no attempt-3 repin. `attempt-2` remains the immutable artifact namespace ordinal, not a claim that only one pre-log wrapper invocation ever occurred. The failed invocation, exact revision/error, zero calls/updates, absent destinations, and consumed authorization remain historical lineage. Reuse is permitted only after repair gates and a fresh explicit operator authorization bound to one exact reviewed revision and command, with immediate proof that every fixed A2/final destination is absent and attempt-1 evidence is immutable. Any collision or drift is STOP: no cleanup, deletion, rename, overwrite, alternate namespace, dynamic suffix, fallback, or automatic retry. Any exit consumes the new authorization.
+
+**Execution gate:** This story authorizes requirements/design/TDD/synthetic review only. Expected future production scope is `scripts/ds4_segmented_pilot.py` plus tracked `tests/test_ds4_segmented_pilot.py`; `scripts/finetune_ds4.py`, fixed attempt-2 paths/catalog, identity, `2/2700s + 1/1500s = 4200s` budgets, report/marker/digest contracts, attempt-1 evidence, Path A, Story 14.3, provider/vendor, CUDA, distributed, Metal, CPU, SSD streaming, GGUF, and inference paths remain protected. A future A2 invocation requires TDD GREEN, canonical regression GREEN, tracked-test proof, independent Reviewer PASS, Test Manager GREEN on the same exact revision, then fresh explicit operator authorization for one visible invocation. B2 remains blocked pending independently verified exact A2 success and separate explicit authorization.
+
+**Acceptance criteria:**
+1. Exact distribution metadata `0.31.2` is the sole accepted MLX version source; module attribute cannot grant or deny admission.
+2. Correct, mismatch, missing, malformed, and error metadata cases have isolated mutation-sensitive production-boundary tests.
+3. Every negative case proves zero calls/updates and no A2/final namespace write through direct launch-check and generated-wrapper boundaries.
+4. Fixed attempt-2 paths are reused only with explicit predecessor/repair/review/test/operator lineage; old authorization remains consumed.
+5. No path repin, cleanup, overwrite, fallback, dynamic suffix, attempt-3 allocation, automatic retry, identity/budget/training change, or B2 authorization occurs.
+6. All verdict-contributing tests are tracked; targeted/canonical tests, `py_compile`, whitespace checks, and protected-file checks pass before review gates.
+7. No real assets, provider call, training, inference, A2/B2 execution, commit, or push occurs in the BA slice.
+
+**STOP/ESCALATE:** Any permissive MLX-version fallback or normalization, metadata-error suppression, changed fixed namespace/identity/budget/training semantics, namespace mutation/cleanup, real execution, untracked verdict file, or claim this document itself authorizes A2/B2.
+
 **EOF Epic 14**

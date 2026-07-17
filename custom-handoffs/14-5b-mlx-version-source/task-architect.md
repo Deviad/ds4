@@ -1,0 +1,3 @@
+# Story 14.5b — Architect
+
+Read requirements.md, current scripts/ds4_segmented_pilot.py preflight, tests/test_ds4_segmented_pilot.py version/launch-check tests, docs architecture/technical spec, failure evidence. Design minimal TDD repair. Pin import style and exception behavior for `importlib.metadata.version("mlx")`; exact 0.31.2; module __version__ ignored; immutable identity unchanged. Specify test seams/mutation matrix and exact protected hashes/scope. Adjudicate BA decision to reuse empty attempt-2 namespace under new authorization lineage. No code/real access/commit/push. Update docs/architecture.md or technical spec if durable. Write architecture.md + marker.

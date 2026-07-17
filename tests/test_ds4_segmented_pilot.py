@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -11,6 +12,7 @@ import shlex
 import subprocess
 import sys
 import textwrap
+import types
 
 import pytest
 
@@ -87,6 +89,74 @@ def install_tmp_fs_guard(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "replace", lambda source, target, *args, **kwargs: (guard(source), guard(target), original_os["replace"](source, target, *args, **kwargs))[2])
     monkeypatch.setattr(os, "rename", lambda source, target, *args, **kwargs: (guard(source), guard(target), original_os["rename"](source, target, *args, **kwargs))[2])
     return root
+
+
+_MISSING_MODULE_VERSION = object()
+
+
+def configure_runtime_preflight_fixture(monkeypatch, tmp_path, metadata_value, module_version=_MISSING_MODULE_VERSION):
+    p = load_pilot()
+    if not hasattr(p, "importlib"):
+        import importlib
+        p.importlib = importlib
+    p.REPO_ROOT = tmp_path
+    p.PILOT_WORKSPACE = str(tmp_path / "workspace")
+    p.PILOT_INTERPRETER = sys.executable
+    p.PILOT_MODEL = str(tmp_path / "model")
+    p.PILOT_DATA = str(tmp_path / "data")
+    p.PILOT_CONFIG = str(tmp_path / "config.json")
+    p.PILOT_PROVENANCE = "provenance.json"
+    p.PILOT_VENDOR_SHA = "vendor-sha"
+    pathlib.Path(p.PILOT_MODEL).mkdir()
+    pathlib.Path(p.PILOT_DATA).mkdir()
+    pathlib.Path(p.PILOT_CONFIG).write_text("{}", encoding="utf-8")
+    (tmp_path / p.PILOT_PROVENANCE).write_text("{}", encoding="utf-8")
+    vendor_module = tmp_path / "vendor" / "mlx-lm" / "mlx_lm" / "__init__.py"
+    vendor_module.parent.mkdir(parents=True)
+    vendor_module.write_text("", encoding="utf-8")
+
+    fake_mlx = types.ModuleType("mlx")
+    if module_version is not _MISSING_MODULE_VERSION:
+        fake_mlx.__version__ = module_version
+    fake_mlx_lm = types.ModuleType("mlx_lm")
+    fake_mlx_lm.__file__ = str(vendor_module)
+    monkeypatch.setitem(sys.modules, "mlx", fake_mlx)
+    monkeypatch.setitem(sys.modules, "mlx_lm", fake_mlx_lm)
+
+    def metadata_version(_name):
+        if isinstance(metadata_value, BaseException):
+            raise metadata_value
+        return metadata_value
+
+    monkeypatch.setattr(p.importlib.metadata, "version", metadata_version)
+    monkeypatch.setattr(p, "_validate_lora_config", lambda _config: {
+        "rank": 8, "scale": 20.0, "dropout": 0.0, "keys": ["synthetic"]})
+    monkeypatch.setattr(p, "_resource_gate", lambda: {"available_memory": 1, "disk_free": 1,
+                                                        "competing_processes": []})
+    monkeypatch.setattr(p, "_validate_provenance_splits",
+                        lambda _path, _manifest: {name: "hash" for name in ("train.jsonl", "valid.jsonl", "test.jsonl")})
+    monkeypatch.setattr(p, "_file_manifest", lambda path: [{"path": pathlib.Path(path).name,
+                                                               "size": 0, "sha256": "0" * 64}])
+
+    def fake_file_sha256(path):
+        path = pathlib.Path(path)
+        if path.name == "segmented_loss_and_grad.py":
+            return p.PILOT_PROVIDER_SHA256
+        if path.name == "ds4_segmented_smoke.py":
+            return p.PILOT_SMOKE_SHA256
+        return hashlib.sha256(str(path).encode()).hexdigest()
+
+    monkeypatch.setattr(p, "file_sha256", fake_file_sha256)
+
+    def fake_git(*args):
+        if "rev-parse" in args and "vendor/mlx-lm" in args:
+            return p.PILOT_VENDOR_SHA
+        if "--stage" in args:
+            return f"160000 {p.PILOT_VENDOR_SHA} 0\\tvendor/mlx-lm"
+        return ""
+
+    monkeypatch.setattr(p, "_git_output", fake_git)
+    return p
 
 
 def write_safetensors(path: pathlib.Path, tensors: dict[str, tuple[str, list[int], bytes]], metadata=None):
@@ -2743,3 +2813,197 @@ def test_attempt2_phase_specs_bind_every_checkpoint_and_config_consumer_to_names
         assert specs[phase]["adapter_path"] == str(paths[f"{phase}-output"])
         for key in keys:
             assert specs[phase]["namespace_paths"][key] == str(paths[key])
+
+
+@pytest.mark.parametrize("module_version", [_MISSING_MODULE_VERSION, None, "999.0-spoof"])
+def test_mlx_distribution_metadata_is_authoritative_for_runtime_identity(tmp_path, monkeypatch, module_version):
+    p = configure_runtime_preflight_fixture(monkeypatch, tmp_path, "0.31.2", module_version)
+    identity = p._runtime_preflight(type("Args", (), {})(), {}, {})
+    assert identity["immutable"]["mlx_version"] == "0.31.2"
+
+
+@pytest.mark.parametrize(
+    "metadata_value,module_version,diagnostic",
+    [
+        ("0.31.1", "0.31.2", "MLX distribution metadata version mismatch"),
+        ("0.31.2+local", "0.31.2", "MLX distribution metadata version mismatch"),
+        ("0.31.3", _MISSING_MODULE_VERSION, "MLX distribution metadata version mismatch"),
+        (importlib.metadata.PackageNotFoundError("mlx"), "0.31.2", "MLX distribution metadata unavailable"),
+        (RuntimeError("metadata broken"), "0.31.2", "MLX distribution metadata error: RuntimeError"),
+        ("", "0.31.2", "MLX distribution metadata malformed"),
+        (None, "0.31.2", "MLX distribution metadata malformed"),
+        (312, "0.31.2", "MLX distribution metadata malformed"),
+    ],
+)
+def test_mlx_distribution_metadata_fail_closed_at_production_preflight(
+        tmp_path, monkeypatch, metadata_value, module_version, diagnostic):
+    p = configure_runtime_preflight_fixture(monkeypatch, tmp_path, metadata_value, module_version)
+    with pytest.raises(p.PilotError, match=re.escape(diagnostic)):
+        p._runtime_preflight(type("Args", (), {})(), {}, {})
+
+
+def test_mlx_module_import_remains_mandatory_when_metadata_is_correct(tmp_path, monkeypatch):
+    p = configure_runtime_preflight_fixture(monkeypatch, tmp_path, "0.31.2")
+    monkeypatch.setitem(sys.modules, "mlx", None)
+    with pytest.raises(p.PilotError, match="runtime source identity unavailable"):
+        p._runtime_preflight(type("Args", (), {})(), {}, {})
+
+
+@pytest.mark.parametrize(
+    "metadata_value,diagnostic",
+    [
+        ("0.31.1", "MLX distribution metadata version mismatch"),
+        ("0.31.2+local", "MLX distribution metadata version mismatch"),
+        (importlib.metadata.PackageNotFoundError("mlx"), "MLX distribution metadata unavailable"),
+        (RuntimeError("metadata broken"), "MLX distribution metadata error: RuntimeError"),
+        ("", "MLX distribution metadata malformed"),
+        (None, "MLX distribution metadata malformed"),
+        (312, "MLX distribution metadata malformed"),
+    ],
+)
+def test_mlx_metadata_direct_launch_check_is_no_write_and_no_call(
+        tmp_path, monkeypatch, capsys, metadata_value, diagnostic):
+    p = configure_runtime_preflight_fixture(monkeypatch, tmp_path, metadata_value, "999.0-spoof")
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    monkeypatch.setattr(p, "_read_config", lambda _path: {})
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_kwargs: [])
+    training_api_calls = []
+    monkeypatch.setattr(p, "_load_training_api", lambda: training_api_calls.append(True))
+    paths = p.attempt2_namespace()
+    assert all(not path.exists() for path in p._attempt2_absent_paths(paths))
+
+    result = p.main(["--attempt", "2", "--phase", "phase-a", "--launch-check-only",
+                     "--log-path", str(paths["phase-a-log"])])
+
+    assert result == 1
+    assert diagnostic in capsys.readouterr().err
+    assert training_api_calls == []
+    assert all(not path.exists() for path in p._attempt2_absent_paths(paths))
+
+
+@pytest.mark.parametrize(
+    "metadata_code,diagnostic",
+    [
+        ("mismatch", "MLX distribution metadata version mismatch"),
+        ("suffix", "MLX distribution metadata version mismatch"),
+        ("missing", "MLX distribution metadata unavailable"),
+        ("error", "MLX distribution metadata error: RuntimeError"),
+        ("empty", "MLX distribution metadata malformed"),
+        ("none", "MLX distribution metadata malformed"),
+        ("integer", "MLX distribution metadata malformed"),
+    ],
+)
+def test_mlx_metadata_generated_attempt2_wrapper_rejects_before_log_or_training(
+        tmp_path, monkeypatch, metadata_code, diagnostic):
+    import scripts.finetune_ds4 as finetune
+
+    root = tmp_path / "wrapper repo with spaces"
+    root.mkdir()
+    namespace_root = root / "namespace with spaces"
+    model = root / "model with spaces"
+    data = root / "data with spaces"
+    config = root / "config with spaces.json"
+    model.mkdir()
+    data.mkdir()
+    config.write_text("{}", encoding="utf-8")
+    runner = root / "pilot runner with spaces.py"
+    runner.write_text(textwrap.dedent(f"""
+        import importlib
+        import importlib.metadata
+        import importlib.util
+        import json
+        import os
+        import pathlib
+        import sys
+        import types
+
+        root = pathlib.Path(os.environ["CASE_ROOT"])
+        production = {str(SCRIPT)!r}
+        spec = importlib.util.spec_from_file_location("production_pilot", production)
+        p = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[spec.name] = p
+        spec.loader.exec_module(p)
+        if not hasattr(p, "importlib"):
+            p.importlib = importlib
+        p.REPO_ROOT = root
+        p.PILOT_WORKSPACE = os.environ["WORKSPACE"]
+        p.PILOT_INTERPRETER = sys.executable
+        p.PILOT_MODEL = os.environ["MODEL"]
+        p.PILOT_DATA = os.environ["DATA"]
+        p.PILOT_CONFIG = os.environ["CONFIG"]
+        p.PILOT_PROVENANCE = "provenance.json"
+        p.PILOT_VENDOR_SHA = "vendor-sha"
+        pathlib.Path(p.PILOT_PROVENANCE).write_text("{{}}", encoding="utf-8")
+        vendor_module = root / "vendor" / "mlx-lm" / "mlx_lm" / "__init__.py"
+        vendor_module.parent.mkdir(parents=True, exist_ok=True)
+        vendor_module.write_text("", encoding="utf-8")
+        fake_mlx = types.ModuleType("mlx")
+        fake_mlx.__version__ = "999.0-spoof"
+        fake_mlx_lm = types.ModuleType("mlx_lm")
+        fake_mlx_lm.__file__ = str(vendor_module)
+        sys.modules["mlx"] = fake_mlx
+        sys.modules["mlx_lm"] = fake_mlx_lm
+
+        def metadata_version(_name):
+            code = os.environ["METADATA_CODE"]
+            if code == "missing":
+                raise p.importlib.metadata.PackageNotFoundError("mlx")
+            if code == "error":
+                raise RuntimeError("metadata broken")
+            return {{"mismatch": "0.31.1", "suffix": "0.31.2+local",
+                     "empty": "", "none": None, "integer": 312}}[code]
+
+        p.importlib.metadata.version = metadata_version
+        p._validate_lora_config = lambda _config: {{"rank": 8, "scale": 20.0,
+            "dropout": 0.0, "keys": ["synthetic"]}}
+        p._resource_gate = lambda: {{"available_memory": 1, "disk_free": 1,
+            "competing_processes": []}}
+        p._validate_provenance_splits = lambda _path, _manifest: {{
+            name: "hash" for name in ("train.jsonl", "valid.jsonl", "test.jsonl")}}
+        p._file_manifest = lambda path: [{{"path": pathlib.Path(path).name,
+            "size": 0, "sha256": "0" * 64}}]
+        def fake_file_sha256(path):
+            path = pathlib.Path(path)
+            if path.name == "segmented_loss_and_grad.py":
+                return p.PILOT_PROVIDER_SHA256
+            if path.name == "ds4_segmented_smoke.py":
+                return p.PILOT_SMOKE_SHA256
+            return "0" * 64
+        p.file_sha256 = fake_file_sha256
+        def fake_git(*args):
+            if "rev-parse" in args and "vendor/mlx-lm" in args:
+                return p.PILOT_VENDOR_SHA
+            if "--stage" in args:
+                return f"160000 {{p.PILOT_VENDOR_SHA}} 0\\tvendor/mlx-lm"
+            return ""
+        p._git_output = fake_git
+        p.verify_attempt1_historical_evidence = lambda **_kwargs: []
+        trace = pathlib.Path(os.environ["TRACE"])
+        kind = "launch-check" if "--launch-check-only" in sys.argv else "train"
+        with trace.open("a", encoding="utf-8") as stream:
+            stream.write(kind + "\\n")
+        p._load_training_api = lambda: trace.open("a", encoding="utf-8").write("training-api\\n")
+        raise SystemExit(p.main(sys.argv[1:]))
+    """), encoding="utf-8")
+
+    pilot = load_pilot()
+    paths = pilot.attempt2_namespace(repo_root=root, workspace=namespace_root)
+    phase_specs = pilot.attempt2_phase_specs(repo_root=root, workspace=namespace_root)
+    identity = {"interpreter": pathlib.Path(sys.executable), "model": model, "data": data,
+                "config": config, "script": runner}
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_kwargs: identity)
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_kwargs: paths)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_kwargs: phase_specs)
+    command = finetune._pilot_attempt2_command(root, runner, namespace_root, "phase-a")
+    trace = root / "trace.txt"
+    env = os.environ.copy()
+    env.update({"CASE_ROOT": str(root), "WORKSPACE": str(namespace_root), "MODEL": str(model),
+                "DATA": str(data), "CONFIG": str(config), "METADATA_CODE": metadata_code,
+                "TRACE": str(trace)})
+    result = subprocess.run(shlex.split(command), cwd=root, env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert diagnostic in result.stderr
+    assert trace.read_text(encoding="utf-8").splitlines() == ["launch-check"]
+    assert all(not path.exists() for path in paths.values())

@@ -1,0 +1,5 @@
+# Story 14.5b — canonical MLX version-source repair and A2 reauthorization contract
+
+Context: reviewed Story 14.5a commit c910d1b passed synthetic gates. First authorized A2 wrapper invocation failed before log/output/training at launch-check: `MLX version mismatch: None`. Canonical interpreter reports `mlx.__version__ is None`, `importlib.metadata.version("mlx") == "0.31.2"`. Failure evidence/closeout commit 925a236. Zero calls/updates; all pinned A2/B2 paths absent; authorization consumed; no retry.
+
+Produce requirements.md and update docs/backlog.md. Define minimal fail-closed fix: authoritative distribution metadata for MLX version, exact 0.31.2, no permissive fallback; mutation-sensitive tests for absent/spoofed module attribute, correct/mismatch/missing/error distribution metadata, no-write launch-check. Decide auditable namespace/attempt contract for one newly authorized A2 invocation after gates: either justify safe reuse of still-empty fixed attempt-2 namespace with explicit authorization lineage, or require one fixed repin; no dynamic suffix, cleanup, overwrite, fallback, or automatic retry. B2 separate. No code/real access/commit/push. Write marker.

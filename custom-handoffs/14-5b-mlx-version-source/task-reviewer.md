@@ -1,0 +1,3 @@
+# Story 14.5b — Reviewer
+
+Review exact staged revision against requirements/architecture/coder notes. Independent direct probes: module __version__ never read; metadata sole source; correct/mismatch/suffix/missing/error/malformed; import remains required; immutable value exact; direct launch/generated wrapper no-write/no-call; fixed empty attempt-2 namespace and authorization lineage; finetune catalog/protected bytes unchanged. Run targeted/full canonical/tracking/diff. Write review.md PASS/BLOCKED + marker. No edit/delegate/real assets.
