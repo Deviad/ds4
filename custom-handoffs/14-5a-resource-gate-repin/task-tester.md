@@ -1,0 +1,3 @@
+# Story 14.5a — Test Manager
+
+Validate synthetic repair directly; no delegate/edit/real assets. Run resource/attempt2 focused tests, full pilot tests, finetune catalog tests, canonical six-file suite, pycompile/diff/tracking. Exercise AccessDenied PID0, NoSuchProcess, ZombieProcess, later >50GiB competitor, unknown/enumeration failure, current PID, thresholds, exact skipped schema. Validate attempt1 five-file hash immutability; all A2/B2/final path mutations/collisions/log FD/attempt1 substitution; default byte guards; PathA/smoke/provider/vendor. GREEN/BLOCKED report + marker.

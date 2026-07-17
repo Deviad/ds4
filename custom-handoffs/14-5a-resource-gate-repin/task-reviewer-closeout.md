@@ -1,0 +1,3 @@
+# Story 14.5a — Reviewer canonical closeout
+
+Read BA closeout and current canonical docs diff after r8b PASS. Verify backlog/technical-spec/training-next-status accurately record PASS/GREEN, 508+3 skips, attempt1 preservation, attempt2 gates, Path A STOP, and no overclaim/authorization. Ensure no production/test drift after reviewed r8b hashes. Write final `custom-handoffs/14-5a-resource-gate-repin/review.md` PASS/BLOCKED + marker. No edits except review handoff; no real execution.

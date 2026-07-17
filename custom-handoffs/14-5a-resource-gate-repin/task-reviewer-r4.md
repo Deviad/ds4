@@ -1,0 +1,3 @@
+# Story 14.5a — Reviewer r4 final
+
+Review r4 vs latest blocked report. Direct/no delegate/edit/real assets. Probe positive valid B2 admission and exact collision path; production resource aggregate schema; trusted canonical command/effective/identity values; coordinated substitutions; exact provider pairing; all centralized checkpoint consumers; resource error matrix; attempt1 equivalence/catalog retirement. Use canonical vendor PYTHONPATH so real trainer tests run. PASS/BLOCKED standby report + marker.

@@ -6,7 +6,9 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shlex
+import subprocess
 import sys
 import textwrap
 
@@ -14,6 +16,15 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ds4_segmented_pilot.py"
+
+ATTEMPT1_EFFECTIVE_ORACLE = {
+    "phase-a": json.loads(r'''{"adapter_path":"/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a","batch_size":1,"clear_cache_threshold":0,"command":["/Volumes/Data NVME/mlx-ft/ds4/.venv/bin/python","/Users/spotted/projects/ds4-finetuning/scripts/ds4_segmented_pilot.py","--attempt","1","--phase","phase-a","--train"],"config":"/Volumes/Data NVME/mlx-ft/ds4/lora-config.json","data":"/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke","fine_tune_type":"lora","grad_accumulation_steps":1,"grad_checkpoint":true,"hf_dataset":false,"iters":2,"learning_rate":1e-05,"lr_schedule":null,"mask_prompt":true,"max_seq_length":4096,"model":"/Volumes/Data NVME/mlx-ft/ds4/model-4bit","num_layers":16,"optimizer":"adam","phase":"phase-a","project_name":null,"report_to":null,"resume_adapter_file":null,"save_every":1,"seed":0,"segment_size":1,"steps_per_eval":2,"steps_per_report":1,"test":false,"train":true,"trust_remote_code":false,"val_batches":25}'''),
+    "phase-b": json.loads(r'''{"adapter_path":"/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-b","batch_size":1,"clear_cache_threshold":0,"command":["/Volumes/Data NVME/mlx-ft/ds4/.venv/bin/python","/Users/spotted/projects/ds4-finetuning/scripts/ds4_segmented_pilot.py","--attempt","1","--phase","phase-b","--train"],"config":"/Volumes/Data NVME/mlx-ft/ds4/lora-config.json","data":"/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke","fine_tune_type":"lora","grad_accumulation_steps":1,"grad_checkpoint":true,"hf_dataset":false,"iters":1,"learning_rate":1e-05,"lr_schedule":null,"mask_prompt":true,"max_seq_length":4096,"model":"/Volumes/Data NVME/mlx-ft/ds4/model-4bit","num_layers":16,"optimizer":"adam","phase":"phase-b","project_name":null,"report_to":null,"resume_adapter_file":"/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a/0000002_adapters.safetensors","save_every":1,"seed":0,"segment_size":1,"steps_per_eval":1,"steps_per_report":1,"test":false,"train":true,"trust_remote_code":false,"val_batches":25}'''),
+}
+ATTEMPT1_CONTRACT_ORACLE = {
+    "phase-a": {"effective_sha256": "6dd980d5aa78536a4d576811d98b56a39a77be9f75a74909c45c2fa0683cc958", "effective_bytes": 944, "contract_digest": "882243376bc65c79bef731bc6254ba532d0f7a545979ddde667355b21382d112", "contract_bytes": 1614},
+    "phase-b": {"effective_sha256": "a0532bf02722824c4458f4d4763fc9ee6bb86e921d072311f0ab62445183984f", "effective_bytes": 1033, "contract_digest": "fa09b656e0a92209f61c90a020159b232356e5dae6c76dce1c2b099b144493e6", "contract_bytes": 1792},
+}
 
 
 def load_pilot():
@@ -23,6 +34,32 @@ def load_pilot():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_attempt1_effective_pins_and_contract_oracle_are_stable():
+    p = load_pilot()
+    for phase_name, phase_spec in p.PHASES.items():
+        values = {"phase": phase_name, "model": p.PILOT_MODEL, "data": p.PILOT_DATA,
+                  "adapter_path": phase_spec["adapter_path"], "config": p.PILOT_CONFIG,
+                  "resume_adapter_file": phase_spec["resume_adapter_file"], "train": True,
+                  "test": False, "hf_dataset": False,
+                  "_command_argv": [p.PILOT_INTERPRETER, str(p.REPO_ROOT / "scripts/ds4_segmented_pilot.py"),
+                                    "--attempt", "1", "--phase", phase_name, "--train"]}
+        values.update(p.COMMON_VALUES)
+        values.update({"iters": phase_spec["iters"], "steps_per_eval": phase_spec["steps_per_eval"]})
+        args = type("Args", (), values)()
+        effective = p.validate_pins(args, phase_spec, {})
+        oracle = ATTEMPT1_EFFECTIVE_ORACLE[phase_name]
+        assert effective == oracle
+        effective_bytes = json.dumps(effective, sort_keys=True, separators=(",", ":")).encode()
+        assert len(effective_bytes) == ATTEMPT1_CONTRACT_ORACLE[phase_name]["effective_bytes"]
+        assert hashlib.sha256(effective_bytes).hexdigest() == ATTEMPT1_CONTRACT_ORACLE[phase_name]["effective_sha256"]
+        assert p.contract_digest(phase_name, effective, phase_spec=phase_spec) == ATTEMPT1_CONTRACT_ORACLE[phase_name]["contract_digest"]
+        contract_payload = {"phase": phase_name, "common": p.COMMON_VALUES, "phase_spec": phase_spec,
+                            "effective": effective, "identity": {}}
+        contract_bytes = json.dumps(contract_payload, sort_keys=True, separators=(",", ":")).encode()
+        assert len(contract_bytes) == ATTEMPT1_CONTRACT_ORACLE[phase_name]["contract_bytes"]
+        assert hashlib.sha256(contract_bytes).hexdigest() == ATTEMPT1_CONTRACT_ORACLE[phase_name]["contract_digest"]
 
 
 def install_tmp_fs_guard(monkeypatch, tmp_path):
@@ -250,16 +287,17 @@ def test_marker_order_and_report_aggregation():
     assert "optimizer_state_continuity" in final["non_claims"]
 
 
-def test_catalog_commands_are_explicit_and_non_default():
-    source = (ROOT / "scripts" / "finetune_ds4.py").read_text(encoding="utf-8")
-    assert "ds4-segmented-pilot-phase-a" in source
-    assert "ds4-segmented-pilot-phase-b" in source
+def test_catalog_commands_retire_attempt1_and_keep_attempt2_non_default():
     p = load_pilot()
     import scripts.finetune_ds4 as finetune
-    assert "ds4-segmented-pilot-phase-a" in finetune.MLX_STEPS
-    assert "ds4-segmented-pilot-phase-b" in finetune.MLX_STEPS
-    assert "ds4-segmented-pilot-phase-a" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
-    assert "ds4-segmented-pilot-phase-b" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
+    old = {"ds4-segmented-pilot-phase-a", "ds4-segmented-pilot-phase-b"}
+    assert old.isdisjoint(finetune.MLX_STEPS)
+    assert old.isdisjoint(finetune.BACKEND_STEPS["local-mlx"])
+    assert old.isdisjoint(finetune.COMMAND_STEPS)
+    assert {"ds4-segmented-pilot-attempt-2-phase-a", "ds4-segmented-pilot-attempt-2-phase-b"} <= set(finetune.MLX_STEPS)
+    assert old.isdisjoint(finetune.DEFAULT_BACKEND_STEPS["local-mlx"])
+    assert "ds4-segmented-pilot-attempt-2-phase-a" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
+    assert "ds4-segmented-pilot-attempt-2-phase-b" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
 
 
 def test_no_real_asset_access_during_import(tmp_path, monkeypatch):
@@ -742,7 +780,7 @@ def test_terminal_mutation_matrix_covers_every_required_boundary():
     assert uncovered == []
 
 
-def test_catalog_rendering_is_byte_exact_and_defaults_are_guarded():
+def test_catalog_rendering_retains_defaults_and_binds_attempt2_wrapper():
     import scripts.finetune_ds4 as finetune
     class Args:
         hf_model = "/tmp/hf"
@@ -755,35 +793,15 @@ def test_catalog_rendering_is_byte_exact_and_defaults_are_guarded():
         ds4_imatrix = None
         adapter_ds4 = None
     catalog = finetune.command_catalog(Args())
-    expected_a = textwrap.dedent("""\
-        bash -lc 'set -o pipefail
-        cd "/Users/spotted/projects/ds4-finetuning"
-        unset SSLKEYLOGFILE
-        PYTHONUNBUFFERED=1 PYTHONPATH="/Users/spotted/projects/ds4-finetuning/python-envs/mlx/src:/Users/spotted/projects/ds4-finetuning/vendor/mlx-lm" \\
-        "/Volumes/Data NVME/mlx-ft/ds4/.venv/bin/python" \\
-        "/Users/spotted/projects/ds4-finetuning/scripts/ds4_segmented_pilot.py" \\
-          --phase phase-a \\
-          --model "/Volumes/Data NVME/mlx-ft/ds4/model-4bit" \\
-          --data "/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge/mlx-4096-smoke" \\
-          --adapter-path "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a" \\
-          --config "/Volumes/Data NVME/mlx-ft/ds4/lora-config.json" \\
-          --train --fine-tune-type lora --num-layers 16 \\
-          --iters 2 --batch-size 1 --learning-rate 1e-5 \\
-          --max-seq-length 4096 --mask-prompt --grad-checkpoint \\
-          --grad-accumulation-steps 1 --seed 0 --optimizer adam \\
-          --val-batches 25 --steps-per-report 1 --steps-per-eval 2 \\
-          --save-every 1 --segment-size 1 \\
-          2>&1 | tee "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5/phase-a-log.txt"'
-        """).rstrip("\n")
-    expected_b = expected_a.replace("phase-a", "phase-b").replace("phase-a-log", "phase-b-log").replace("iters 2", "iters 1").replace("steps-per-eval 2", "steps-per-eval 1")
-    resume = ' \\\n  --resume-adapter-file "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a/0000002_adapters.safetensors"'
-    expected_b = expected_b.replace('  --config "/Volumes/Data NVME/mlx-ft/ds4/lora-config.json" \\\n', '  --config "/Volumes/Data NVME/mlx-ft/ds4/lora-config.json"' + resume + ' \\\n')
-    assert catalog["ds4-segmented-pilot-phase-a"] == [expected_a]
-    assert catalog["ds4-segmented-pilot-phase-b"] == [expected_b]
+    command = catalog["ds4-segmented-pilot-attempt-2-phase-a"][0]
+    assert command.startswith("bash -lc 'set -euo pipefail")
+    assert "--attempt 2 --phase phase-a --launch-check-only --log-path \"$LOG\"" in command
+    assert command.index("--launch-check-only") < command.index('mkdir -p "$(dirname "$LOG")"')
+    assert command.index('set -o noclobber; exec 3>"$LOG"') < command.index("--attempt 2 --phase phase-a --log-path \"$LOG\" --log-fd 3")
+    assert "tee /dev/fd/3" in command
+    assert 'tee "$LOG"' not in command and "tee -a" not in command
     assert catalog["smoke-train"] == ["cd /tmp/mlx && unset SSLKEYLOGFILE && . /tmp/mlx/.venv/bin/activate && mlx_lm.lora --config /tmp/mlx/lora-config.json --model /tmp/mlx/model-4bit --train --data /tmp/data/mlx-4096 --adapter-path /tmp/mlx/adapters-smoke --fine-tune-type lora --iters 20 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint"]
     assert catalog["continue-train"] == ["cd /tmp/mlx && unset SSLKEYLOGFILE && . /tmp/mlx/.venv/bin/activate && mlx_lm.lora --config /tmp/mlx/lora-config.json --model /tmp/mlx/model-4bit --train --data /tmp/data/mlx-4096 --adapter-path /tmp/mlx/adapters --resume-adapter-file /tmp/mlx/adapters/adapters.safetensors --fine-tune-type lora --iters 15000 --batch-size 1 --learning-rate 5e-6 --max-seq-length 4096 --mask-prompt --grad-checkpoint --steps-per-report 10 --steps-per-eval 200"]
-    assert "ds4-segmented-pilot-phase-a" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
-    assert "ds4-segmented-pilot-phase-b" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
 
 
 @pytest.mark.parametrize("phase,failure_number", [("phase-a", 1), ("phase-a", 2),
@@ -1471,3 +1489,1257 @@ def test_run_phase_fake_terminal_path_writes_report_then_marker(tmp_path, monkey
     assert marker["timestamp"] > 0
     assert marker["exit_code"] == 0
     assert marker["contract_digest"] == saved_report["contract_digest"]
+
+
+def _fake_psutil(monkeypatch, pilot, processes, available=64 * 1024**3, disk=2 * 1024**3):
+    class Memory:
+        def __init__(self, rss):
+            self.rss = rss
+
+    class VM:
+        def __init__(self):
+            self.available = available
+
+    class FakePsutil:
+        AccessDenied = type("AccessDenied", (Exception,), {})
+        NoSuchProcess = type("NoSuchProcess", (Exception,), {})
+        ZombieProcess = type("ZombieProcess", (FakePsutil if False else Exception,), {})
+        def virtual_memory(self):
+            return VM()
+        def process_iter(self, _attrs):
+            return iter(processes)
+
+    class Disk:
+        free = disk
+
+    fake = FakePsutil()
+    for proc in processes:
+        proc._memory = getattr(proc, "_memory", None)
+    monkeypatch.setitem(sys.modules, "psutil", fake)
+    monkeypatch.setattr(pilot, "shutil_disk_free", lambda _path: disk)
+    return fake, Memory
+
+
+def test_resource_gate_skips_only_allowed_process_races_and_preserves_sorted_evidence(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    class Process:
+        def __init__(self, pid, outcome):
+            self.pid = pid
+            self.outcome = outcome
+        def memory_info(self):
+            if isinstance(self.outcome, BaseException):
+                raise self.outcome
+            return Memory(self.outcome)
+    denied = fake.AccessDenied(); denied.pid = 0
+    gone = fake.NoSuchProcess(); gone.pid = 101
+    zombie = fake.ZombieProcess(); zombie.pid = 202
+    processes = [Process(9, 4), Process(101, gone), Process(0, denied), Process(202, zombie), Process(3, 8)]
+    fake.process_iter = lambda _attrs: iter(processes)
+    monkeypatch.setattr(p.os, "getpid", lambda: 999)
+    evidence = p._resource_gate()
+    assert evidence["competing_processes"] == [[3, 8], [9, 4]]
+    assert evidence["allowed_process_skips"] == {
+        "total": 3,
+        "counts_by_type": {"AccessDenied": 1, "NoSuchProcess": 1, "ZombieProcess": 1},
+        "pids_by_type": {"AccessDenied": [0], "NoSuchProcess": [101], "ZombieProcess": [202]},
+        "unknown_pid_counts_by_type": {"AccessDenied": 0, "NoSuchProcess": 0, "ZombieProcess": 0},
+    }
+
+
+def test_resource_gate_keeps_strict_resource_boundaries_and_current_pid_exclusion(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    class Process:
+        def __init__(self, pid, rss):
+            self.pid, self.rss = pid, rss
+        def memory_info(self):
+            assert self.pid != 77
+            return Memory(self.rss)
+    fake.process_iter = lambda _attrs: iter([Process(77, 100 * 1024**3), Process(8, 50 * 1024**3)])
+    monkeypatch.setattr(p.os, "getpid", lambda: 77)
+    assert p._resource_gate()["competing_processes"] == [[8, 50 * 1024**3]]
+    fake.virtual_memory = lambda: type("VM", (), {"available": 32 * 1024**3 - 1})()
+    with pytest.raises(p.PilotError, match="32 GiB"):
+        p._resource_gate()
+
+
+def test_resource_gate_unknown_process_error_fails_closed_with_structured_context(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    class Process:
+        pid = 123
+        def memory_info(self):
+            raise RuntimeError("observer drift")
+    fake.process_iter = lambda _attrs: iter([Process()])
+    with pytest.raises(p.ResourceObserverError) as caught:
+        p._resource_gate()
+    assert caught.value.stage == "process-rss"
+    assert caught.value.exception_type == "RuntimeError"
+    assert caught.value.pid == 123
+
+
+def test_resource_gate_competitor_and_disk_boundaries_remain_strict(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [], disk=1 * 1024**3)
+    class Process:
+        pid = 321
+        def memory_info(self):
+            return Memory(50 * 1024**3 + 1)
+    fake.process_iter = lambda _attrs: iter([Process()])
+    with pytest.raises(p.PilotError, match="competing process"):
+        p._resource_gate()
+    class AtLimit:
+        pid = 321
+        def memory_info(self):
+            return Memory(0)
+    fake.process_iter = lambda _attrs: iter([AtLimit()])
+    assert p._resource_gate()["disk_free"] == 1 * 1024**3
+    monkeypatch.setattr(p, "shutil_disk_free", lambda _path: 1 * 1024**3 - 1)
+    with pytest.raises(p.PilotError, match="disk free"):
+        p._resource_gate()
+
+
+def test_resource_gate_enumeration_and_oserror_fail_closed(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    fake.process_iter = lambda _attrs: (_ for _ in ()).throw(OSError("enumeration drift"))
+    with pytest.raises(p.ResourceObserverError) as caught:
+        p._resource_gate()
+    assert caught.value.stage == "process-enumeration"
+    class Process:
+        pid = 44
+        def memory_info(self):
+            raise OSError("rss drift")
+    fake.process_iter = lambda _attrs: iter([Process()])
+    with pytest.raises(p.ResourceObserverError) as caught:
+        p._resource_gate()
+    assert caught.value.stage == "process-rss"
+    assert caught.value.exception_type == "OSError"
+
+
+@pytest.mark.parametrize("stage", ["iterator", "pid", "virtual-memory", "disk-free", "resource-evidence"])
+def test_resource_gate_observer_failure_matrix_is_structured_and_fail_closed(monkeypatch, stage):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    if stage == "iterator":
+        class BrokenIterator:
+            def __iter__(self): return self
+            def __next__(self): raise RuntimeError("iterator drift")
+        fake.process_iter = lambda _attrs: BrokenIterator()
+    elif stage == "pid":
+        class Process:
+            @property
+            def pid(self): raise RuntimeError("pid drift")
+        fake.process_iter = lambda _attrs: iter([Process()])
+    elif stage == "virtual-memory":
+        class BrokenInt:
+            def __int__(self): raise RuntimeError("memory conversion drift")
+        fake.virtual_memory = lambda: type("VM", (), {"available": BrokenInt()})()
+    elif stage == "disk-free":
+        monkeypatch.setattr(p, "shutil_disk_free", lambda _path: (_ for _ in ()).throw(RuntimeError("disk drift")))
+    else:
+        monkeypatch.setattr(p, "_resource_evidence", lambda *_args: (_ for _ in ()).throw(ValueError("evidence drift")))
+    with pytest.raises(p.ResourceObserverError) as caught:
+        p._resource_gate()
+    expected = {"iterator": "process-enumeration", "pid": "process-pid", "virtual-memory": "virtual-memory",
+                "disk-free": "disk-free", "resource-evidence": "resource-evidence"}[stage]
+    assert caught.value.stage == expected
+    assert caught.value.exception_type
+
+
+def test_resource_gate_unknown_skip_accounting_is_repeated_and_deterministic(monkeypatch):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    class Process:
+        @property
+        def pid(self):
+            error = fake.NoSuchProcess()
+            raise error
+    fake.process_iter = lambda _attrs: iter([Process(), Process()])
+    evidence = p._resource_gate()
+    assert evidence["allowed_process_skips"]["counts_by_type"]["NoSuchProcess"] == 2
+    assert evidence["allowed_process_skips"]["pids_by_type"]["NoSuchProcess"] == []
+    assert evidence["allowed_process_skips"]["unknown_pid_counts_by_type"]["NoSuchProcess"] == 2
+
+
+@pytest.mark.parametrize("error_name", ["NoSuchProcess", "ZombieProcess"])
+def test_resource_gate_later_competitor_survives_allowed_process_race(monkeypatch, error_name):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    class Process:
+        def __init__(self, pid, outcome):
+            self.pid, self.outcome = pid, outcome
+        def memory_info(self):
+            if isinstance(self.outcome, BaseException):
+                raise self.outcome
+            return Memory(self.outcome)
+    vanished = getattr(fake, error_name)()
+    vanished.pid = 41
+    fake.process_iter = lambda _attrs: iter([
+        Process(41, vanished), Process(99, 50 * 1024**3 + 1),
+    ])
+    with pytest.raises(p.PilotError, match="competing process"):
+        p._resource_gate()
+
+
+@pytest.mark.parametrize("stage", ["process-pid", "process-rss"])
+def test_resource_gate_integer_normalization_errors_fail_closed(monkeypatch, stage):
+    p = load_pilot()
+    fake, Memory = _fake_psutil(monkeypatch, p, [])
+    if stage == "process-pid":
+        class Process:
+            @property
+            def pid(self):
+                return "not-an-int"
+        fake.process_iter = lambda _attrs: iter([Process()])
+    else:
+        class Process:
+            pid = 55
+            def memory_info(self):
+                return type("RSS", (), {"rss": "not-an-int"})()
+        fake.process_iter = lambda _attrs: iter([Process()])
+    with pytest.raises(p.ResourceObserverError) as caught:
+        p._resource_gate()
+    assert caught.value.stage == stage
+    assert caught.value.pid == (None if stage == "process-pid" else 55)
+
+
+def test_attempt2_namespace_is_exact_and_attempt1_manifest_is_separate():
+    p = load_pilot()
+    paths = p.attempt2_namespace()
+    assert paths["phase-a-output"] == pathlib.Path("/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a")
+    assert paths["phase-b-resume"] == paths["phase-a-output"] / "0000002_adapters.safetensors"
+    assert paths["phase-a-log"] == p.REPO_ROOT / "agent-output/cmux-14-5-attempt-2/phase-a-log.txt"
+    assert paths["final-report"] == p.REPO_ROOT / "agent-output/cmux-14-5-attempt-2/pilot-report.json"
+    assert all("attempt-2" in str(path) for key, path in paths.items() if key not in {"phase-a-output", "phase-b-output", "phase-b-resume"})
+    assert all("attempt-2" not in item["path"] for item in p.ATTEMPT1_EVIDENCE_SHA256)
+
+
+def test_attempt2_namespace_binds_every_exact_destination_and_has_no_future_suffix(tmp_path):
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert set(paths) == {
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+        "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+        "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+        "phase-b-final-checkpoint", "phase-b-config", "phase-b-resume",
+        "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+        "final-report", "final-ok", "final-fail",
+    }
+    assert all("attempt-2" in str(path) for path in paths.values())
+    assert not any("attempt-3" in str(path) or "attempt-2-2" in str(path) for path in paths.values())
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+    "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+    "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+    "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+    "phase-b-final-checkpoint", "phase-b-config", "phase-b-log", "phase-b-report",
+    "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
+])
+def test_attempt2_phase_a_collision_matrix_is_fail_closed(tmp_path, monkeypatch, key):
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    collision = paths[key]
+    collision.parent.mkdir(parents=True, exist_ok=True)
+    if key.endswith("output"):
+        collision.mkdir()
+    else:
+        collision.write_bytes(b"historical")
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: [])
+    with pytest.raises(p.PilotError, match="collision"):
+        p.check_attempt2_launch("phase-a", paths["phase-a-log"], repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert collision.exists()
+    assert not paths["phase-a-report"].exists() if key != "phase-a-report" else True
+
+
+@pytest.mark.parametrize("key", [
+    "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+    "phase-b-final-checkpoint", "phase-b-config", "phase-b-log", "phase-b-report",
+    "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
+])
+def test_attempt2_phase_b_collision_matrix_is_fail_closed(tmp_path, monkeypatch, key):
+    p = load_pilot()
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    collision = paths[key]
+    collision.parent.mkdir(parents=True, exist_ok=True)
+    if key.endswith("output"):
+        collision.mkdir()
+    else:
+        collision.write_bytes(b"historical")
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: report["attempt_1_historical_evidence"])
+    with pytest.raises(p.PilotError, match=re.escape(str(collision))):
+        p.check_attempt2_launch("phase-b", paths["phase-b-log"], repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert collision.exists()
+
+
+def test_attempt2_phase_b_admits_valid_a2_evidence_before_b2_destinations(tmp_path, monkeypatch):
+    p = load_pilot()
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: report["attempt_1_historical_evidence"])
+    result = p.check_attempt2_launch("phase-b", paths["phase-b-log"], repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert result["phase"] == "phase-b"
+    assert result["log_path"] == str(paths["phase-b-log"])
+    assert not paths["phase-b-output"].exists()
+    assert not paths["final-report"].exists()
+
+
+def test_attempt2_dependency_rejects_report_marker_checkpoint_and_log_mutations(tmp_path):
+    p = load_pilot()
+    paths, report, marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    cases = ("report_sha256", "contract_digest", "resume_source_file_sha256", "resume_source_canonical_tensor_digest_v1")
+    for field in cases:
+        mutated_marker = dict(marker)
+        mutated_marker[field] = "mutated"
+        with pytest.raises(p.PilotError):
+            p.validate_phase_b_dependency(report, mutated_marker, paths["phase-b-resume"],
+                                          phase_spec=p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"])
+    mutated_report = dict(report)
+    mutated_report["effective"] = {"command": ["synthetic"], "log_path": str(tmp_path / "wrong.log")}
+    with pytest.raises(p.PilotError):
+        p.validate_phase_b_dependency(mutated_report, marker, paths["phase-b-resume"],
+                                      phase_spec=p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"])
+
+
+def test_attempt2_historical_manifest_path_size_and_digest_are_verified(tmp_path, monkeypatch):
+    p = load_pilot()
+    historical = tmp_path / "historical.bin"
+    historical.write_bytes(b"abc")
+    entry = {"path": historical.name, "size": 3, "sha256": hashlib.sha256(b"abc").hexdigest()}
+    monkeypatch.setattr(p, "ATTEMPT1_EVIDENCE_SHA256", (entry,))
+    assert p.verify_attempt1_historical_evidence(repo_root=tmp_path)[0]["sha256"] == entry["sha256"]
+    for field, value in (("path", "missing.bin"), ("size", 4), ("sha256", "0" * 64)):
+        mutated = dict(entry, **{field: value})
+        monkeypatch.setattr(p, "ATTEMPT1_EVIDENCE_SHA256", (mutated,))
+        with pytest.raises(p.PilotError):
+            p.verify_attempt1_historical_evidence(repo_root=tmp_path)
+
+
+def test_attempt2_log_fd_attestation_rejects_wrong_descriptor(tmp_path):
+    p = load_pilot()
+    log = tmp_path / "phase-a-log.txt"
+    log.write_bytes(b"log")
+    with log.open("ab") as handle:
+        p._attest_log_fd(log, handle.fileno())
+    other = tmp_path / "other.log"
+    other.write_bytes(b"other")
+    with other.open("ab") as handle:
+        with pytest.raises(p.PilotError, match="FD collision"):
+            p._attest_log_fd(log, handle.fileno())
+
+
+def test_attempt2_collision_rejects_before_any_mutation(tmp_path, monkeypatch):
+    p = load_pilot()
+    namespace = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    collision = namespace["phase-a-log"]
+    collision.parent.mkdir(parents=True)
+    collision.write_bytes(b"historical")
+    monkeypatch.setattr(p, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(p, "PILOT_WORKSPACE", str(tmp_path / "workspace"))
+    with pytest.raises(p.PilotError, match="collision"):
+        p.check_attempt2_launch("phase-a", collision)
+    assert collision.read_bytes() == b"historical"
+    assert not (tmp_path / "workspace").exists()
+
+
+def test_attempt2_namespace_contains_all_exact_checkpoint_and_config_paths():
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=pathlib.Path("/tmp/repo"), workspace=pathlib.Path("/tmp/work"))
+    assert set(paths) == {
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+        "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+        "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-resume", "phase-b-start-checkpoint",
+        "phase-b-step1-checkpoint", "phase-b-final-checkpoint", "phase-b-config",
+        "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+        "final-report", "final-ok", "final-fail",
+    }
+
+
+def test_canonical_attempt2_validator_rejects_incomplete_report_before_dependency(tmp_path):
+    p = load_pilot()
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    report.pop("provider_evidence")
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    with pytest.raises(p.PilotError, match="canonical A2 report"):
+        p.validate_canonical_attempt2_report(report, phase_spec=spec,
+                                             report_path=paths["phase-a-report"])
+
+
+@pytest.mark.parametrize("mutation", [
+    "effective", "identity", "provider", "validation", "artifact", "commands", "historical",
+    "namespace", "output", "report", "resume", "contract", "coordinated",
+])
+def test_canonical_attempt2_report_mutation_matrix_is_fail_closed(tmp_path, mutation):
+    p = load_pilot()
+    paths, original, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    report = json.loads(json.dumps(original))
+    if mutation == "effective":
+        report["effective"]["learning_rate"] = 2e-5
+    elif mutation == "identity":
+        report["identity_manifest"]["immutable"]["provider_sha256"] = "0" * 64
+    elif mutation == "provider":
+        report["provider_evidence"][0]["n_tokens"] = 2
+    elif mutation == "validation":
+        report["validation_evidence"][0]["iteration"] = 99
+    elif mutation == "artifact":
+        report["artifacts"]["checkpoints"][1]["path"] = str(tmp_path / "substituted.safetensors")
+    elif mutation == "commands":
+        report["commands"] = ["substituted"]
+    elif mutation == "historical":
+        report["attempt_1_historical_evidence"].append({"path": "extra", "size": 0, "sha256": "0" * 64})
+    elif mutation == "namespace":
+        report["namespace_paths"]["phase-a-step2-checkpoint"] = str(tmp_path / "substituted.safetensors")
+    elif mutation == "output":
+        report["output_path"] = str(tmp_path / "substituted-output")
+    elif mutation == "report":
+        report["report_path"] = str(tmp_path / "substituted-report.json")
+    elif mutation == "resume":
+        report["resume_source"]["canonical_tensor_digest_v1"] = "0" * 64
+    elif mutation == "contract":
+        report["contract_digest"] = "0" * 64
+    elif mutation == "coordinated":
+        report["effective"]["model"] = "/substituted-model"
+        report["identity_manifest"]["immutable"]["git_head"] = "2" * 40
+        report["contract_digest"] = p.contract_digest("phase-a", report["effective"], report["identity_manifest"],
+                                                       phase_spec=p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"])
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    with pytest.raises(p.PilotError):
+        p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-a-report"])
+
+
+def test_canonical_attempt2_rejects_coordinated_command_and_identity_substitutions(tmp_path):
+    p = load_pilot()
+    paths, original, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    spec["trusted_identity"] = original["identity_manifest"]
+    report = json.loads(json.dumps(original))
+    report["effective"]["command"] = ["substituted-command"]
+    report["commands"] = ["substituted-command"]
+    report["identity_manifest"]["immutable"]["git_head"] = "2" * 40
+    report["contract_digest"] = p.contract_digest("phase-a", report["effective"], report["identity_manifest"], phase_spec=spec)
+    with pytest.raises(p.PilotError):
+        p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-a-report"])
+
+
+def test_canonical_attempt2_rejects_provider_schema_substitution_after_digest_recompute(tmp_path):
+    p = load_pilot()
+    paths, original, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    report = json.loads(json.dumps(original))
+    report["provider_evidence"][0].pop("gradient_paths")
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    report["contract_digest"] = p.contract_digest("phase-a", report["effective"], report["identity_manifest"], phase_spec=spec)
+    with pytest.raises(p.PilotError):
+        p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-a-report"])
+
+
+@pytest.mark.parametrize("mutation", ["provider_swap", "update_swap", "elapsed", "learning_rate_bool",
+                                       "loss_bool", "gradient_path", "gradient_duplicate_path", "gradient_shape", "gradient_dtype"])
+def test_canonical_attempt2_rejects_coordinated_provider_update_value_mutations(tmp_path, mutation):
+    p = load_pilot()
+    paths, original, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    report = json.loads(json.dumps(original))
+    if mutation == "provider_swap":
+        report["provider_evidence"][0]["provider_call"], report["provider_evidence"][1]["provider_call"] = 2, 1
+    elif mutation == "update_swap":
+        report["steps"][0]["local_step"], report["steps"][1]["local_step"] = 2, 1
+        report["steps"][0]["optimizer_update_ordinal"], report["steps"][1]["optimizer_update_ordinal"] = 2, 1
+    elif mutation == "elapsed":
+        report["provider_evidence"][0]["provider_elapsed_seconds"] = "0.1"
+    elif mutation == "learning_rate_bool":
+        report["steps"][0]["learning_rate"] = True
+    elif mutation == "loss_bool":
+        report["provider_evidence"][0]["loss"] = True
+    elif mutation == "gradient_path":
+        report["provider_evidence"][0]["gradient_schema"][0]["path"] = "bad path"
+        report["provider_evidence"][0]["gradient_paths"] = ["bad path"]
+        report["provider_evidence"][0]["gradient_shapes"] = {"bad path": [1]}
+        report["provider_evidence"][0]["gradient_dtypes"] = {"bad path": "float32"}
+    elif mutation == "gradient_duplicate_path":
+        report["provider_evidence"][0]["gradient_schema"] = [
+            {"path": "x", "shape": [1], "dtype": "float32"},
+            {"path": "x", "shape": [1], "dtype": "float32"},
+        ]
+        report["provider_evidence"][0]["gradient_leaf_count"] = 2
+        report["provider_evidence"][0]["gradient_paths"] = ["x", "x"]
+        report["provider_evidence"][0]["gradient_shapes"] = {"x": [1]}
+        report["provider_evidence"][0]["gradient_dtypes"] = {"x": "float32"}
+    elif mutation == "gradient_shape":
+        report["provider_evidence"][0]["gradient_schema"][0]["shape"] = ["1"]
+        report["provider_evidence"][0]["gradient_shapes"]["x"] = ["1"]
+    elif mutation == "gradient_dtype":
+        report["provider_evidence"][0]["gradient_schema"][0]["dtype"] = "not-a-dtype"
+        report["provider_evidence"][0]["gradient_dtypes"]["x"] = "not-a-dtype"
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    with pytest.raises(p.PilotError):
+        p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-a-report"])
+
+
+def test_validate_artifacts_consumes_canonical_namespace_entries(tmp_path):
+    p = load_pilot()
+    paths, _, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    mutated = dict(spec)
+    mutated["namespace_paths"] = dict(spec["namespace_paths"])
+    mutated["namespace_paths"]["phase-a-config"] = str(tmp_path / "wrong-config.json")
+    with pytest.raises(p.PilotError, match="missing required pilot artifact"):
+        p._validate_artifacts("phase-a", paths["phase-a-output"], phase_spec=mutated)
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-config", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+    "phase-a-step2-checkpoint", "phase-a-final-checkpoint",
+])
+def test_validate_artifacts_binds_each_phase_a_checkpoint_and_config_path(tmp_path, key):
+    p = load_pilot()
+    paths, _, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    mutated = dict(spec)
+    mutated["namespace_paths"] = dict(spec["namespace_paths"])
+    mutated["namespace_paths"][key] = str(tmp_path / "mutated" / key)
+    with pytest.raises(p.PilotError):
+        p._validate_artifacts("phase-a", paths["phase-a-output"], phase_spec=mutated)
+
+
+@pytest.mark.parametrize("key", ["phase-b-config", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint"])
+def test_validate_artifacts_binds_each_phase_b_checkpoint_and_config_path(tmp_path, key):
+    p = load_pilot()
+    workspace = tmp_path / "workspace"
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=workspace)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=workspace)["phase-b"]
+    paths["phase-b-output"].mkdir(parents=True)
+    for name, payload in (("resume-start.safetensors", b"a"), ("0000001_adapters.safetensors", b"b"), ("adapters.safetensors", b"b")):
+        write_safetensors(paths["phase-b-output"] / name, {"x": ("U8", [1], payload)})
+    paths["phase-b-config"].write_text("{}", encoding="utf-8")
+    mutated = dict(spec)
+    mutated["namespace_paths"] = dict(spec["namespace_paths"])
+    mutated["namespace_paths"][key] = str(tmp_path / "mutated" / key)
+    with pytest.raises(p.PilotError):
+        p._validate_artifacts("phase-b", paths["phase-b-output"], phase_spec=mutated)
+
+
+def _r8_rebind_consumer(report, phase_spec, p, tmp_path, key):
+    rebound_report = json.loads(json.dumps(report))
+    rebound_spec = json.loads(json.dumps(phase_spec))
+    mutated_path = tmp_path / "mutated consumer paths" / key
+    rebound_spec["namespace_paths"] = dict(phase_spec["namespace_paths"])
+    rebound_report["namespace_paths"] = dict(report["namespace_paths"])
+    rebound_spec["namespace_paths"][key] = str(mutated_path)
+    rebound_report["namespace_paths"][key] = str(mutated_path)
+    if key == "phase-b-resume":
+        mutated_path.parent.mkdir(parents=True, exist_ok=True)
+        write_safetensors(mutated_path, {"x": ("U8", [1], b"x")})
+        rebound_spec["resume_adapter_file"] = str(mutated_path)
+        rebound_report["effective"]["resume_adapter_file"] = str(mutated_path)
+        command = p.canonical_attempt2_command(rebound_spec["phase"], rebound_spec)
+        rebound_report["effective"]["command"] = command
+        rebound_report["commands"] = command
+    rebound_report["contract_digest"] = p.contract_digest(
+        rebound_report["phase"], rebound_report["effective"],
+        rebound_report["identity_manifest"], phase_spec=rebound_spec)
+    return rebound_report, rebound_spec, mutated_path
+
+
+def _r8_write_dependency_snapshot(paths, report, marker, p):
+    paths["phase-a-report"].write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    marker = dict(marker)
+    marker["report_sha256"] = p.file_sha256(paths["phase-a-report"])
+    marker["contract_digest"] = report["contract_digest"]
+    paths["phase-a-ok"].write_text(json.dumps(marker, sort_keys=True), encoding="utf-8")
+    return marker
+
+
+def _r8_remove_publications(paths, phase):
+    keys = (f"{phase}-report", f"{phase}-ok", f"{phase}-fail", "final-report", "final-ok", "final-fail")
+    for key in keys:
+        paths[key].unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+    "phase-a-final-checkpoint", "phase-a-config",
+])
+def test_r8_canonical_a2_consumer_matrix_reaches_named_artifact_boundary(tmp_path, key):
+    p = load_pilot()
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(report, spec, p, tmp_path, key)
+    with pytest.raises(p.PilotError, match=re.escape(f"missing required pilot artifact: {mutated_path}")) as caught:
+        p.validate_canonical_attempt2_report(rebound_report, phase_spec=rebound_spec,
+                                             report_path=paths["phase-a-report"])
+    assert "canonical A2 namespace path substitution" not in str(caught.value)
+    assert "canonical A2 contract digest mismatch" not in str(caught.value)
+
+
+@pytest.mark.parametrize("key", [
+    "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+    "phase-b-config", "phase-b-resume",
+])
+def test_r8_canonical_b2_consumer_matrix_reaches_named_artifact_boundary(tmp_path, key):
+    p = load_pilot()
+    paths, report, spec, _, _ = _write_valid_attempt2_phase_b(tmp_path, p)
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(report, spec, p, tmp_path, key)
+    expected = ("canonical A2 resume checkpoint binding mismatch" if key == "phase-b-resume"
+                else f"missing required pilot artifact: {mutated_path}")
+    with pytest.raises(p.PilotError, match=re.escape(expected)) as caught:
+        p.validate_canonical_attempt2_report(rebound_report, phase_spec=rebound_spec,
+                                             report_path=paths["phase-b-report"])
+    assert "canonical A2 namespace path substitution" not in str(caught.value)
+    assert "canonical A2 contract digest mismatch" not in str(caught.value)
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+    "phase-a-final-checkpoint", "phase-a-config",
+])
+def test_r8_a2_success_admission_rejects_each_consumer_without_publication(tmp_path, monkeypatch, key):
+    p = load_pilot()
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    paths, report, marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(report, spec, p, tmp_path, key)
+    _r8_remove_publications(paths, "phase-a")
+    calls = []
+    real_writer = p._write_success_evidence
+    monkeypatch.setattr(p, "_write_success_evidence", lambda *args, **kwargs: calls.append((args, kwargs)))
+    with pytest.raises(p.PilotError, match=re.escape(f"missing required pilot artifact: {mutated_path}")):
+        p.validate_canonical_attempt2_report(rebound_report, phase_spec=rebound_spec,
+                                             report_path=paths["phase-a-report"])
+        p._write_success_evidence("phase-a", rebound_report, phase_spec=rebound_spec)
+    assert calls == []
+    assert all(not paths[name].exists() for name in ("phase-a-report", "phase-a-ok", "phase-a-fail",
+                                                       "final-report", "final-ok", "final-fail"))
+    assert real_writer is not None
+
+
+@pytest.mark.parametrize("key", [
+    "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+    "phase-b-config", "phase-b-resume",
+])
+def test_r8_b2_success_admission_rejects_each_consumer_without_publication(tmp_path, monkeypatch, key):
+    p = load_pilot()
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    paths, report, spec, phase_a_report, phase_a_marker = _write_valid_attempt2_phase_b(tmp_path, p)
+    a2_report_bytes = paths["phase-a-report"].read_bytes()
+    a2_marker_bytes = paths["phase-a-ok"].read_bytes()
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(report, spec, p, tmp_path, key)
+    _r8_remove_publications(paths, "phase-b")
+    calls = []
+    monkeypatch.setattr(p, "_write_success_evidence", lambda *args, **kwargs: calls.append((args, kwargs)))
+    expected = ("canonical A2 resume checkpoint binding mismatch" if key == "phase-b-resume"
+                else f"missing required pilot artifact: {mutated_path}")
+    with pytest.raises(p.PilotError, match=re.escape(expected)):
+        p.validate_canonical_attempt2_report(rebound_report, phase_spec=rebound_spec,
+                                             report_path=paths["phase-b-report"])
+        p._write_success_evidence("phase-b", rebound_report, phase_spec=rebound_spec)
+    assert calls == []
+    assert all(not paths[name].exists() for name in ("phase-b-report", "phase-b-ok", "phase-b-fail",
+                                                       "final-report", "final-ok", "final-fail"))
+    assert paths["phase-a-report"].read_bytes() == a2_report_bytes
+    assert paths["phase-a-ok"].read_bytes() == a2_marker_bytes
+    assert phase_a_report and phase_a_marker
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+    "phase-a-final-checkpoint", "phase-a-config",
+])
+def test_r8_phase_b_dependency_a2_matrix_reaches_named_consumer(tmp_path, key):
+    p = load_pilot()
+    paths, report, marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(report, spec, p, tmp_path, key)
+    rebound_marker = _r8_write_dependency_snapshot(paths, rebound_report, marker, p)
+    with pytest.raises(p.PilotError, match=re.escape(f"missing required pilot artifact: {mutated_path}")) as caught:
+        p.validate_phase_b_dependency(rebound_report, rebound_marker, paths["phase-b-resume"],
+                                      phase_spec=rebound_spec)
+    assert "canonical A2 namespace path substitution" not in str(caught.value)
+    assert "Phase A report hash binding mismatch" not in str(caught.value)
+
+
+def test_r8_phase_b_dependency_resume_matrix_reaches_resume_binding(tmp_path):
+    p = load_pilot()
+    paths, report, marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    rebound_report, rebound_spec, mutated_path = _r8_rebind_consumer(
+        report, spec, p, tmp_path, "phase-b-resume")
+    rebound_marker = _r8_write_dependency_snapshot(paths, rebound_report, marker, p)
+    with pytest.raises(p.PilotError, match="Phase A resume source path binding missing") as caught:
+        p.validate_phase_b_dependency(rebound_report, rebound_marker, mutated_path,
+                                      phase_spec=rebound_spec)
+    assert "canonical A2 namespace path substitution" not in str(caught.value)
+    assert "Phase A report hash binding mismatch" not in str(caught.value)
+
+
+R8_CATALOG_APPLICABILITY = {
+    "phase-a-start-checkpoint": "executable",
+    "phase-a-step1-checkpoint": "N/A — derived training output",
+    "phase-a-step2-checkpoint": "N/A — derived training output",
+    "phase-a-final-checkpoint": "executable",
+    "phase-a-config": "executable",
+    "phase-b-resume": "executable",
+    "phase-b-start-checkpoint": "executable",
+    "phase-b-step1-checkpoint": "N/A — derived training output",
+    "phase-b-final-checkpoint": "executable",
+    "phase-b-config": "executable",
+}
+R8_EXECUTABLE_CATALOG_KEYS = (
+    "phase-a-start-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+    "phase-b-resume", "phase-b-start-checkpoint", "phase-b-final-checkpoint", "phase-b-config",
+)
+R8_DERIVED_CATALOG_NA_KEYS = (
+    "phase-a-step1-checkpoint", "phase-a-step2-checkpoint", "phase-b-step1-checkpoint",
+)
+
+
+@pytest.mark.parametrize("key", R8_EXECUTABLE_CATALOG_KEYS)
+def test_r8_catalog_each_key_changes_observable_consumer(tmp_path, monkeypatch, key):
+    import scripts.finetune_ds4 as finetune
+
+    phase = "phase-b" if key.startswith("phase-b-") else "phase-a"
+    root = tmp_path / "catalog repo with spaces"
+    root.mkdir()
+    pilot_script = root / "pilot stub with spaces.py"
+    pilot_script.write_text(
+        "import json, os, pathlib, sys\n"
+        "obs = pathlib.Path(os.environ['R8_OBS'])\n"
+        "kind = 'launch' if '--launch-check-only' in sys.argv else 'train'\n"
+        "with obs.open('a', encoding='utf-8') as stream:\n"
+        "    json.dump({'kind': kind, 'argv': sys.argv[1:]}, stream); stream.write('\\n')\n"
+        "if kind == 'train': print('training-output')\n",
+        encoding="utf-8",
+    )
+    namespace_root = root / "namespace with spaces"
+    paths = {name: namespace_root / name for name in (
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+        "phase-a-final-checkpoint", "phase-a-config", "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+        "phase-b-config", "phase-b-resume", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+        "final-report", "final-ok", "final-fail")}
+    identity = {name: root / name for name in ("interpreter", "model", "data", "config")}
+    identity["interpreter"] = pathlib.Path(sys.executable)
+    identity["script"] = pilot_script
+    specs = {
+        "phase-a": {"phase": "phase-a", "attempt": 2, "iters": 2, "steps_per_eval": 2,
+                    "adapter_path": str(paths["phase-a-output"]), "resume_adapter_file": None,
+                    "namespace_paths": {name: str(value) for name, value in paths.items()}},
+        "phase-b": {"phase": "phase-b", "attempt": 2, "iters": 1, "steps_per_eval": 1,
+                    "adapter_path": str(paths["phase-b-output"]), "resume_adapter_file": str(paths["phase-b-resume"]),
+                    "namespace_paths": {name: str(value) for name, value in paths.items()}},
+    }
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_: identity)
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_: paths)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_: specs)
+
+    def run_case(mutated=False):
+        if mutated:
+            paths[key] = namespace_root / "mutated" / key
+            specs[phase]["namespace_paths"] = {name: str(value) for name, value in paths.items()}
+            if key == "phase-b-resume":
+                specs[phase]["resume_adapter_file"] = str(paths[key])
+        else:
+            specs[phase]["namespace_paths"] = {name: str(value) for name, value in paths.items()}
+        paths[f"{phase}-log"].unlink(missing_ok=True)
+        command = finetune._pilot_attempt2_command(root, pilot_script, namespace_root, phase)
+        argv = shlex.split(command)
+        assert argv[:2] == ["bash", "-lc"] and len(argv) == 3
+        obs = root / ("mutated-observations.jsonl" if mutated else "baseline-observations.jsonl")
+        env = os.environ.copy()
+        env["R8_OBS"] = str(obs)
+        result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        log = pathlib.Path(paths[f"{phase}-log"])
+        assert log.is_file() and "training-output" in log.read_text(encoding="utf-8")
+        return [json.loads(line) for line in obs.read_text(encoding="utf-8").splitlines()], log.read_text(encoding="utf-8")
+
+    baseline, baseline_log = run_case()
+    mutated, mutated_log = run_case(mutated=True)
+    assert [item["kind"] for item in baseline] == ["launch", "train"]
+    assert [item["kind"] for item in mutated] == ["launch", "train"]
+    if key == "phase-b-resume":
+        value = str(paths[key])
+        assert all(value in item["argv"] for item in (mutated[0], mutated[1]))
+        assert value in mutated_log
+    else:
+        assert str(paths[key]) in mutated_log, key
+
+
+def test_r8_catalog_applicability_matrix_is_exact():
+    assert set(R8_CATALOG_APPLICABILITY) == set(R8_EXECUTABLE_CATALOG_KEYS) | set(R8_DERIVED_CATALOG_NA_KEYS)
+    assert all(R8_CATALOG_APPLICABILITY[key] == "executable" for key in R8_EXECUTABLE_CATALOG_KEYS)
+    assert all(R8_CATALOG_APPLICABILITY[key] == "N/A — derived training output"
+               for key in R8_DERIVED_CATALOG_NA_KEYS)
+
+
+@pytest.mark.parametrize("key", R8_DERIVED_CATALOG_NA_KEYS)
+def test_r8_catalog_marks_derived_checkpoint_outputs_na(key):
+    assert R8_CATALOG_APPLICABILITY[key] == "N/A — derived training output"
+    assert key not in R8_EXECUTABLE_CATALOG_KEYS
+
+
+def test_r8_valid_b2_publication_binds_phase_and_final_ok_evidence(tmp_path, monkeypatch):
+    p = load_pilot()
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    paths, report, spec, phase_a_report, phase_a_marker = _write_valid_attempt2_phase_b(tmp_path, p)
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: report["attempt_1_historical_evidence"])
+    _r8_remove_publications(paths, "phase-b")
+    p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-b-report"])
+    p._write_success_evidence("phase-b", report, phase_spec=spec)
+    phase_report = json.loads(paths["phase-b-report"].read_text(encoding="utf-8"))
+    final_report = json.loads(paths["final-report"].read_text(encoding="utf-8"))
+    phase_marker = json.loads(paths["phase-b-ok"].read_text(encoding="utf-8"))
+    final_marker = json.loads(paths["final-ok"].read_text(encoding="utf-8"))
+    required_marker_keys = {"phase", "status", "attempt", "namespace", "report_path", "report_sha256",
+                            "output_path", "timestamp", "exit_code", "contract_digest"}
+    assert phase_report["status"] == "ok"
+    assert phase_marker.keys() == required_marker_keys
+    assert phase_marker["phase"] == "phase-b" and phase_marker["attempt"] == 2
+    assert phase_marker["report_path"] == str(paths["phase-b-report"])
+    assert phase_marker["report_sha256"] == p.file_sha256(paths["phase-b-report"])
+    assert phase_marker["contract_digest"] == report["contract_digest"]
+    assert phase_marker["output_path"] == report["output_path"]
+    assert phase_marker["timestamp"] > 0 and phase_marker["exit_code"] == 0
+    assert final_report["status"] == "ok" and final_report["global_progression"] == [0, 1, 2, 3]
+    assert final_marker.keys() == required_marker_keys
+    assert final_marker["phase"] == "phase-b" and final_marker["attempt"] == 2
+    assert final_marker["report_path"] == str(paths["final-report"])
+    assert final_marker["report_sha256"] == p.file_sha256(paths["final-report"])
+    assert final_marker["contract_digest"] == final_report["contract_digest"]
+    assert final_marker["output_path"] == report["output_path"]
+    assert final_marker["timestamp"] > 0 and final_marker["exit_code"] == 0
+    assert paths["phase-b-fail"].exists() is False and paths["final-fail"].exists() is False
+    assert phase_a_report and phase_a_marker
+
+
+def _write_valid_attempt2_phase_a(tmp_path, p):
+    workspace = tmp_path / "workspace"
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=workspace)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=workspace)["phase-a"]
+    paths["phase-a-output"].mkdir(parents=True)
+    for key, raw in (("phase-a-start-checkpoint", b"a"), ("phase-a-step1-checkpoint", b"b"),
+                     ("phase-a-step2-checkpoint", b"c"), ("phase-a-final-checkpoint", b"c")):
+        write_safetensors(paths[key], {"x": ("U8", [1], raw)})
+    paths["phase-a-config"].write_text("{}", encoding="utf-8")
+    paths["phase-a-log"].parent.mkdir(parents=True, exist_ok=True)
+    paths["phase-a-log"].write_bytes(b"phase-a")
+    identity = {
+        "immutable": {
+            "interpreter": p.PILOT_INTERPRETER, "python_version": [3, 13, 0], "mlx_version": "0.31.2",
+            "mlx_lm_resolved_module": "/tmp/vendor/mlx-lm/mlx_lm/__init__.py", "vendor_head": p.PILOT_VENDOR_SHA,
+            "vendor_gitlink": f"160000 {p.PILOT_VENDOR_SHA} 0\tvendor/mlx-lm", "vendor_inner_clean": True,
+            "provider_sha256": p.PILOT_PROVIDER_SHA256, "smoke_sha256": p.PILOT_SMOKE_SHA256,
+            "pilot_source_sha256": "a" * 64, "config_sha256": "b" * 64, "provenance_sha256": "c" * 64,
+            "provenance_split_hashes": {name: "d" * 64 for name in ("train.jsonl", "valid.jsonl", "test.jsonl")},
+            "model_manifest": [{"path": "model", "size": 1, "sha256": "e" * 64}],
+            "dataset_manifest": [{"path": "train.jsonl", "size": 1, "sha256": "f" * 64}],
+            "lora_parameters": {"rank": 8, "scale": 20.0, "dropout": 0.0, "keys": ["self_attn.q_a_proj"]},
+            "git_head": "1" * 40,
+        },
+        "dynamic_resources": {
+            "available_memory": 32 * 1024**3, "disk_free": 1 * 1024**3,
+            "competing_processes": [],
+            "allowed_process_skips": p._resource_evidence(
+                32 * 1024**3, 1 * 1024**3, [],
+                {name: {"counts_by_type": 0, "pids_by_type": [], "unknown_pid_counts_by_type": 0}
+                 for name in ("AccessDenied", "NoSuchProcess", "ZombieProcess")},
+            )["allowed_process_skips"],
+        },
+        "repository_status": [],
+    }
+    effective = {key: value for key, value in p.COMMON_VALUES.items()}
+    effective.update({"phase": "phase-a", "model": p.PILOT_MODEL, "data": p.PILOT_DATA, "config": p.PILOT_CONFIG,
+                      "adapter_path": str(paths["phase-a-output"]), "resume_adapter_file": None,
+                      "train": True, "test": False, "hf_dataset": False, "attempt": 2,
+                      "log_path": str(paths["phase-a-log"]), "iters": 2, "steps_per_eval": 2,
+                      "command": p.canonical_attempt2_command("phase-a", spec)})
+    artifacts = p._validate_artifacts("phase-a", paths["phase-a-output"], phase_spec=spec)
+    provider = []
+    steps = []
+    for local in (1, 2):
+        provider.append({"phase": "phase-a", "provider_call": local, "local_step": local, "global_step": local,
+                         "loss": 1.0, "loss_dtype": "float32", "token_dtype": "int32", "n_tokens": 1,
+                         "expected_mask_tokens": 1, "mask_tokens_match": True,
+                         "gradient_schema": [{"path": "x", "shape": [1], "dtype": "float32"}],
+                         "gradient_leaf_count": 1, "gradient_paths": ["x"], "gradient_shapes": {"x": [1]},
+                         "gradient_dtypes": {"x": "float32"}, "gradients_finite": True, "provider_elapsed_seconds": 0.1})
+        steps.append({"phase": "phase-a", "local_step": local, "global_step": local, "loss": 1.0,
+                      "learning_rate": 1e-5, "tokens_per_second": 1.0, "iterations_per_second": 1.0,
+                      "train_step_wall_seconds": 1.0, "optimizer_update_ordinal": local,
+                      "provider_call": local, "checkpoint": artifacts["checkpoints"][local - 1]})
+    report = {"status": "ok", "phase": "phase-a", "attempt": 2, "namespace": p.ATTEMPT2_NAMESPACE,
+              "effective": effective, "identity_manifest": identity,
+              "contract_digest": p.contract_digest("phase-a", effective, identity, phase_spec=spec),
+              "provider_calls": 2, "optimizer_updates": 2, "steps": steps, "provider_evidence": provider,
+              "validation_evidence": [{"iteration": 0, "val_loss": 1.0, "val_time": 0.1},
+                                      {"iteration": 1, "val_loss": 1.0, "val_time": 0.1}],
+              "artifacts": artifacts, "output_path": str(paths["phase-a-output"]),
+              "commands": p.canonical_attempt2_command("phase-a", spec),
+              "wall_seconds": 1.0, "retry": p.RETRY_POLICY, "fallback": p.FALLBACK_POLICY,
+              "non_claims": list(p.NON_CLAIMS), "global_mapping": [0, 1, 2],
+              "attempt_1_historical_evidence": list(p.ATTEMPT1_EVIDENCE_SHA256),
+              "resume_source": artifacts["checkpoints"][-1], "report_path": str(paths["phase-a-report"]),
+              "log_path": str(paths["phase-a-log"]), "ok_marker_path": str(paths["phase-a-ok"]),
+              "fail_marker_path": str(paths["phase-a-fail"]), "final_report_path": str(paths["final-report"]),
+              "namespace_paths": {key: str(value) for key, value in paths.items()},
+              "lock_lifecycle": {}, "watchdog_cancelled": True, "exit_code": 0}
+    spec["trusted_identity"] = identity
+    paths["phase-a-report"].parent.mkdir(parents=True, exist_ok=True)
+    paths["phase-a-report"].write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    marker = {"status": "ok", "phase": "phase-a", "attempt": 2, "namespace": p.ATTEMPT2_NAMESPACE,
+              "report_path": str(paths["phase-a-report"]), "report_sha256": p.file_sha256(paths["phase-a-report"]),
+              "output_path": str(paths["phase-a-output"]), "contract_digest": report["contract_digest"],
+              "resume_source": str(paths["phase-b-resume"]),
+              "resume_source_file_sha256": report["resume_source"]["file_sha256"],
+              "resume_source_canonical_tensor_digest_v1": report["resume_source"]["canonical_tensor_digest_v1"]}
+    paths["phase-a-ok"].write_text(json.dumps(marker, sort_keys=True), encoding="utf-8")
+    return paths, report, marker
+
+
+def _write_valid_attempt2_phase_b(tmp_path, p):
+    paths, phase_a_report, phase_a_marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    workspace = tmp_path / "workspace"
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=workspace)["phase-b"]
+    paths["phase-b-output"].mkdir(parents=True)
+    for key, raw in (("phase-b-start-checkpoint", b"d"), ("phase-b-step1-checkpoint", b"e"),
+                     ("phase-b-final-checkpoint", b"e")):
+        write_safetensors(paths[key], {"x": ("U8", [1], raw)})
+    paths["phase-b-config"].write_text("{}", encoding="utf-8")
+    paths["phase-b-log"].parent.mkdir(parents=True, exist_ok=True)
+    paths["phase-b-log"].write_bytes(b"phase-b")
+    artifacts = p._validate_artifacts("phase-b", paths["phase-b-output"], phase_spec=spec)
+    report = json.loads(json.dumps(phase_a_report))
+    effective = dict(report["effective"])
+    effective.update({"phase": "phase-b", "adapter_path": str(paths["phase-b-output"]),
+                      "resume_adapter_file": str(paths["phase-b-resume"]), "log_path": str(paths["phase-b-log"]),
+                      "iters": 1, "steps_per_eval": 1,
+                      "command": p.canonical_attempt2_command("phase-b", spec)})
+    provider = [{"phase": "phase-b", "provider_call": 1, "local_step": 1, "global_step": 3,
+                 "loss": 1.0, "loss_dtype": "float32", "token_dtype": "int32", "n_tokens": 1,
+                 "expected_mask_tokens": 1, "mask_tokens_match": True,
+                 "gradient_schema": [{"path": "x", "shape": [1], "dtype": "float32"}],
+                 "gradient_leaf_count": 1, "gradient_paths": ["x"], "gradient_shapes": {"x": [1]},
+                 "gradient_dtypes": {"x": "float32"}, "gradients_finite": True,
+                 "provider_elapsed_seconds": 0.1}]
+    report.update({"phase": "phase-b", "effective": effective,
+                   "contract_digest": p.contract_digest("phase-b", effective, report["identity_manifest"], phase_spec=spec),
+                   "provider_calls": 1, "optimizer_updates": 1, "steps": [{
+                       "phase": "phase-b", "local_step": 1, "global_step": 3, "loss": 1.0,
+                       "learning_rate": 1e-5, "tokens_per_second": 1.0, "iterations_per_second": 1.0,
+                       "train_step_wall_seconds": 1.0, "optimizer_update_ordinal": 1,
+                       "provider_call": 1, "checkpoint": artifacts["checkpoints"][0]}],
+                   "provider_evidence": provider, "validation_evidence": [{"iteration": 0, "val_loss": 1.0, "val_time": 0.1}],
+                   "artifacts": artifacts, "output_path": str(paths["phase-b-output"]),
+                   "commands": p.canonical_attempt2_command("phase-b", spec), "global_mapping": [0, 3],
+                   "resume_source": p.canonical_tensor_digest(paths["phase-b-resume"]),
+                   "report_path": str(paths["phase-b-report"]), "log_path": str(paths["phase-b-log"]),
+                   "ok_marker_path": str(paths["phase-b-ok"]), "fail_marker_path": str(paths["phase-b-fail"]),
+                   "final_report_path": str(paths["final-report"]),
+                   "namespace_paths": {key: str(value) for key, value in paths.items()}})
+    paths["phase-b-report"].parent.mkdir(parents=True, exist_ok=True)
+    paths["phase-b-report"].write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+    return paths, report, spec, phase_a_report, phase_a_marker
+
+
+def test_valid_b2_canonical_report_publishes_phase_and_final_evidence(tmp_path, monkeypatch):
+    p = load_pilot()
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    paths, report, spec, phase_a_report, phase_a_marker = _write_valid_attempt2_phase_b(tmp_path, p)
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: report["attempt_1_historical_evidence"])
+    p.validate_canonical_attempt2_report(report, phase_spec=spec, report_path=paths["phase-b-report"])
+    p._write_success_evidence("phase-b", report, phase_spec=spec)
+    assert paths["phase-b-report"].is_file()
+    assert paths["final-report"].is_file()
+    assert paths["phase-b-ok"].is_file()
+    assert paths["final-ok"].is_file()
+    assert json.loads(paths["final-report"].read_text(encoding="utf-8"))["status"] == "ok"
+
+
+@pytest.mark.parametrize("key", [
+    "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+    "phase-b-config", "phase-b-resume", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+    "final-report", "final-ok", "final-fail",
+])
+def test_valid_b2_canonical_report_rejects_each_namespace_binding_mutation(tmp_path, key):
+    p = load_pilot()
+    paths, report, spec, _, _ = _write_valid_attempt2_phase_b(tmp_path, p)
+    mutated = json.loads(json.dumps(report))
+    mutated["namespace_paths"][key] = str(tmp_path / "mutated" / key)
+    with pytest.raises(p.PilotError):
+        p.validate_canonical_attempt2_report(mutated, phase_spec=spec, report_path=paths["phase-b-report"])
+
+
+def test_attempt2_launch_check_rejects_invalid_a2_before_b2_log_creation(tmp_path, monkeypatch):
+    p = load_pilot()
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    report["status"] = "fail"
+    paths["phase-a-report"].write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: [])
+    with pytest.raises(p.PilotError, match="Phase A report and OK marker"):
+        p.check_attempt2_launch("phase-b", paths["phase-b-log"], repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert not paths["phase-b-log"].exists()
+    assert not paths["phase-b-output"].exists()
+    assert not paths["final-report"].exists()
+
+
+def test_launch_check_cli_rejects_current_identity_substitution_before_b2_log(tmp_path, monkeypatch, capsys):
+    p = load_pilot()
+    install_tmp_fs_guard(monkeypatch, tmp_path)
+    monkeypatch.setattr(p, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(p, "PILOT_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setattr(p, "PILOT_MODEL", str(tmp_path / "model"))
+    monkeypatch.setattr(p, "PILOT_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(p, "PILOT_CONFIG", str(tmp_path / "lora-config.json"))
+    monkeypatch.setattr(p, "PILOT_INTERPRETER", sys.executable)
+    paths, report, _ = _write_valid_attempt2_phase_a(tmp_path, p)
+    current = json.loads(json.dumps(report["identity_manifest"]))
+    current["immutable"]["git_head"] = "2" * 40
+    monkeypatch.setattr(p, "_read_config", lambda _path: {})
+    monkeypatch.setattr(p, "_runtime_preflight", lambda *_args: current)
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_kwargs: list(p.ATTEMPT1_EVIDENCE_SHA256))
+    result = p.main(["--attempt", "2", "--phase", "phase-b", "--launch-check-only", "--log-path", str(paths["phase-b-log"])])
+    assert result == 1
+    assert "immutable identity substituted" in capsys.readouterr().err
+    assert not paths["phase-b-log"].exists()
+    assert not paths["phase-b-output"].exists()
+    assert not paths["final-report"].exists()
+
+
+def test_attempt2_contract_digest_binds_manifest_and_namespace_paths(tmp_path):
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    effective = {"log_path": str(paths["phase-a-log"]), "pin": "fixed"}
+    identity = {"immutable": {"identity": "same"}}
+    first = p.contract_digest("phase-a", effective, identity, phase_spec=spec)
+    changed_manifest = list(p.ATTEMPT1_EVIDENCE_SHA256)
+    changed_manifest[0] = {**changed_manifest[0], "size": changed_manifest[0]["size"] + 1}
+    p.ATTEMPT1_EVIDENCE_SHA256 = tuple(changed_manifest)
+    assert p.contract_digest("phase-a", effective, identity, phase_spec=spec) != first
+    changed_spec = dict(spec)
+    changed_spec["namespace_paths"] = dict(spec["namespace_paths"])
+    changed_spec["namespace_paths"]["phase-b-log"] = str(tmp_path / "mutated.log")
+    assert p.contract_digest("phase-a", effective, identity, phase_spec=changed_spec) != p.contract_digest("phase-a", effective, identity, phase_spec=spec)
+
+
+def test_attempt2_contract_digest_binds_every_namespace_path_mutation(tmp_path):
+    p = load_pilot()
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    effective = {"command": ["synthetic"], "log_path": spec["namespace_paths"]["phase-a-log"]}
+    identity = {"immutable": {"identity": "same"}}
+    baseline = p.contract_digest("phase-a", effective, identity, phase_spec=spec)
+    for key in spec["namespace_paths"]:
+        mutated = dict(spec)
+        mutated["namespace_paths"] = dict(spec["namespace_paths"])
+        mutated["namespace_paths"][key] = f"{mutated['namespace_paths'][key]}.mutated"
+        assert p.contract_digest("phase-a", effective, identity, phase_spec=mutated) != baseline, key
+
+
+def test_attempt2_catalog_is_non_default_and_uses_fd_attested_noclobber_wrapper():
+    import scripts.finetune_ds4 as finetune
+    class Args:
+        hf_model = "/tmp/hf"; dataset_root = "/tmp/data"; mlx_work = "/tmp/mlx"
+        ds4_root = "/tmp/ds4"; ds4_gguf = None; split_dir = "mlx-4096"
+        fused_hf_model = None; ds4_imatrix = None; adapter_ds4 = None
+    catalog = finetune.command_catalog(Args())
+    assert "ds4-segmented-pilot-attempt-2-phase-a" in finetune.MLX_STEPS
+    assert "ds4-segmented-pilot-attempt-2-phase-b" in finetune.MLX_STEPS
+    assert "ds4-segmented-pilot-attempt-2-phase-a" not in finetune.DEFAULT_BACKEND_STEPS["local-mlx"]
+    command = catalog["ds4-segmented-pilot-attempt-2-phase-a"][0]
+    assert "--launch-check-only" in command
+    assert "set -o noclobber; exec 3>" in command
+    assert "tee /dev/fd/3" in command
+    assert "tee \"" not in command
+    assert "--attempt 2" in command
+
+
+@pytest.mark.parametrize("phase", ["phase-a", "phase-b"])
+def test_attempt2_catalog_uses_every_central_namespace_binding(monkeypatch, phase):
+    import scripts.finetune_ds4 as finetune
+    keys = ("phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+            "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+            "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+            "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+            "phase-b-final-checkpoint", "phase-b-config", "phase-b-resume", "phase-b-log",
+            "phase-b-report", "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail")
+    sentinel = {key: pathlib.Path(f"/sentinel/{key}") for key in keys}
+    phase_specs = {
+        "phase-a": {"iters": 2, "steps_per_eval": 2, "adapter_path": str(sentinel["phase-a-output"]),
+                     "resume_adapter_file": None},
+        "phase-b": {"iters": 1, "steps_per_eval": 1, "adapter_path": str(sentinel["phase-b-output"]),
+                     "resume_adapter_file": str(sentinel["phase-b-resume"])},
+    }
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_kwargs: sentinel)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_kwargs: phase_specs)
+    command = finetune._pilot_attempt2_command(pathlib.Path("/repo"), pathlib.Path("/repo/pilot.py"), pathlib.Path("/work"), phase)
+    for path in sentinel.values():
+        assert str(path) in command
+
+
+@pytest.mark.parametrize("phase", ["phase-a", "phase-b"])
+@pytest.mark.parametrize("field", ["interpreter", "model", "data", "config"])
+def test_attempt2_catalog_central_launch_mutation_changes_both_command_positions(monkeypatch, field, phase):
+    import scripts.finetune_ds4 as finetune
+    base = {name: pathlib.Path(f"/base/{name}") for name in ("interpreter", "model", "data", "config", "script")}
+    mutated = dict(base)
+    mutated[field] = pathlib.Path(f"/mutated/{field}")
+    paths = {key: pathlib.Path(f"/sentinel/{key}") for key in (
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+        "phase-a-final-checkpoint", "phase-a-config", "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint", "phase-b-config",
+        "phase-b-resume", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail")}
+    phase_specs = {
+        "phase-a": {"iters": 2, "steps_per_eval": 2, "adapter_path": str(paths["phase-a-output"]), "resume_adapter_file": None},
+        "phase-b": {"iters": 1, "steps_per_eval": 1, "adapter_path": str(paths["phase-b-output"]), "resume_adapter_file": str(paths["phase-b-resume"])},
+    }
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_kwargs: paths)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_kwargs: phase_specs)
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_kwargs: base)
+    baseline = finetune._pilot_attempt2_command(pathlib.Path("/repo"), pathlib.Path("/repo/pilot.py"), pathlib.Path("/work"), phase)
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_kwargs: mutated)
+    changed = finetune._pilot_attempt2_command(pathlib.Path("/repo"), pathlib.Path("/repo/pilot.py"), pathlib.Path("/work"), phase)
+    assert changed != baseline
+    assert str(mutated[field]) in changed
+    if field != "interpreter":
+        assert changed.count(str(mutated[field])) == 1
+
+
+
+@pytest.mark.parametrize("phase", ["phase-a", "phase-b"])
+def test_attempt2_catalog_binds_central_launch_identity_in_launch_check_and_training(monkeypatch, phase):
+    import scripts.finetune_ds4 as finetune
+    identity = {
+        "interpreter": pathlib.Path("/sentinel/python"),
+        "model": pathlib.Path("/sentinel/model"),
+        "data": pathlib.Path("/sentinel/data"),
+        "config": pathlib.Path("/sentinel/config.json"),
+        "script": pathlib.Path("/sentinel/pilot.py"),
+    }
+    paths = {key: pathlib.Path(f"/sentinel/{key}") for key in (
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+        "phase-a-final-checkpoint", "phase-a-config", "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint", "phase-b-config",
+        "phase-b-resume", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail")}
+    phase_specs = {
+        "phase-a": {"iters": 2, "steps_per_eval": 2, "adapter_path": str(paths["phase-a-output"]), "resume_adapter_file": None},
+        "phase-b": {"iters": 1, "steps_per_eval": 1, "adapter_path": str(paths["phase-b-output"]), "resume_adapter_file": str(paths["phase-b-resume"])},
+    }
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_kwargs: identity)
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_kwargs: paths)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_kwargs: phase_specs)
+    command = finetune._pilot_attempt2_command(pathlib.Path("/repo"), pathlib.Path("/repo/pilot.py"), pathlib.Path("/work"), phase)
+    assert command.count("/sentinel/python") == 1
+    assert command.count("/sentinel/pilot.py") == 1
+    for flag, variable in (("--model", '"$MODEL"'), ("--data", '"$DATA"'), ("--config", '"$CONFIG"')):
+        assert command.count(f"{flag} {variable}") == 2
+    for value in identity.values():
+        assert str(value) in command
+
+
+@pytest.mark.parametrize("phase", ["phase-a", "phase-b"])
+@pytest.mark.parametrize("train_exit", [0, 17])
+def test_attempt2_catalog_wrapper_executes_temp_phase_with_spaces_and_propagates_status(
+        tmp_path, monkeypatch, phase, train_exit):
+    import scripts.finetune_ds4 as finetune
+
+    root = tmp_path / "repo with spaces"
+    root.mkdir()
+    pilot_script = root / "pilot stub with spaces.py"
+    pilot_script.write_text(
+        "import os, pathlib, sys\n"
+        "trace = pathlib.Path(os.environ['STUB_TRACE'])\n"
+        "kind = 'launch-check' if '--launch-check-only' in sys.argv else 'train'\n"
+        "with trace.open('a', encoding='utf-8') as stream:\n"
+        "    stream.write(kind + '\\n')\n"
+        "if kind == 'train':\n"
+        "    print('training-output')\n"
+        "    raise SystemExit(int(os.environ['STUB_TRAIN_EXIT']))\n",
+        encoding="utf-8",
+    )
+    sentinel_root = tmp_path / "namespace with spaces"
+    keys = (
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+        "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config", "phase-a-log",
+        "phase-a-report", "phase-a-ok", "phase-a-fail", "phase-b-output", "phase-b-start-checkpoint",
+        "phase-b-step1-checkpoint", "phase-b-final-checkpoint", "phase-b-config", "phase-b-resume",
+        "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail", "final-report", "final-ok",
+        "final-fail",
+    )
+    paths = {key: sentinel_root / key for key in keys}
+    identity = {
+        "interpreter": pathlib.Path(sys.executable), "model": sentinel_root / "model with spaces",
+        "data": sentinel_root / "data with spaces", "config": sentinel_root / "config with spaces.json",
+        "script": pilot_script,
+    }
+    phase_specs = {
+        "phase-a": {"iters": 2, "steps_per_eval": 2, "adapter_path": str(paths["phase-a-output"]),
+                    "resume_adapter_file": None},
+        "phase-b": {"iters": 1, "steps_per_eval": 1, "adapter_path": str(paths["phase-b-output"]),
+                    "resume_adapter_file": str(paths["phase-b-resume"])},
+    }
+    monkeypatch.setattr(finetune, "_central_attempt2_launch_identity", lambda **_kwargs: identity)
+    monkeypatch.setattr(finetune, "_central_attempt2_namespace", lambda **_kwargs: paths)
+    monkeypatch.setattr(finetune, "_central_attempt2_phase_specs", lambda **_kwargs: phase_specs)
+    command = finetune._pilot_attempt2_command(root, pilot_script, sentinel_root, phase)
+    argv = shlex.split(command)
+    assert len(argv) == 3
+    assert argv[:2] == ["bash", "-lc"]
+
+    env = os.environ.copy()
+    env.update({"STUB_TRACE": str(tmp_path / "trace with spaces.txt"), "STUB_TRAIN_EXIT": str(train_exit)})
+    result = subprocess.run(argv, cwd=root, env=env, capture_output=True, text=True)
+    assert result.returncode == train_exit
+    assert pathlib.Path(env["STUB_TRACE"]).read_text(encoding="utf-8").splitlines() == ["launch-check", "train"]
+    assert paths[f"{phase}-log"].is_file()
+    log = paths[f"{phase}-log"].read_text(encoding="utf-8")
+    assert "attempt-2 namespace" in log
+    assert "training-output" in log
+
+
+@pytest.mark.parametrize("key", [
+    "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+    "phase-a-final-checkpoint", "phase-a-config", "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+    "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+    "phase-b-config", "phase-b-resume", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+    "final-report", "final-ok", "final-fail",
+])
+def test_attempt2_namespace_key_mutation_rejected_by_dependency_admission(tmp_path, monkeypatch, key):
+    p = load_pilot()
+    paths, report, marker = _write_valid_attempt2_phase_a(tmp_path, p)
+    spec = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")["phase-a"]
+    spec["namespace_paths"] = dict(spec["namespace_paths"])
+    spec["namespace_paths"][key] = str(tmp_path / "mutated" / key)
+    monkeypatch.setattr(p, "verify_attempt1_historical_evidence", lambda **_: report["attempt_1_historical_evidence"])
+    with pytest.raises(p.PilotError):
+        p.validate_phase_b_dependency(report, marker, paths["phase-b-resume"], phase_spec=spec)
+
+
+def test_attempt2_phase_specs_bind_checkpoint_and_config_consumers_to_namespace(tmp_path):
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    specs = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    assert specs["phase-a"]["adapter_path"] == str(paths["phase-a-output"])
+    assert specs["phase-a"]["namespace_paths"]["phase-a-config"] == str(paths["phase-a-config"])
+    assert specs["phase-b"]["adapter_path"] == str(paths["phase-b-output"])
+    assert specs["phase-b"]["resume_adapter_file"] == str(paths["phase-b-resume"])
+    assert specs["phase-b"]["namespace_paths"]["phase-b-start-checkpoint"] == str(paths["phase-b-start-checkpoint"])
+    assert specs["phase-b"]["namespace_paths"]["phase-b-step1-checkpoint"] == str(paths["phase-b-step1-checkpoint"])
+    assert specs["phase-b"]["namespace_paths"]["phase-b-final-checkpoint"] == str(paths["phase-b-final-checkpoint"])
+    assert specs["phase-b"]["namespace_paths"]["phase-b-config"] == str(paths["phase-b-config"])
+
+
+def test_attempt2_phase_specs_bind_every_checkpoint_and_config_consumer_to_namespace(tmp_path):
+    p = load_pilot()
+    paths = p.attempt2_namespace(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    specs = p.attempt2_phase_specs(repo_root=tmp_path, workspace=tmp_path / "workspace")
+    for phase, keys in {
+        "phase-a": ("phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+                    "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config"),
+        "phase-b": ("phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+                    "phase-b-final-checkpoint", "phase-b-config", "phase-b-resume"),
+    }.items():
+        assert specs[phase]["adapter_path"] == str(paths[f"{phase}-output"])
+        for key in keys:
+            assert specs[phase]["namespace_paths"][key] == str(paths[key])

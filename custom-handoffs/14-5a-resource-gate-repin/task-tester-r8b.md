@@ -1,0 +1,3 @@
+# Story 14.5a — Test Manager r8b final
+
+Run tests directly; do not require generic review.md/test-report.md. Canonical vendor-first focused matrices + full pilot + exact six-file expected 508+3 skips; executable wrappers; pycompile/bash-n/diff/tracking/protected/attempt1 hashes. Write `custom-handoffs/14-5a-resource-gate-repin/test-report-r8b.md` with GREEN/BLOCKED and marker. No delegate/real execution.

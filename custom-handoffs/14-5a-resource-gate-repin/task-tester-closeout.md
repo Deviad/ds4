@@ -1,0 +1,3 @@
+# Story 14.5a — Test Manager canonical closeout
+
+Read BA closeout and current canonical docs diff after own r8b GREEN. Verify production/test hashes unchanged from r8b, docs only add accurate closeout, diff checks pass, six baseline tests tracked, no markers staged. Write final `custom-handoffs/14-5a-resource-gate-repin/test-report.md` GREEN/BLOCKED + marker. No real execution required; no edits except test handoff.

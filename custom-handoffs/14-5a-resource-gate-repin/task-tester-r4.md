@@ -1,0 +1,3 @@
+# Story 14.5a — Test Manager r4 final
+
+Validate r4 with project MLX interpreter and `PYTHONPATH=$PWD/vendor/mlx-lm:$PWD/python-envs/mlx/src:$PWD`. Run focused 149, real trainer targets, exact six-file suite with only authorized GGUF skips, positive/collision/canonical substitution/resource/path mutations, pycompile/diff/tracking/attempt1 hashes/PathA/smoke/provider/vendor. GREEN/BLOCKED report + marker.

@@ -1,0 +1,3 @@
+# Story 14.5a — Reviewer r7 final
+
+Review r7 vs latest blocked report. Direct/no delegate/edit/real assets. Execute emitted A2/B2 wrappers temp-only with spaces, launch/training stubs and exit propagation; assert 3 argv/no false success. Verify valid B2 publication and every checkpoint/config applicable consumer matrix, central identity, duplicate gradient, resource repair, attempt1 immutability/catalog retirement. Run canonical 470 suite/protected/tracking/diff. PASS/BLOCKED standby report + marker.

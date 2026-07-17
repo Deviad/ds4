@@ -1,0 +1,3 @@
+# Story 14.5a — Reviewer r8b final
+
+Read architecture-r8.md, coder-notes-r8b.md, latest standby review. Direct final review. Verify three derived checkpoint rows are legitimately catalog N/A and retain true-consumer oracles; seven executable catalog rows; isolated canonical/publication/no-write/dependency matrices; wrapper/resource/identity/attempt1 invariants. Run canonical 508 suite/protected/tracking/diff. PASS/BLOCKED to standby review + marker. No delegate/edit/real execution.

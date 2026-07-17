@@ -4975,4 +4975,44 @@ As a DS4 fine-tuning operator (WHO), I want a two-phase bounded segmented traini
 
 **STOP/ESCALATE:** Any inability to prove adapter-weight continuity before Phase B update, config/pin/path drift, required vendor-trainer semantic change, protected Story 14.3/Path A evidence mutation, budget increase, real-asset need during implementation, or untracked verdict file requires BA + Architect repin before execution.
 
+### Story 14.5a — Resource observer repair + immutable attempt-2 repin — **Status: [x] SYNTHETIC CLOSEOUT COMPLETE — Reviewer r8b PASS; Test Manager r8b GREEN; no real execution authorized**
+
+As a DS4 fine-tuning operator (WHO), I want the process resource observer repaired and the bounded pilot repinned to a new immutable attempt-2 namespace (WHAT), so that inaccessible or disappearing system processes do not cause a false preflight failure while prior failure evidence and one-attempt safety remain intact (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-5a-resource-gate-repin/requirements.md`
+
+**Attempt-1 disposition:** Phase A attempt 1 failed closed in `0.04519541701301932s` on `psutil.AccessDenied(pid=0)` before model/dataset loading, provider calls, optimizer updates, or adapter creation. Provider calls/updates remained `0/0`; lock acquired/released once; failure reports/log and Phase A/final fail markers remain durable. All `agent-output/cmux-14-5/` reports/logs and canonical `.ds4-segmented-pilot-*` attempt-1 paths remain immutable historical evidence: never delete, rename, overwrite, or accept as attempt-2 evidence. Attempt-1 artifacts do not collide with attempt 2.
+
+**Resource-gate repair:** Scan each process independently. Exclude current PID before RSS access. Skip only `psutil.AccessDenied`, `psutil.NoSuchProcess`, and `psutil.ZombieProcess`; preserve deterministic skip total, per-type counts, sorted PID lists, and unknown-PID counts. Continue scanning after allowed skips. Any other observer exception fails closed with stage/type/PID context. Preserve strict competitor RSS `>50 GiB`, available memory `>=32 GiB`, disk free `>=1 GiB`, and auditable dynamic-resource evidence. Synthetic implementation and mutation-sensitive consumer-oracle closure are complete.
+
+**Immutable attempt-2 paths:**
+
+- Phase A2 output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a`; log/report `agent-output/cmux-14-5-attempt-2/phase-a-{log.txt,report.json}`; markers `/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-phase-a-{ok,fail}`.
+- Phase B2 output `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-b`; resume `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/0000002_adapters.safetensors`; log/report `agent-output/cmux-14-5-attempt-2/phase-b-{log.txt,report.json}`; markers `/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-phase-b-{ok,fail}`.
+- Final report `agent-output/cmux-14-5-attempt-2/pilot-report.json`; final markers `/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-{ok,fail}`.
+
+Phase A2 requires all attempt-2 phase/final paths absent before its log opens. Before B2 log creation, launch-check strict-reads the canonical A2 report and OK marker, verifies attempt/namespace, exact effective pins and command, exact immutable identity/resource schema, complete provider/update/validation/global evidence, exact checkpoint/config artifact schema/cardinality, exact output/log/report/marker bindings, contract digest, active log, historical manifest, and resume file SHA/canonical tensor digest; invalid or substituted A2 evidence writes nothing in the B2 namespace. `validate_canonical_attempt2_report()` is the shared strict validator used by B2 admission and runtime success publication. Phase B2 then requires all B2/final paths absent. The attempt-2 digest binds every exact namespace path, including `phase-a-start.safetensors`, `0000001_adapters.safetensors`, `0000002_adapters.safetensors`, `adapters.safetensors`, `adapter_config.json`, and the corresponding B2 resume-start/step-1/final/config paths, plus effective pins, immutable identity, active log, and full attempt-1 manifest. Old attempt-1 pilot names are retired from runnable catalogs; attempt 2 remains explicit and non-default. Any pre-existing artifact in the relevant attempt-2 namespace blocks without cleanup or overwrite. No automatic retry, fallback, attempt-3 allocation, or dynamic suffix.
+
+**Unchanged identity/budgets:** Same model, filtered dataset, config, DS4 segmented provider, vendor pin, LoRA/training parameters, world size `1`, and checkpoint/evidence contracts. Phase A2 exactly 2 calls/updates with `2700s`; Phase B2 exactly 1 call/update with `1500s`; total active budget `4200s`. Retry/fallback remain `none`.
+
+**Synthetic closeout evidence:** Independent Reviewer r8b **PASS** and Test Manager r8b **GREEN** on the exact repaired revision. The canonical six-file suite passed `508 passed, 3 skipped` (plus `1 warning`, `2 subtests passed); all six verdict-contributing test files were tracked. Protected production/runtime/vendor hashes remained unchanged, and the immutable attempt-1 five-file manifest verified `5/5`. Path A remains permanently frozen/STOP. These verdicts close only the synthetic repair/test gate; they do not prove or authorize real execution.
+
+**Execution gate:** Real Phase A2 still requires fresh explicit operator authorization and then one visible, non-retryable attempt in the fixed A2 namespace. Phase B2 remains blocked until A2 has completed and its exact report, OK marker, checkpoint hashes/digests, identity, cardinality, lock-release, and absence-of-failure evidence have been verified; B2 then requires separate explicit operator authorization and one visible, non-retryable attempt in the fixed B2 namespace. Adapter-weight equality/continuity and bounded readiness or throughput evidence, if later observed, must not be reported as convergence, quality, optimizer/RNG/dataset-cursor/scheduler/global-step continuity, full-training readiness, or any result not established by real execution.
+
+**Acceptance criteria:**
+1. Attempt-1 reports/log/markers remain byte-for-byte immutable and cannot satisfy attempt-2 gates.
+2. Per-process scan skips only `AccessDenied`, `NoSuchProcess`, and `ZombieProcess`, retaining deterministic PID/type counts; all other errors fail closed.
+3. Current-process exclusion, strict `>50 GiB` competitor gate, `32 GiB` memory gate, and `1 GiB` disk gate remain exact.
+4. Mutation-sensitive tracked tests cover PID 0 access denial, disappearing/zombie process, genuine competitor, unknown exception, current process, iterator/PID/RSS/virtual-memory/disk/evidence observer failures, repeated/unknown skip accounting, memory/disk boundaries, complete A2 report sections, every exact checkpoint/config path, coordinated substitutions, and attempt-1 manifest binding.
+5. Exact Phase A2/B2 output/report/log/marker/final paths and Phase B2 resume source remain pinned.
+6. Attempt-1 artifacts do not block attempt 2; any relevant attempt-2 collision blocks without mutation.
+7. Same model/dataset/config/provider/vendor/training identity remains; A2 `2/2700s`, B2 `1/1500s`, total `4200s`.
+8. One attempt each; no retry/fallback, alternate namespace, smoke rerun, alternate backend, or parameter reduction.
+9. Independent Reviewer r8b PASS + Test Manager r8b GREEN are recorded on the exact repaired revision; fresh explicit operator authorization remains required before Phase A2.
+10. Phase A2 must exit and its exact evidence must verify before separate explicit operator authorization for Phase B2.
+11. Path A, Story 14.3 smoke, vendor/provider, CUDA, distributed, Metal, CPU, SSD streaming, GGUF, and non-claims remain protected.
+12. No real asset access, training, inference, cleanup, commit, or push during requirements/design/implementation review gates.
+
+**STOP/ESCALATE:** Any attempt-1 mutation, broader exception skip, resource-threshold change, attempt-2 path conflict, identity/budget change, automatic retry/fallback, Phase B2 dependency on attempt-1 evidence, protected-path drift, real-asset need, or untracked verdict file requires BA + Architect repin before execution.
+
 **EOF Epic 14**

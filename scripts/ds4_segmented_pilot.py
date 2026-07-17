@@ -8,6 +8,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import signal
 import struct
 import subprocess
@@ -61,6 +62,33 @@ PHASES: dict[str, dict[str, Any]] = {
                 "resume_adapter_file": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a/0000002_adapters.safetensors",
                 "report": "agent-output/cmux-14-5/phase-b-report.json"},
 }
+
+ATTEMPT1_EVIDENCE_SHA256: tuple[dict[str, Any], ...] = (
+    {"path": "agent-output/cmux-14-5/phase-a-log.txt", "size": 29,
+     "sha256": "4ac7319d81f9dcd344a185fd57fb3a6342ef981cbd7ca378143d1ea803eb8865"},
+    {"path": "agent-output/cmux-14-5/phase-a-report.json", "size": 3771,
+     "sha256": "497e5a271df5765e3af7f9795b27961e2b383886aada100d626a5e85f1fc49b1"},
+    {"path": "agent-output/cmux-14-5/pilot-report.json", "size": 3874,
+     "sha256": "13c8429d8ceaf11dfed24faabb9dcaa2bb9022c02882d055ba7ec0d1b4cc0b02"},
+    {"path": "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-phase-a-fail", "size": 458,
+     "sha256": "e19872f0d9c1d7fe90fd16aa94bef750c7cd5b9e58e608fc5ff650141ec75f54"},
+    {"path": "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-fail", "size": 456,
+     "sha256": "201089f5ede43a0fe839325a6feae1347ed6d3c54d020a0e498598628d1677d8"},
+)
+# This private snapshot prevents a substituted in-memory manifest from becoming
+# valid B2 evidence while keeping the manifest itself part of the attempt-2 digest.
+_ATTEMPT1_EVIDENCE_SHA256_CANONICAL = ATTEMPT1_EVIDENCE_SHA256
+ATTEMPT1_RESERVED_PATHS: tuple[str, ...] = (
+    "agent-output/cmux-14-5/phase-b-log.txt",
+    "agent-output/cmux-14-5/phase-b-report.json",
+    "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-a",
+    "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-phase-b",
+    "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-phase-a-ok",
+    "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-phase-b-ok",
+    "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-phase-b-fail",
+    "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-ok",
+)
+ATTEMPT2_NAMESPACE = "ds4-segmented-pilot-attempt-2"
 NON_CLAIMS = ["optimizer_state_continuity", "rng_state_continuity", "dataset_cursor_continuity",
               "scheduler_continuity", "trainer_global_iteration", "convergence_or_quality",
               "throughput_improvement", "full-training-readiness"]
@@ -68,6 +96,17 @@ NON_CLAIMS = ["optimizer_state_continuity", "rng_state_continuity", "dataset_cur
 
 class PilotError(RuntimeError):
     """Terminal fail-closed pilot error."""
+
+
+class ResourceObserverError(PilotError):
+    """Structured fail-closed error from resource observation."""
+
+    def __init__(self, stage: str, error: BaseException, pid: int | None = None) -> None:
+        self.stage = stage
+        self.exception_type = type(error).__name__
+        self.pid = pid
+        pid_text = "null" if pid is None else str(pid)
+        super().__init__(f"resource observer failed: stage={stage} exception={self.exception_type} pid={pid_text}")
 
 
 @dataclass(frozen=True)
@@ -238,6 +277,178 @@ def verify_resume_continuity(source: pathlib.Path | str, resume_start: pathlib.P
     return {"equal_source": True, "changed_from_phase_start": True, "source": source_info, "resume_start": resume_info}
 
 
+def attempt2_launch_identity(*, repo_root: pathlib.Path | None = None) -> dict[str, str]:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    return {
+        "interpreter": PILOT_INTERPRETER,
+        "model": PILOT_MODEL,
+        "data": PILOT_DATA,
+        "config": PILOT_CONFIG,
+        "script": str(root / "scripts" / "ds4_segmented_pilot.py"),
+    }
+
+
+def attempt2_namespace(*, repo_root: pathlib.Path | None = None,
+                       workspace: pathlib.Path | str | None = None) -> dict[str, pathlib.Path]:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    work = pathlib.Path(workspace) if workspace is not None else pathlib.Path(PILOT_WORKSPACE)
+    a = work / "adapters-segmented-pilot-attempt-2-phase-a"
+    b = work / "adapters-segmented-pilot-attempt-2-phase-b"
+    evidence = root / "agent-output" / "cmux-14-5-attempt-2"
+    return {
+        "phase-a-output": a,
+        "phase-a-start-checkpoint": a / "phase-a-start.safetensors",
+        "phase-a-step1-checkpoint": a / "0000001_adapters.safetensors",
+        "phase-a-step2-checkpoint": a / "0000002_adapters.safetensors",
+        "phase-a-final-checkpoint": a / "adapters.safetensors",
+        "phase-a-config": a / "adapter_config.json",
+        "phase-a-log": evidence / "phase-a-log.txt",
+        "phase-a-report": evidence / "phase-a-report.json",
+        "phase-a-ok": work / f".{ATTEMPT2_NAMESPACE}-phase-a-ok",
+        "phase-a-fail": work / f".{ATTEMPT2_NAMESPACE}-phase-a-fail",
+        "phase-b-output": b,
+        "phase-b-start-checkpoint": b / "resume-start.safetensors",
+        "phase-b-step1-checkpoint": b / "0000001_adapters.safetensors",
+        "phase-b-final-checkpoint": b / "adapters.safetensors",
+        "phase-b-config": b / "adapter_config.json",
+        "phase-b-resume": a / "0000002_adapters.safetensors",
+        "phase-b-log": evidence / "phase-b-log.txt",
+        "phase-b-report": evidence / "phase-b-report.json",
+        "phase-b-ok": work / f".{ATTEMPT2_NAMESPACE}-phase-b-ok",
+        "phase-b-fail": work / f".{ATTEMPT2_NAMESPACE}-phase-b-fail",
+        "final-report": evidence / "pilot-report.json",
+        "final-ok": work / f".{ATTEMPT2_NAMESPACE}-ok",
+        "final-fail": work / f".{ATTEMPT2_NAMESPACE}-fail",
+    }
+
+
+def attempt2_phase_specs(*, repo_root: pathlib.Path | None = None,
+                         workspace: pathlib.Path | str | None = None) -> dict[str, dict[str, Any]]:
+    paths = attempt2_namespace(repo_root=repo_root, workspace=workspace)
+    namespace_paths = {key: str(value) for key, value in paths.items()}
+    return {
+        "phase-a": {"phase": "phase-a", "attempt": 2, "namespace": ATTEMPT2_NAMESPACE, "iters": 2,
+                    "steps_per_eval": 2, "timeout": 2700, "global_offset": 0,
+                    "adapter_path": str(paths["phase-a-output"]),
+                    "resume_adapter_file": None, "report": str(paths["phase-a-report"]),
+                    "phase_start_adapter_file": None, "final_report": str(paths["final-report"]),
+                    "namespace_paths": namespace_paths},
+        "phase-b": {"phase": "phase-b", "attempt": 2, "namespace": ATTEMPT2_NAMESPACE, "iters": 1,
+                    "steps_per_eval": 1, "timeout": 1500, "global_offset": 2,
+                    "adapter_path": str(paths["phase-b-output"]),
+                    "resume_adapter_file": str(paths["phase-b-resume"]),
+                    "report": str(paths["phase-b-report"]),
+                    "phase_start_adapter_file": str(paths["phase-a-start-checkpoint"]),
+                    "final_report": str(paths["final-report"]),
+                    "namespace_paths": namespace_paths},
+    }
+
+
+def canonical_attempt2_command(phase: str, phase_spec: dict[str, Any]) -> list[str]:
+    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 2:
+        raise PilotError("canonical attempt-2 command requires attempt-2 phase spec")
+    paths = phase_spec["namespace_paths"]
+    identity = attempt2_launch_identity()
+    command = [identity["interpreter"], identity["script"],
+               "--attempt", "2", "--phase", phase, "--log-path", paths[f"{phase}-log"],
+               "--model", identity["model"], "--data", identity["data"],
+               "--adapter-path", phase_spec["adapter_path"], "--config", identity["config"]]
+    if phase == "phase-b":
+        command.extend(["--resume-adapter-file", phase_spec["resume_adapter_file"]])
+    command.extend(["--train", "--fine-tune-type", "lora", "--num-layers", "16",
+                     "--iters", str(phase_spec["iters"]), "--batch-size", "1",
+                     "--learning-rate", "1e-5", "--max-seq-length", "4096", "--mask-prompt",
+                     "--grad-checkpoint", "--grad-accumulation-steps", "1", "--seed", "0",
+                     "--optimizer", "adam", "--val-batches", "25", "--steps-per-report", "1",
+                     "--steps-per-eval", str(phase_spec["steps_per_eval"]), "--save-every", "1",
+                     "--segment-size", "1"])
+    return command
+
+
+def _attempt1_manifest_path(entry: dict[str, Any], repo_root: pathlib.Path) -> pathlib.Path:
+    path = pathlib.Path(entry["path"])
+    return path if path.is_absolute() else repo_root / path
+
+
+def verify_attempt1_historical_evidence(*, repo_root: pathlib.Path | None = None) -> list[dict[str, Any]]:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    verified: list[dict[str, Any]] = []
+    for entry in ATTEMPT1_EVIDENCE_SHA256:
+        path = _attempt1_manifest_path(entry, root)
+        try:
+            size = path.stat().st_size
+            actual_sha = file_sha256(path)
+        except OSError as exc:
+            raise PilotError(f"attempt-1 historical evidence unavailable: {path}") from exc
+        if size != entry["size"] or actual_sha != entry["sha256"]:
+            raise PilotError(f"attempt-1 historical evidence hash mismatch: {path}")
+        verified.append({"path": entry["path"], "size": size, "sha256": actual_sha})
+    return verified
+
+
+def _attempt2_absent_paths(paths: dict[str, pathlib.Path]) -> list[pathlib.Path]:
+    return [paths[key] for key in (
+        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+        "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+        "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
+        "phase-b-final-checkpoint", "phase-b-config", "phase-b-log", "phase-b-report",
+        "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
+    )]
+
+
+def _attempt2_phase_b_absent_paths(paths: dict[str, pathlib.Path]) -> list[pathlib.Path]:
+    return [paths[key] for key in (
+        "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
+        "phase-b-config", "phase-b-output", "phase-b-log", "phase-b-report",
+        "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
+    )]
+
+
+def check_attempt2_launch(phase: str, log_path: pathlib.Path | str, *,
+                         repo_root: pathlib.Path | None = None,
+                         workspace: pathlib.Path | str | None = None,
+                         allow_active_log: bool = False,
+                         trusted_identity: dict[str, Any] | None = None) -> dict[str, Any]:
+    if phase not in ("phase-a", "phase-b"):
+        raise PilotError(f"unknown attempt-2 phase: {phase}")
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    paths = attempt2_namespace(repo_root=root, workspace=workspace)
+    expected_log = paths[f"{phase}-log"]
+    if pathlib.Path(log_path) != expected_log:
+        raise PilotError(f"attempt-2 log path mismatch: expected {expected_log}")
+    if phase == "phase-a":
+        collisions = _attempt2_absent_paths(paths)
+        if allow_active_log:
+            collisions.remove(expected_log)
+    else:
+        required = (
+            "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
+            "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
+            "phase-a-report", "phase-a-ok", "phase-a-log", "phase-b-resume",
+        )
+        for key in required:
+            if not paths[key].exists():
+                raise PilotError(f"attempt-2 Phase A dependency missing: {paths[key]}")
+        ensure_absent(paths["phase-a-fail"])
+        phase_a_spec = attempt2_phase_specs(repo_root=root, workspace=workspace)["phase-a"]
+        historical = verify_attempt1_historical_evidence(repo_root=root)
+        _, phase_a_report = _read_json_snapshot(paths["phase-a-report"])
+        _, phase_a_marker = _read_json_snapshot(paths["phase-a-ok"])
+        validate_phase_b_dependency(phase_a_report, phase_a_marker, paths["phase-b-resume"], phase_spec=phase_a_spec,
+                                    historical_evidence=historical, trusted_identity=trusted_identity)
+        collisions = _attempt2_phase_b_absent_paths(paths)
+        if allow_active_log:
+            collisions.remove(expected_log)
+    for path in collisions:
+        if path.exists():
+            raise PilotError(f"attempt-2 collision: {path}")
+    historical = locals().get("historical") or verify_attempt1_historical_evidence(repo_root=root)
+    return {"attempt": 2, "namespace": ATTEMPT2_NAMESPACE,
+            "phase": phase, "log_path": str(expected_log),
+            "attempt_1_historical_evidence": historical}
+
+
 def ensure_absent(path: pathlib.Path | str) -> None:
     if pathlib.Path(path).exists():
         raise PilotError(f"output or marker already exists: {path}")
@@ -266,19 +477,315 @@ def validate_step_evidence(phase: str, records: list[dict[str, Any]], expected: 
             raise PilotError(f"{phase} gradient schema must be nonempty")
         if any(not isinstance(item, dict) or not item.get("path") or "shape" not in item or "dtype" not in item for item in schema):
             raise PilotError(f"{phase} gradient schema evidence incomplete")
-        if record.get("expected_mask_tokens") is None or record.get("mask_tokens_match") is not True:
+        if record.get("expected_mask_tokens") is None or record.get("mask_tokens_match") is not True or record.get("n_tokens") != record.get("expected_mask_tokens"):
             raise PilotError(f"{phase} mask token evidence mismatch")
     return local_steps
 
 
-def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], resume_source: pathlib.Path | str) -> None:
+_A2_IDENTITY_IMMUTABLE_KEYS = frozenset({
+    "interpreter", "python_version", "mlx_version", "mlx_lm_resolved_module",
+    "vendor_head", "vendor_gitlink", "vendor_inner_clean", "provider_sha256",
+    "smoke_sha256", "pilot_source_sha256", "config_sha256", "provenance_sha256",
+    "provenance_split_hashes", "model_manifest", "dataset_manifest", "lora_parameters",
+    "git_head",
+})
+_A2_IDENTITY_KEYS = frozenset({"immutable", "dynamic_resources", "repository_status"})
+_A2_REPORT_KEYS = frozenset({
+    "status", "phase", "attempt", "namespace", "effective", "contract_digest",
+    "identity_manifest", "provider_calls", "optimizer_updates", "steps", "provider_evidence",
+    "validation_evidence", "artifacts", "output_path", "commands", "wall_seconds",
+    "retry", "fallback", "non_claims", "global_mapping", "attempt_1_historical_evidence",
+    "resume_source", "report_path", "log_path", "ok_marker_path", "fail_marker_path",
+    "final_report_path", "namespace_paths", "lock_lifecycle", "watchdog_cancelled", "exit_code",
+})
+_A2_EFFECTIVE_BASE_KEYS = frozenset(set(COMMON_VALUES) | {
+    "phase", "model", "data", "config", "adapter_path", "resume_adapter_file", "train", "test", "hf_dataset",
+    "attempt", "log_path", "command", "iters", "steps_per_eval",
+})
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_A2_DTYPE_ALLOWLIST = frozenset({
+    "bool", "float16", "float32", "float64", "bfloat16",
+    "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
+})
+_A2_PATH = re.compile(r"^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)*$")
+
+
+def _a2_finite_number(value: Any, label: str, *, minimum: float | None = None) -> None:
+    if type(value) not in (int, float) or not math.isfinite(float(value)):
+        raise PilotError(f"canonical A2 {label} must be a finite number")
+    if minimum is not None and float(value) < minimum:
+        raise PilotError(f"canonical A2 {label} below minimum")
+
+
+def _a2_positive_ordinal(value: Any, label: str) -> None:
+    if type(value) is not int or value < 1:
+        raise PilotError(f"canonical A2 {label} ordinal invalid")
+
+
+def _a2_gradient_schema(schema: Any) -> None:
+    if not isinstance(schema, list) or not schema:
+        raise PilotError("canonical A2 gradient schema missing")
+    seen_paths: set[str] = set()
+    for entry in schema:
+        if not isinstance(entry, dict) or set(entry) != {"path", "shape", "dtype"}:
+            raise PilotError("canonical A2 gradient schema mismatch")
+        path, shape, dtype = entry["path"], entry["shape"], entry["dtype"]
+        if not isinstance(path, str) or not _A2_PATH.fullmatch(path):
+            raise PilotError("canonical A2 gradient path schema mismatch")
+        if path in seen_paths:
+            raise PilotError("canonical A2 gradient paths must be unique")
+        seen_paths.add(path)
+        if not isinstance(shape, list) or not shape or any(type(dim) is not int or dim <= 0 for dim in shape):
+            raise PilotError("canonical A2 gradient shape schema mismatch")
+        if not isinstance(dtype, str) or dtype not in _A2_DTYPE_ALLOWLIST:
+            raise PilotError("canonical A2 gradient dtype schema mismatch")
+
+
+def _require_exact_keys(value: Any, expected: frozenset[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != set(expected):
+        actual = sorted(value) if isinstance(value, dict) else type(value).__name__
+        raise PilotError(f"canonical A2 {label} schema mismatch: expected {sorted(expected)}, got {actual}")
+    return value
+
+
+def _validate_manifest_list(value: Any, label: str) -> None:
+    if not isinstance(value, list) or not value:
+        raise PilotError(f"canonical A2 {label} evidence missing")
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"path", "size", "sha256"}:
+            raise PilotError(f"canonical A2 {label} schema mismatch")
+        if not isinstance(item["path"], str) or type(item["size"]) is not int or item["size"] < 0 or not _HEX64.fullmatch(item["sha256"]):
+            raise PilotError(f"canonical A2 {label} evidence invalid")
+
+
+def _validate_resource_evidence(resources: Any) -> None:
+    resources = _require_exact_keys(resources, frozenset({"available_memory", "disk_free", "competing_processes", "allowed_process_skips"}), "resource identity")
+    if type(resources["available_memory"]) is not int or resources["available_memory"] < PILOT_MEMORY_HEADROOM or type(resources["disk_free"]) is not int or resources["disk_free"] < PILOT_DISK_MIN_FREE:
+        raise PilotError("canonical A2 resource identity below pinned boundary")
+    competing = resources["competing_processes"]
+    if not isinstance(competing, list) or competing != sorted(competing) or any(
+        not isinstance(item, list) or len(item) != 2 or type(item[0]) is not int or type(item[1]) is not int
+        or item[0] < 0 or item[1] < 0 or item[1] > 50 * 1024**3 for item in competing
+    ):
+        raise PilotError("canonical A2 competing-process evidence schema mismatch")
+    skips = _require_exact_keys(resources["allowed_process_skips"],
+                                frozenset({"total", "counts_by_type", "pids_by_type", "unknown_pid_counts_by_type"}),
+                                "resource skip")
+    names = ("AccessDenied", "NoSuchProcess", "ZombieProcess")
+    counts = _require_exact_keys(skips["counts_by_type"], frozenset(names), "resource skip counts")
+    pids = _require_exact_keys(skips["pids_by_type"], frozenset(names), "resource skip pids")
+    unknown = _require_exact_keys(skips["unknown_pid_counts_by_type"], frozenset(names), "resource skip unknown counts")
+    if type(skips["total"]) is not int or skips["total"] < 0:
+        raise PilotError("canonical A2 resource skip total schema mismatch")
+    for name in names:
+        if type(counts[name]) is not int or counts[name] < 0 or type(unknown[name]) is not int or unknown[name] < 0:
+            raise PilotError("canonical A2 resource skip count schema mismatch")
+        if not isinstance(pids[name], list) or pids[name] != sorted(pids[name]) or any(type(pid) is not int or pid < 0 for pid in pids[name]):
+            raise PilotError("canonical A2 resource skip PID schema mismatch")
+        if counts[name] != len(pids[name]) + unknown[name]:
+            raise PilotError("canonical A2 resource skip count invariant mismatch")
+    if skips["total"] != sum(counts.values()):
+        raise PilotError("canonical A2 resource skip total invariant mismatch")
+
+
+def _validate_canonical_identity(identity: Any, *, trusted_identity: dict[str, Any] | None = None) -> None:
+    value = _require_exact_keys(identity, _A2_IDENTITY_KEYS, "identity")
+    immutable = _require_exact_keys(value["immutable"], _A2_IDENTITY_IMMUTABLE_KEYS, "immutable identity")
+    if trusted_identity is not None:
+        trusted = _require_exact_keys(trusted_identity, _A2_IDENTITY_KEYS, "trusted identity")
+        if immutable != trusted["immutable"]:
+            raise PilotError("canonical A2 immutable identity substituted")
+    if immutable["interpreter"] != PILOT_INTERPRETER or immutable["mlx_version"] != "0.31.2" or "/vendor/mlx-lm/" not in immutable["mlx_lm_resolved_module"]:
+        raise PilotError("canonical A2 pinned interpreter/MLX-LM identity substituted")
+    if type(immutable["python_version"]) is not list or len(immutable["python_version"]) != 3 or any(type(item) is not int for item in immutable["python_version"]):
+        raise PilotError("canonical A2 Python identity schema mismatch")
+    if immutable["vendor_head"] != PILOT_VENDOR_SHA or not str(immutable["vendor_gitlink"]).startswith(f"160000 {PILOT_VENDOR_SHA} 0") or immutable["vendor_inner_clean"] is not True:
+        raise PilotError("canonical A2 vendor identity substituted")
+    for key, expected in (("provider_sha256", PILOT_PROVIDER_SHA256), ("smoke_sha256", PILOT_SMOKE_SHA256)):
+        if immutable[key] != expected:
+            raise PilotError(f"canonical A2 {key} substituted")
+    for key in ("pilot_source_sha256", "config_sha256", "provenance_sha256"):
+        if not isinstance(immutable[key], str) or not _HEX64.fullmatch(immutable[key]):
+            raise PilotError(f"canonical A2 {key} identity missing")
+    if not isinstance(immutable["git_head"], str) or not re.fullmatch(r"[0-9a-f]{40}", immutable["git_head"]):
+        raise PilotError("canonical A2 git identity schema mismatch")
+    if set(immutable["provenance_split_hashes"]) != {"train.jsonl", "valid.jsonl", "test.jsonl"} or any(not _HEX64.fullmatch(item) for item in immutable["provenance_split_hashes"].values()):
+        raise PilotError("canonical A2 provenance split identity mismatch")
+    _validate_manifest_list(immutable["model_manifest"], "model manifest")
+    _validate_manifest_list(immutable["dataset_manifest"], "dataset manifest")
+    lora = immutable["lora_parameters"]
+    if not isinstance(lora, dict) or set(lora) != {"rank", "scale", "dropout", "keys"} or lora["rank"] != 8 or lora["scale"] != 20.0 or lora["dropout"] != 0.0 or not isinstance(lora["keys"], list) or not lora["keys"] or len(lora["keys"]) != len(set(lora["keys"])) or any(not isinstance(item, str) or not item for item in lora["keys"]):
+        raise PilotError("canonical A2 LoRA identity substituted")
+    _validate_resource_evidence(value["dynamic_resources"])
+    if not isinstance(value["repository_status"], list) or any(not isinstance(item, str) for item in value["repository_status"]):
+        raise PilotError("canonical A2 repository identity schema mismatch")
+
+
+def _validate_canonical_effective(effective: Any, report: dict[str, Any], phase_spec: dict[str, Any]) -> None:
+    effective = _require_exact_keys(effective, _A2_EFFECTIVE_BASE_KEYS, "effective pins")
+    phase = report["phase"]
+    identity = attempt2_launch_identity()
+    paths = phase_spec["namespace_paths"]
+    expected = dict(COMMON_VALUES)
+    expected.update({"phase": phase, "attempt": 2, "iters": phase_spec["iters"], "steps_per_eval": phase_spec["steps_per_eval"],
+                     "model": identity["model"], "data": identity["data"], "config": identity["config"],
+                     "adapter_path": phase_spec["adapter_path"], "resume_adapter_file": phase_spec["resume_adapter_file"],
+                     "train": True, "test": False, "hf_dataset": False,
+                     "log_path": paths[f"{phase}-log"]})
+    for key, expected_value in expected.items():
+        if effective.get(key) != expected_value:
+            raise PilotError(f"canonical A2 effective pin substituted: {key}")
+    command = effective.get("command")
+    expected_command = canonical_attempt2_command(phase, phase_spec)
+    if command != expected_command or report.get("commands") != expected_command:
+        raise PilotError("canonical A2 exact command binding missing")
+
+
+def _validate_canonical_step_records(phase: str, report: dict[str, Any], phase_spec: dict[str, Any],
+                                     expected_artifacts: dict[str, Any]) -> None:
+    provider = report.get("provider_evidence")
+    validate_step_evidence(phase, provider, phase_spec["iters"])
+    provider_keys = {"phase", "provider_call", "local_step", "global_step", "loss", "loss_dtype", "token_dtype",
+                     "n_tokens", "expected_mask_tokens", "mask_tokens_match", "gradient_schema", "gradient_leaf_count",
+                     "gradient_paths", "gradient_shapes", "gradient_dtypes", "gradients_finite", "provider_elapsed_seconds"}
+    for index, item in enumerate(provider, 1):
+        if set(item) != provider_keys or item["phase"] != phase:
+            raise PilotError("canonical A2 provider evidence schema/pairing mismatch")
+        _a2_positive_ordinal(item["provider_call"], "provider_call")
+        _a2_positive_ordinal(item["local_step"], "local_step")
+        if item["provider_call"] != index or item["local_step"] != index:
+            raise PilotError("canonical A2 provider/update ordinal pairing mismatch")
+        _a2_positive_ordinal(item["global_step"], "global_step")
+        expected_global = global_steps(phase, [index])[0]
+        if item["global_step"] != expected_global:
+            raise PilotError("canonical A2 provider/global mapping mismatch")
+        _a2_finite_number(item["loss"], "provider loss")
+        _a2_finite_number(item["provider_elapsed_seconds"], "provider elapsed", minimum=0.0)
+        if item["loss_dtype"] not in _A2_DTYPE_ALLOWLIST or item["token_dtype"] not in _A2_DTYPE_ALLOWLIST:
+            raise PilotError("canonical A2 provider dtype schema mismatch")
+        if type(item["n_tokens"]) is not int or item["n_tokens"] <= 0 or type(item["expected_mask_tokens"]) is not int or item["expected_mask_tokens"] <= 0:
+            raise PilotError("canonical A2 token ordinal schema mismatch")
+        schema = item["gradient_schema"]
+        _a2_gradient_schema(schema)
+        if item["gradient_leaf_count"] != len(schema) or item["gradient_paths"] != [entry["path"] for entry in schema]:
+            raise PilotError("canonical A2 provider gradient pairing mismatch")
+        if item["gradient_shapes"] != {entry["path"]: entry["shape"] for entry in schema} or item["gradient_dtypes"] != {entry["path"]: entry["dtype"] for entry in schema}:
+            raise PilotError("canonical A2 provider gradient schema pairing mismatch")
+        if item["gradients_finite"] is not True:
+            raise PilotError("canonical A2 gradient finiteness binding missing")
+    expected_global = global_steps(phase, range(1, phase_spec["iters"] + 1))
+    validation = report.get("validation_evidence")
+    expected_validation = _expected_validation_steps(phase_spec)
+    if not isinstance(validation, list) or len(validation) != len(expected_validation) or [item.get("iteration") for item in validation] != expected_validation:
+        raise PilotError("canonical A2 validation evidence cardinality mismatch")
+    for item in validation:
+        if set(item) != {"iteration", "val_loss", "val_time"} or type(item["iteration"]) is not int:
+            raise PilotError("canonical A2 validation evidence schema mismatch")
+        _a2_finite_number(item["val_loss"], "validation loss")
+        _a2_finite_number(item["val_time"], "validation elapsed", minimum=0.0)
+    steps = report.get("steps")
+    if not isinstance(steps, list) or len(steps) != phase_spec["iters"]:
+        raise PilotError("canonical A2 update evidence cardinality mismatch")
+    for index, (item, global_step) in enumerate(zip(steps, expected_global), 1):
+        if set(item) != {"phase", "local_step", "global_step", "loss", "learning_rate", "tokens_per_second", "iterations_per_second", "train_step_wall_seconds", "optimizer_update_ordinal", "provider_call", "checkpoint"} or item["phase"] != phase:
+            raise PilotError("canonical A2 update evidence schema mismatch")
+        _a2_positive_ordinal(item["local_step"], "local_step")
+        _a2_positive_ordinal(item["global_step"], "global_step")
+        _a2_positive_ordinal(item["provider_call"], "provider_call")
+        _a2_positive_ordinal(item["optimizer_update_ordinal"], "optimizer_update_ordinal")
+        if item["local_step"] != index or item["global_step"] != global_step or item["provider_call"] != index or item["optimizer_update_ordinal"] != index:
+            raise PilotError("canonical A2 update/checkpoint ordinal pairing mismatch")
+        _a2_finite_number(item["loss"], "update loss")
+        _a2_finite_number(item["learning_rate"], "learning rate", minimum=0.0)
+        _a2_finite_number(item["tokens_per_second"], "tokens per second", minimum=0.0)
+        _a2_finite_number(item["iterations_per_second"], "iterations per second", minimum=0.0)
+        _a2_finite_number(item["train_step_wall_seconds"], "update elapsed", minimum=0.0)
+        if item["checkpoint"] != expected_artifacts["checkpoints"][index - 1]:
+            raise PilotError("canonical A2 update/checkpoint binding mismatch")
+
+
+def validate_canonical_attempt2_report(report: dict[str, Any], *, phase_spec: dict[str, Any],
+                                       report_path: pathlib.Path | str | None = None,
+                                       historical_evidence: list[dict[str, Any]] | None = None,
+                                       trusted_identity: dict[str, Any] | None = None) -> None:
+    _require_exact_keys(report, _A2_REPORT_KEYS, "report")
+    if report["status"] != "ok" or report["attempt"] != 2 or report["namespace"] != ATTEMPT2_NAMESPACE or report["phase"] not in ("phase-a", "phase-b"):
+        raise PilotError("canonical A2 report identity mismatch")
+    if report["phase"] != phase_spec.get("phase", report["phase"]) or phase_spec.get("attempt") != 2:
+        raise PilotError("canonical A2 report phase mismatch")
+    paths = phase_spec.get("namespace_paths")
+    if not isinstance(paths, dict) or not paths:
+        raise PilotError("canonical A2 namespace paths missing")
+    phase = report["phase"]
+    prefix = phase
+    if report["output_path"] != paths[f"{prefix}-output"] or report["log_path"] != paths[f"{prefix}-log"] or report["report_path"] != paths[f"{prefix}-report"]:
+        raise PilotError("canonical A2 output/log/report binding mismatch")
+    if report["ok_marker_path"] != paths[f"{prefix}-ok"] or report["fail_marker_path"] != paths[f"{prefix}-fail"] or report["final_report_path"] != paths["final-report"]:
+        raise PilotError("canonical A2 marker/final binding mismatch")
+    if report["namespace_paths"] != paths:
+        raise PilotError("canonical A2 namespace path substitution")
+    if phase_spec.get("report") != paths[f"{phase}-report"] or phase_spec.get("final_report") != paths["final-report"]:
+        raise PilotError("canonical A2 report namespace binding missing")
+    _validate_canonical_effective(report["effective"], report, phase_spec)
+    _validate_canonical_identity(report["identity_manifest"],
+                                 trusted_identity=trusted_identity or phase_spec.get("trusted_identity"))
+    if report["contract_digest"] != contract_digest(phase, report["effective"], report["identity_manifest"], phase_spec=phase_spec):
+        raise PilotError("canonical A2 contract digest mismatch")
+    expected_artifacts = _validate_artifacts(phase, pathlib.Path(phase_spec["adapter_path"]), phase_spec=phase_spec)
+    _validate_canonical_step_records(phase, report, phase_spec, expected_artifacts)
+    if report["provider_calls"] != phase_spec["iters"] or report["optimizer_updates"] != phase_spec["iters"]:
+        raise PilotError("canonical A2 provider/update cardinality mismatch")
+    if report["global_mapping"] != [0, *global_steps(phase, range(1, phase_spec["iters"] + 1))]:
+        raise PilotError("canonical A2 global mapping mismatch")
+    if report["watchdog_cancelled"] is not True or report["exit_code"] != 0:
+        raise PilotError("canonical A2 lifecycle evidence missing")
+    _a2_finite_number(report["wall_seconds"], "phase wall time", minimum=0.0)
+    if report["attempt_1_historical_evidence"] != (historical_evidence if historical_evidence is not None else list(ATTEMPT1_EVIDENCE_SHA256)):
+        raise PilotError("canonical A2 historical evidence substituted")
+    if report["artifacts"] != expected_artifacts:
+        raise PilotError("canonical A2 artifact/checkpoint evidence mismatch")
+    if any(item.get("checkpoint") != expected_artifacts["checkpoints"][index] for index, item in enumerate(report["steps"])):
+        raise PilotError("canonical A2 update/checkpoint binding mismatch")
+    expected_resume = expected_artifacts["checkpoints"][-1] if phase == "phase-a" else canonical_tensor_digest(phase_spec["resume_adapter_file"])
+    if report["resume_source"] != expected_resume:
+        raise PilotError("canonical A2 resume checkpoint binding mismatch")
+    if report["commands"] != report["effective"]["command"] or report["retry"] != RETRY_POLICY or report["fallback"] != FALLBACK_POLICY or report["non_claims"] != list(NON_CLAIMS):
+        raise PilotError("canonical A2 command or policy binding mismatch")
+    if report_path is not None and pathlib.Path(report_path).resolve() != pathlib.Path(paths[f"{phase}-report"]).resolve():
+        raise PilotError("canonical A2 report path argument mismatch")
+
+
+def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], resume_source: pathlib.Path | str,
+                                 phase_spec: dict[str, Any] | None = None,
+                                 historical_evidence: list[dict[str, Any]] | None = None,
+                                 trusted_identity: dict[str, Any] | None = None) -> None:
     if report.get("status") != "ok" or report.get("phase") != "phase-a" or marker.get("status") != "ok" or marker.get("phase") != "phase-a":
         raise PilotError("Phase A report and OK marker required")
+    a2_paths: dict[str, str] | None = None
+    if phase_spec is not None and phase_spec.get("attempt") == 2:
+        a2_paths = phase_spec.get("namespace_paths")
+        if not isinstance(a2_paths, dict) or not a2_paths:
+            raise PilotError("canonical A2 namespace paths missing")
+        if report.get("attempt") != 2 or report.get("namespace") != ATTEMPT2_NAMESPACE:
+            raise PilotError("attempt-1 report cannot satisfy attempt-2 dependency")
+        if marker.get("attempt") != 2 or marker.get("namespace") != ATTEMPT2_NAMESPACE:
+            raise PilotError("attempt-1 marker cannot satisfy attempt-2 dependency")
     if report.get("provider_calls") != 2 or report.get("optimizer_updates") != 2:
         raise PilotError("Phase A report cardinality binding missing")
+    if phase_spec is not None and phase_spec.get("attempt") == 2:
+        if not isinstance(report.get("provider_evidence"), list):
+            raise PilotError("Phase A canonical provider evidence missing")
     report_path = marker.get("report_path")
     expected_report_sha = marker.get("report_sha256")
-    canonical_report_path = (REPO_ROOT / PHASES["phase-a"]["report"]).resolve()
+    if a2_paths is not None:
+        canonical_report_path = pathlib.Path(a2_paths["phase-a-report"])
+        if pathlib.Path(resume_source) != pathlib.Path(a2_paths["phase-b-resume"]):
+            raise PilotError("Phase A resume source path is not the canonical Phase B resume")
+    else:
+        canonical_report_path = pathlib.Path((phase_spec or PHASES["phase-a"])["report"])
+        if not canonical_report_path.is_absolute():
+            canonical_report_path = REPO_ROOT / canonical_report_path
+    canonical_report_path = canonical_report_path.resolve()
     if not report_path or pathlib.Path(report_path).resolve() != canonical_report_path:
         raise PilotError("Phase A marker report path is not the canonical report")
     if not expected_report_sha:
@@ -288,6 +795,11 @@ def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], 
         raise PilotError("Phase A report hash binding mismatch")
     if hashed_report != report:
         raise PilotError("Phase A report object does not equal hashed payload")
+    if phase_spec is not None and phase_spec.get("attempt") == 2:
+        validate_canonical_attempt2_report(report, phase_spec=phase_spec,
+                                           report_path=canonical_report_path,
+                                           historical_evidence=historical_evidence,
+                                           trusted_identity=trusted_identity)
     if not marker.get("contract_digest") or marker.get("contract_digest") != report.get("contract_digest"):
         raise PilotError("Phase A contract binding missing")
     source = pathlib.Path(resume_source)
@@ -302,10 +814,15 @@ def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], 
         raise PilotError("Phase A resume source hash mismatch")
     if not source_info.get("canonical_tensor_digest_v1"):
         raise PilotError("Phase A resume source canonical digest binding missing")
+    observed_source = canonical_tensor_digest(source)
+    if observed_source["file_sha256"] != source_info.get("file_sha256") or observed_source["canonical_tensor_digest_v1"] != source_info.get("canonical_tensor_digest_v1"):
+        raise PilotError("Phase A resume source canonical digest mismatch")
 
 
 def _effective(args: argparse.Namespace) -> dict[str, Any]:
     keys = set(COMMON_VALUES) | {"phase", "model", "data", "config", "adapter_path", "resume_adapter_file", "train", "test", "hf_dataset"}
+    if getattr(args, "attempt", 1) != 1:
+        keys |= {"attempt", "log_path"}
     effective = {key: getattr(args, key, None) for key in sorted(keys)}
     command = list(getattr(args, "_command_argv", ()) or sys.argv)
     effective["command"] = command or [PILOT_INTERPRETER, str(REPO_ROOT / "scripts/ds4_segmented_pilot.py")]
@@ -364,6 +881,8 @@ def validate_pins(args: argparse.Namespace, phase: dict[str, Any], config: dict[
         raise PilotError("pinned-args: Phase B requires resume source")
     effective = _effective(args)
     effective.update(expected)
+    if getattr(args, "attempt", 1) == 2:
+        effective["command"] = canonical_attempt2_command(args.phase, phase)
     return effective
 
 
@@ -464,6 +983,7 @@ def aggregate_reports(phase_a: dict[str, Any], phase_b: dict[str, Any]) -> dict[
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--attempt", type=int, choices=(1, 2), default=1)
     parser.add_argument("--phase", choices=tuple(PHASES), required=True)
     for name in ("model", "data", "adapter_path", "config", "resume_adapter_file"):
         parser.add_argument(f"--{name.replace('_', '-')}")
@@ -486,6 +1006,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps-per-eval", type=int)
     parser.add_argument("--save-every", type=int)
     parser.add_argument("--segment-size", type=int)
+    parser.add_argument("--launch-check-only", action="store_true")
+    parser.add_argument("--log-path")
+    parser.add_argument("--log-fd", type=int)
     return parser
 
 
@@ -799,10 +1322,17 @@ def compare_immutable_identity(previous: dict[str, Any], current: dict[str, Any]
         raise PilotError("Phase B immutable identity mismatch before model loading")
 
 
-def contract_digest(phase: str, effective: dict[str, Any], identity: dict[str, Any] | None = None) -> str:
+def contract_digest(phase: str, effective: dict[str, Any], identity: dict[str, Any] | None = None,
+                    phase_spec: dict[str, Any] | None = None) -> str:
     identity_value = _immutable_identity(identity or {})
-    payload = {"phase": phase, "common": COMMON_VALUES, "phase_spec": PHASES[phase],
+    spec = phase_spec or PHASES[phase]
+    payload = {"phase": phase, "common": COMMON_VALUES, "phase_spec": spec,
                "effective": effective, "identity": identity_value}
+    if spec.get("attempt") == 2:
+        payload["attempt"] = 2
+        payload["namespace"] = ATTEMPT2_NAMESPACE
+        payload["attempt_1_historical_evidence_manifest"] = list(ATTEMPT1_EVIDENCE_SHA256)
+        payload["active_log_binding"] = effective.get("log_path")
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -875,7 +1405,8 @@ def _execute_training(args: argparse.Namespace, phase: dict[str, Any], api: Any,
     if saved_schema != trainable_schema:
         raise PilotError("trainable schema changed before training")
     if args.phase == "phase-b":
-        phase_start = pathlib.Path(PHASES["phase-a"]["adapter_path"]) / "phase-a-start.safetensors"
+        phase_start = pathlib.Path(phase.get("phase_start_adapter_file") or
+                                   (pathlib.Path(PHASES["phase-a"]["adapter_path"]) / "phase-a-start.safetensors"))
         if not phase_start.is_file():
             raise PilotError("Phase A start checkpoint missing for resume proof")
         verify_resume_continuity(args.resume_adapter_file, start_path, phase_start)
@@ -903,19 +1434,35 @@ def _artifact_info(path: pathlib.Path) -> dict[str, Any]:
     return canonical_tensor_digest(path)
 
 
-def _validate_artifacts(phase_name: str, output: pathlib.Path) -> dict[str, Any]:
-    phase = PHASES[phase_name]
-    start = output / ("phase-a-start.safetensors" if phase_name == "phase-a" else "resume-start.safetensors")
-    checkpoints = [output / f"{step:07d}_adapters.safetensors" for step in range(1, phase["iters"] + 1)]
-    final = output / "adapters.safetensors"
-    for path in [start, *checkpoints, final, output / "adapter_config.json"]:
+def _validate_artifacts(phase_name: str, output: pathlib.Path,
+                        phase_spec: dict[str, Any] | None = None) -> dict[str, Any]:
+    phase = phase_spec or PHASES[phase_name]
+    if phase.get("attempt") == 2:
+        paths = phase.get("namespace_paths")
+        if not isinstance(paths, dict) or not paths:
+            raise PilotError("canonical A2 namespace paths missing")
+        expected_output = pathlib.Path(paths[f"{phase_name}-output"])
+        if output != expected_output:
+            raise PilotError(f"canonical A2 artifact output binding mismatch: {output}")
+        start = pathlib.Path(paths[f"{phase_name}-start-checkpoint"])
+        checkpoints = [pathlib.Path(paths[f"{phase_name}-step{step}-checkpoint"])
+                       for step in range(1, phase["iters"] + 1)]
+        final = pathlib.Path(paths[f"{phase_name}-final-checkpoint"])
+        config = pathlib.Path(paths[f"{phase_name}-config"])
+    else:
+        start = output / ("phase-a-start.safetensors" if phase_name == "phase-a" else "resume-start.safetensors")
+        checkpoints = [output / f"{step:07d}_adapters.safetensors" for step in range(1, phase["iters"] + 1)]
+        final = output / "adapters.safetensors"
+        config = output / "adapter_config.json"
+    for path in [start, *checkpoints, final, config]:
         if not path.is_file():
             raise PilotError(f"missing required pilot artifact: {path}")
     numbered = {path.name for path in output.glob("*_adapters.safetensors")}
     expected_numbered = {path.name for path in checkpoints}
     if numbered != expected_numbered:
         raise PilotError("checkpoint cardinality or unexpected numbered checkpoint")
-    infos = {"start": _artifact_info(start), "checkpoints": [_artifact_info(path) for path in checkpoints], "final": _artifact_info(final)}
+    infos = {"start": _artifact_info(start), "checkpoints": [_artifact_info(path) for path in checkpoints], "final": _artifact_info(final),
+             "config": {"path": str(config), "size": config.stat().st_size, "file_sha256": file_sha256(config)}}
     all_infos = [infos["start"], *infos["checkpoints"], infos["final"]]
     schema = all_infos[0]["tensors"]
     if any(item["tensors"] != schema for item in all_infos[1:]):
@@ -930,11 +1477,25 @@ def _validate_artifacts(phase_name: str, output: pathlib.Path) -> dict[str, Any]
     return infos
 
 
-def _marker_path(phase: str, status: str) -> pathlib.Path:
+def _phase_spec(phase: str, attempt: int = 1) -> dict[str, Any]:
+    if attempt == 1:
+        if phase not in PHASES:
+            raise PilotError(f"unknown phase: {phase}")
+        return PHASES[phase]
+    if attempt == 2:
+        return attempt2_phase_specs()[phase]
+    raise PilotError("only attempt 1 and attempt 2 are supported")
+
+
+def _marker_path(phase: str, status: str, phase_spec: dict[str, Any] | None = None) -> pathlib.Path:
+    if phase_spec is not None and phase_spec.get("attempt") == 2:
+        return pathlib.Path(phase_spec["namespace_paths"][f"{phase}-{status}"])
     return pathlib.Path(PILOT_WORKSPACE) / f".ds4-segmented-pilot-{phase}-{status}"
 
 
-def _all_attempt_paths(phase: str) -> list[pathlib.Path]:
+def _all_attempt_paths(phase: str, attempt: int = 1) -> list[pathlib.Path]:
+    if attempt == 2:
+        return _attempt2_absent_paths(attempt2_namespace())
     paths = [PILOT_FINAL_REPORT, pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok", pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail"]
     if phase == "phase-a":
         paths.extend(REPO_ROOT / spec["report"] for spec in PHASES.values())
@@ -944,7 +1505,11 @@ def _all_attempt_paths(phase: str) -> list[pathlib.Path]:
     return paths
 
 
-def _check_attempt_gates(phase: str) -> None:
+def _check_attempt_gates(phase: str, attempt: int = 1, allow_active_log: bool = False) -> None:
+    if attempt == 2:
+        paths = attempt2_namespace()
+        check_attempt2_launch(phase, paths[f"{phase}-log"], allow_active_log=allow_active_log)
+        return
     for path in _all_attempt_paths(phase):
         ensure_absent(path)
     ensure_absent(PHASES[phase]["adapter_path"])
@@ -957,30 +1522,125 @@ def _git_output(*args: str) -> str:
         raise PilotError(f"identity command failed: {' '.join(args)}: {exc}") from exc
 
 
+def _resource_skip_type(psutil: Any, error: BaseException) -> str | None:
+    for name in ("ZombieProcess", "NoSuchProcess", "AccessDenied"):
+        error_type = getattr(psutil, name, None)
+        if error_type is not None and isinstance(error, error_type):
+            return name
+    return None
+
+
+def _resource_skip_pid(error: BaseException, pid: int | None) -> int | None:
+    if pid is not None:
+        return pid
+    candidate = getattr(error, "pid", None)
+    return candidate if type(candidate) is int else None
+
+
+def _resource_evidence(available: int, free: int, observed: list[list[int]],
+                       skips: dict[str, Any]) -> dict[str, Any]:
+    names = ("AccessDenied", "NoSuchProcess", "ZombieProcess")
+    if set(skips) != set(names):
+        raise ValueError("resource skip type schema mismatch")
+    for name in names:
+        if skips[name]["counts_by_type"] != len(skips[name]["pids_by_type"]) + skips[name]["unknown_pid_counts_by_type"]:
+            raise ValueError("resource skip count mismatch")
+    evidence = {"available_memory": available, "disk_free": free,
+                "competing_processes": sorted(observed),
+                "allowed_process_skips": {
+                    "total": sum(skips[name]["counts_by_type"] for name in names),
+                    "counts_by_type": {name: skips[name]["counts_by_type"] for name in names},
+                    "pids_by_type": {name: sorted(skips[name]["pids_by_type"]) for name in names},
+                    "unknown_pid_counts_by_type": {name: skips[name]["unknown_pid_counts_by_type"] for name in names},
+                }}
+    if evidence["allowed_process_skips"]["total"] != sum(evidence["allowed_process_skips"]["counts_by_type"].values()):
+        raise ValueError("resource skip total mismatch")
+    return evidence
+
+
 def _resource_gate() -> dict[str, Any]:
     try:
         import psutil
+    except Exception as exc:
+        raise ResourceObserverError("import", exc) from exc
+    try:
         available = int(psutil.virtual_memory().available)
-        rss = [(int(proc.pid), int(proc.memory_info().rss)) for proc in psutil.process_iter(["pid", "memory_info"]) if proc.pid != os.getpid()]
-    except (ImportError, OSError) as exc:
-        raise PilotError(f"resource observer unavailable: {exc}") from exc
-    competing = [item for item in rss if item[1] > 50 * 1024**3]
+    except Exception as exc:
+        raise ResourceObserverError("virtual-memory", exc) from exc
+    try:
+        current_pid = os.getpid()
+    except Exception as exc:
+        raise ResourceObserverError("process-pid", exc) from exc
+    names = ("AccessDenied", "NoSuchProcess", "ZombieProcess")
+    skips = {name: {"counts_by_type": 0, "pids_by_type": [], "unknown_pid_counts_by_type": 0} for name in names}
+    observed: list[list[int]] = []
+    try:
+        iterator = iter(psutil.process_iter(["pid"]))
+    except Exception as exc:
+        raise ResourceObserverError("process-enumeration", exc) from exc
+    while True:
+        try:
+            process = next(iterator)
+        except StopIteration:
+            break
+        except Exception as exc:
+            raise ResourceObserverError("process-enumeration", exc) from exc
+        pid: int | None = None
+        try:
+            pid = int(process.pid)
+        except Exception as exc:
+            skip_type = _resource_skip_type(psutil, exc)
+            if skip_type is None:
+                raise ResourceObserverError("process-pid", exc) from exc
+            skip_pid = _resource_skip_pid(exc, None)
+            skips[skip_type]["counts_by_type"] += 1
+            if skip_pid is None:
+                skips[skip_type]["unknown_pid_counts_by_type"] += 1
+            else:
+                skips[skip_type]["pids_by_type"].append(skip_pid)
+            continue
+        if pid == current_pid:
+            continue
+        try:
+            rss = int(process.memory_info().rss)
+        except Exception as exc:
+            skip_type = _resource_skip_type(psutil, exc)
+            if skip_type is None:
+                raise ResourceObserverError("process-rss", exc, pid) from exc
+            skip_pid = _resource_skip_pid(exc, pid)
+            skips[skip_type]["counts_by_type"] += 1
+            if skip_pid is None:
+                skips[skip_type]["unknown_pid_counts_by_type"] += 1
+            else:
+                skips[skip_type]["pids_by_type"].append(skip_pid)
+            continue
+        observed.append([pid, rss])
+    observed.sort(key=lambda item: (item[0], item[1]))
+    competing = [item for item in observed if item[1] > 50 * 1024**3]
     if competing:
         raise PilotError(f"competing process exceeds RSS gate: {competing}")
     if available < PILOT_MEMORY_HEADROOM:
         raise PilotError("memory headroom below 32 GiB")
-    free = shutil_disk_free(PILOT_WORKSPACE)
+    try:
+        free = shutil_disk_free(PILOT_WORKSPACE)
+    except ResourceObserverError:
+        raise
+    except Exception as exc:
+        raise ResourceObserverError("disk-free", exc) from exc
     if free < PILOT_DISK_MIN_FREE:
         raise PilotError("disk free below 1 GiB")
-    return {"available_memory": available, "disk_free": free, "competing_processes": rss}
+    try:
+        return _resource_evidence(available, free, observed, skips)
+    except Exception as exc:
+        raise ResourceObserverError("resource-evidence", exc) from exc
 
 
 def shutil_disk_free(path: str | pathlib.Path) -> int:
     import shutil
     try:
         return int(shutil.disk_usage(path).free)
-    except OSError as exc:
-        raise PilotError(f"disk resource check failed: {path}: {exc}") from exc
+    except Exception as exc:
+        raise ResourceObserverError("disk-free", exc) from exc
 
 
 def _file_manifest(root: pathlib.Path) -> list[dict[str, Any]]:
@@ -1073,26 +1733,35 @@ def _runtime_preflight(args: argparse.Namespace, phase: dict[str, Any], config: 
             "repository_status": _git_output("git", "status", "--short")}
 
 
-def _phase_failure_report(phase_name: str, message: str, started: float, *, effective: dict[str, Any] | None = None,
+def _phase_failure_report(phase_name: str, message: str | Exception, started: float, *, effective: dict[str, Any] | None = None,
                           identity: dict[str, Any] | None = None, contract: str | None = None,
                           output: pathlib.Path | None = None, lock_lifecycle: dict[str, Any] | None = None,
-                          watchdog_cancelled: bool = False) -> dict[str, Any]:
-    return {"status": "fail", "phase": phase_name, "error": message, "wall_seconds": time.monotonic() - started,
-            "effective": effective or {}, "commands": (effective or {}).get("command", []),
-            "identity_manifest": identity or {}, "contract_digest": contract or "",
-            "output_path": str(output or PHASES[phase_name]["adapter_path"]),
-            "lock_lifecycle": lock_lifecycle or {}, "watchdog_cancelled": watchdog_cancelled,
-            "exit_code": 1, "retry": RETRY_POLICY, "fallback": FALLBACK_POLICY, "non_claims": list(NON_CLAIMS)}
+                          watchdog_cancelled: bool = False, phase_spec: dict[str, Any] | None = None) -> dict[str, Any]:
+    spec = phase_spec or PHASES[phase_name]
+    report = {"status": "fail", "phase": phase_name, "attempt": spec.get("attempt", 1),
+              "namespace": spec.get("namespace", "ds4-segmented-pilot"), "error": str(message), "wall_seconds": time.monotonic() - started,
+              "effective": effective or {}, "commands": (effective or {}).get("command", []),
+              "identity_manifest": identity or {}, "contract_digest": contract or "",
+              "output_path": str(output or spec["adapter_path"]),
+              "lock_lifecycle": lock_lifecycle or {}, "watchdog_cancelled": watchdog_cancelled,
+              "exit_code": 1, "retry": RETRY_POLICY, "fallback": FALLBACK_POLICY, "non_claims": list(NON_CLAIMS)}
+    if isinstance(message, ResourceObserverError):
+        report["resource_observer_error"] = {"stage": message.stage, "exception_type": message.exception_type,
+                                              "pid": message.pid}
+    return report
 
 
-def _ok_marker_paths() -> list[pathlib.Path]:
+def _ok_marker_paths(attempt: int = 1) -> list[pathlib.Path]:
+    if attempt == 2:
+        paths = attempt2_namespace()
+        return [paths["phase-a-ok"], paths["phase-b-ok"], paths["final-ok"]]
     workspace = pathlib.Path(PILOT_WORKSPACE)
     return [_marker_path(phase, "ok") for phase in PHASES] + [workspace / ".ds4-segmented-pilot-ok"]
 
 
-def _remove_ok_markers() -> None:
+def _remove_ok_markers(attempt: int = 1) -> None:
     errors: list[Exception] = []
-    for path in _ok_marker_paths():
+    for path in _ok_marker_paths(attempt):
         try:
             path.unlink()
         except FileNotFoundError:
@@ -1113,41 +1782,55 @@ def _remove_ok_markers() -> None:
         raise PilotError("cannot roll back success markers: " + "; ".join(str(exc) for exc in errors)) from errors[0]
 
 
-def _marker_fields(phase: str, status: str, report_path: pathlib.Path, report: dict[str, Any]) -> dict[str, Any]:
-    return {"phase": phase, "status": status, "report_path": str(report_path),
-            "report_sha256": file_sha256(report_path), "output_path": report.get("output_path", PHASES[phase]["adapter_path"]),
+def _marker_fields(phase: str, status: str, report_path: pathlib.Path, report: dict[str, Any],
+                   phase_spec: dict[str, Any] | None = None) -> dict[str, Any]:
+    spec = phase_spec or PHASES[phase]
+    return {"phase": phase, "status": status, "attempt": spec.get("attempt", 1),
+            "namespace": spec.get("namespace", "ds4-segmented-pilot"), "report_path": str(report_path),
+            "report_sha256": file_sha256(report_path), "output_path": report.get("output_path", spec["adapter_path"]),
             "timestamp": time.time(), "exit_code": 0 if status == "ok" else 1,
             "contract_digest": report.get("contract_digest", "")}
 
 
-def _write_failure_evidence(phase: str, report: dict[str, Any]) -> None:
+def _write_failure_evidence(phase: str, report: dict[str, Any], phase_spec: dict[str, Any] | None = None) -> None:
+    spec = phase_spec or PHASES[phase]
+    attempt = int(spec.get("attempt", 1))
     # Roll back published success evidence before replacing any report it names.
-    _remove_ok_markers()
-    report_path = REPO_ROOT / PHASES[phase]["report"]
+    _remove_ok_markers(attempt)
+    report_path = (pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
+                   if attempt == 2 else REPO_ROOT / spec["report"])
+    final_path = (pathlib.Path(spec["namespace_paths"]["final-report"])
+                  if attempt == 2 else PILOT_FINAL_REPORT)
     atomic_write_json(report_path, report)
     final = dict(report)
     final["phase_report"] = str(report_path)
-    atomic_write_json(PILOT_FINAL_REPORT, final)
+    atomic_write_json(final_path, final)
     errors: list[Exception] = []
+    final_marker = (pathlib.Path(spec["namespace_paths"]["final-fail"])
+                    if attempt == 2 else pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail")
     for marker_path, marker in (
-        (_marker_path(phase, "fail"), _marker_fields(phase, "fail", report_path, report)),
-        (pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail",
-         _marker_fields(phase, "fail", PILOT_FINAL_REPORT, final)),
+        (_marker_path(phase, "fail", spec), _marker_fields(phase, "fail", report_path, report, spec)),
+        (final_marker, _marker_fields(phase, "fail", final_path, final, spec)),
     ):
         try:
             atomic_write_json(marker_path, marker)
         except Exception as exc:
             errors.append(exc)
     if errors:
-        _remove_ok_markers()
+        _remove_ok_markers(attempt)
         raise PilotError("failure evidence write failed: " + "; ".join(str(exc) for exc in errors)) from errors[0]
 
 
-def _write_success_evidence(phase: str, report: dict[str, Any]) -> None:
+def _write_success_evidence(phase: str, report: dict[str, Any], phase_spec: dict[str, Any] | None = None) -> None:
+    spec = phase_spec or PHASES[phase]
+    attempt = int(spec.get("attempt", 1))
     try:
-        report_path = REPO_ROOT / PHASES[phase]["report"]
+        report_path = (pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
+                       if attempt == 2 else REPO_ROOT / spec["report"])
+        final_path = (pathlib.Path(spec["namespace_paths"]["final-report"])
+                      if attempt == 2 else PILOT_FINAL_REPORT)
         atomic_write_json(report_path, report)
-        marker = _marker_fields(phase, "ok", report_path, report)
+        marker = _marker_fields(phase, "ok", report_path, report, spec)
         if phase == "phase-a":
             source = report.get("resume_source")
             if source:
@@ -1155,17 +1838,20 @@ def _write_success_evidence(phase: str, report: dict[str, Any]) -> None:
                 marker["resume_source_file_sha256"] = source["file_sha256"]
                 marker["resume_source_canonical_tensor_digest_v1"] = source["canonical_tensor_digest_v1"]
         else:
-            phase_a = json.loads((REPO_ROOT / PHASES["phase-a"]["report"]).read_text(encoding="utf-8"))
+            phase_a_report_path = (pathlib.Path(spec["namespace_paths"]["phase-a-report"]) if attempt == 2
+                                   else REPO_ROOT / PHASES["phase-a"]["report"])
+            phase_a = json.loads(phase_a_report_path.read_text(encoding="utf-8"))
             final = aggregate_reports(phase_a, report)
-            atomic_write_json(PILOT_FINAL_REPORT, final)
-        atomic_write_json(_marker_path(phase, "ok"), marker)
+            atomic_write_json(final_path, final)
+        atomic_write_json(_marker_path(phase, "ok", spec), marker)
         if phase == "phase-b":
-            atomic_write_json(pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok",
-                              _marker_fields(phase, "ok", PILOT_FINAL_REPORT, final))
+            final_marker = (pathlib.Path(spec["namespace_paths"]["final-ok"])
+                            if attempt == 2 else pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok")
+            atomic_write_json(final_marker, _marker_fields(phase, "ok", final_path, final, spec))
     except Exception:
         # Multi-file publication cannot be a filesystem transaction. Remove all
         # success markers before the caller writes bound failure evidence.
-        _remove_ok_markers()
+        _remove_ok_markers(attempt)
         raise
 
 
@@ -1174,8 +1860,28 @@ def _expected_validation_steps(phase: dict[str, Any]) -> list[int]:
             if iteration == 1 or iteration % phase["steps_per_eval"] == 0 or iteration == phase["iters"]]
 
 
+def _attest_log_fd(log_path: pathlib.Path | str, log_fd: int) -> None:
+    try:
+        path_stat = os.stat(log_path)
+        fd_stat = os.fstat(log_fd)
+    except OSError as exc:
+        raise PilotError(f"attempt-2 log attestation failed: {log_path}: {exc}") from exc
+    if not stat_is_regular(path_stat.st_mode) or not stat_is_regular(fd_stat.st_mode):
+        raise PilotError(f"attempt-2 log attestation requires regular file: {log_path}")
+    fields = ("st_dev", "st_ino", "st_mode", "st_size")
+    if any(getattr(path_stat, field) != getattr(fd_stat, field) for field in fields):
+        raise PilotError(f"attempt-2 log FD collision: {log_path}")
+
+
+def stat_is_regular(mode: int) -> bool:
+    import stat
+    return stat.S_ISREG(mode)
+
+
 def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = None) -> dict[str, Any]:
-    phase_name, phase = args.phase, PHASES[args.phase]
+    phase_name = args.phase
+    attempt = int(getattr(args, "attempt", 1) or 1)
+    phase = _phase_spec(phase_name, attempt)
     started = time.monotonic()
     watchdog: Watchdog | None = None
     watchdog_cancelled = False
@@ -1189,41 +1895,59 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
     effective: dict[str, Any] = {}
     identity: dict[str, Any] = {}
     contract = ""
+    historical_evidence: list[dict[str, Any]] = []
     output = pathlib.Path(phase["adapter_path"])
     try:
         # Occupied evidence is a terminal one-attempt record. Check it before
         # any watchdog, config, or identity work can fail and overwrite it.
         try:
-            _check_attempt_gates(phase_name)
+            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 2)
+            if attempt == 2:
+                historical_evidence = verify_attempt1_historical_evidence()
+                if getattr(args, "log_fd", None) is not None:
+                    _attest_log_fd(args.log_path, int(args.log_fd))
         except Exception:
             attempt_gate_rejected = True
             raise
         watchdog = _install_timeout_watchdog(phase["timeout"])
         config = _read_config(args.config)
         effective = validate_pins(args, phase, config)
-        contract = contract_digest(phase_name, effective)
+        contract = contract_digest(phase_name, effective, phase_spec=phase)
         _acquire_ft_lock(workspace)
         lock_acquired = True
         lock_lifecycle["acquired"] = True
         try:
-            _check_attempt_gates(phase_name)
+            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 2)
         except Exception:
             attempt_gate_rejected = True
             raise
+        if attempt == 2 and getattr(args, "log_fd", None) is not None:
+            _attest_log_fd(args.log_path, int(args.log_fd))
         phase_a_report: dict[str, Any] | None = None
         if phase_name == "phase-b":
-            phase_a_report_path = REPO_ROOT / PHASES["phase-a"]["report"]
+            phase_a_spec = attempt2_phase_specs()["phase-a"] if attempt == 2 else PHASES["phase-a"]
+            phase_a_report_path = pathlib.Path(phase_a_spec["namespace_paths"]["phase-a-report"] if attempt == 2 else phase_a_spec["report"])
+            if attempt == 1:
+                phase_a_report_path = REPO_ROOT / phase_a_report_path
             if not phase_a_report_path.is_file():
                 raise PilotError("Phase A report missing")
             phase_a_report = json.loads(phase_a_report_path.read_text(encoding="utf-8"))
-            marker_path = _marker_path("phase-a", "ok")
+            marker_path = _marker_path("phase-a", "ok", phase_a_spec)
             if not marker_path.is_file():
                 raise PilotError("Phase A OK marker missing")
-            validate_phase_b_dependency(phase_a_report, json.loads(marker_path.read_text(encoding="utf-8")), phase["resume_adapter_file"])
+            dependency_marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            if attempt == 2:
+                validate_phase_b_dependency(phase_a_report, dependency_marker, phase["resume_adapter_file"],
+                                            phase_spec=phase_a_spec)
+            else:
+                validate_phase_b_dependency(phase_a_report, dependency_marker, phase["resume_adapter_file"])
         identity = (preflight or _runtime_preflight)(args, phase, config)
         if phase_name == "phase-b" and phase_a_report is not None:
             compare_immutable_identity(phase_a_report.get("identity_manifest", {}), identity)
-        contract = contract_digest(phase_name, effective, identity)
+            if attempt == 2:
+                validate_phase_b_dependency(phase_a_report, dependency_marker, phase["resume_adapter_file"],
+                                            phase_spec=phase_a_spec, trusted_identity=identity)
+        contract = contract_digest(phase_name, effective, identity, phase_spec=phase)
         output.mkdir(parents=True)
         runtime_api = api or _load_training_api()
         tree_flatten = _api_get(runtime_api, "tree_flatten")
@@ -1231,7 +1955,8 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                                           _api_get(runtime_api, "mx"), tree_flatten=tree_flatten)
         callback = _PilotTrainingCallback(phase_name)
         _execute_training(args, phase, runtime_api, output, provider, callback, config=config)
-        artifacts = _validate_artifacts(phase_name, output)
+        artifacts = (_validate_artifacts(phase_name, output, phase_spec=phase)
+                     if attempt == 2 else _validate_artifacts(phase_name, output))
         validate_step_evidence(phase_name, provider.records, phase["iters"])
         callback_steps = [item["local_step"] for item in callback.records]
         if callback_steps != list(range(1, phase["iters"] + 1)):
@@ -1246,12 +1971,19 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                 raise PilotError("provider/callback step pairing mismatch")
             callback_record["provider_call"] = provider_record["provider_call"]
             callback_record["checkpoint"] = artifacts["checkpoints"][index]
-        report = {"status": "ok", "phase": phase_name, "effective": effective, "contract_digest": contract,
+        report = {"status": "ok", "phase": phase_name, "attempt": attempt,
+                  "namespace": phase.get("namespace", "ds4-segmented-pilot"), "effective": effective, "contract_digest": contract,
                   "identity_manifest": identity, "provider_calls": len(provider.records), "optimizer_updates": len(callback.records),
                   "steps": callback.records, "provider_evidence": provider.records, "validation_evidence": callback.validation_records,
                   "artifacts": artifacts, "output_path": str(output), "commands": effective.get("command", []),
                   "wall_seconds": time.monotonic() - started, "retry": RETRY_POLICY, "fallback": FALLBACK_POLICY,
                   "non_claims": list(NON_CLAIMS), "global_mapping": [0] + global_steps(phase_name, callback_steps)}
+        if attempt == 2:
+            paths = phase["namespace_paths"]
+            report.update({"attempt_1_historical_evidence": historical_evidence,
+                           "report_path": str(phase["report"]), "log_path": paths[f"{phase_name}-log"],
+                           "ok_marker_path": paths[f"{phase_name}-ok"], "fail_marker_path": paths[f"{phase_name}-fail"],
+                           "final_report_path": paths["final-report"], "namespace_paths": dict(paths)})
         if phase_name == "phase-a":
             report["resume_source"] = artifacts["checkpoints"][-1]
         else:
@@ -1291,37 +2023,83 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                         error = PilotError(f"{error}; partial lock quarantine failed: {quarantine_error}")
     lock_lifecycle["release_attempts"] = lock_release_attempts
     if error is not None:
-        failed = _phase_failure_report(phase_name, str(error), started, effective=effective, identity=identity,
+        failed = _phase_failure_report(phase_name, error or "unknown failure", started, effective=effective, identity=identity,
                                        contract=contract, output=output, lock_lifecycle=lock_lifecycle,
-                                       watchdog_cancelled=watchdog_cancelled)
+                                       watchdog_cancelled=watchdog_cancelled, phase_spec=phase)
         if attempt_gate_rejected:
             # Existing one-attempt evidence is itself the terminal record. Never
             # delete or overwrite it with a second invocation's failure report.
             return failed
         try:
-            _write_failure_evidence(phase_name, failed)
+            if attempt == 2:
+                _write_failure_evidence(phase_name, failed, phase_spec=phase)
+            else:
+                _write_failure_evidence(phase_name, failed)
         except Exception as evidence_error:
             failed["cleanup_warning"] = f"failure evidence write failed: {evidence_error}"
         return failed
     assert report is not None
     report["lock_lifecycle"] = lock_lifecycle
     report["watchdog_cancelled"] = watchdog_cancelled
+    report["exit_code"] = 0
     try:
-        _write_success_evidence(phase_name, report)
+        if attempt == 2:
+            validate_canonical_attempt2_report(report, phase_spec=phase,
+                                               report_path=phase["report"],
+                                               historical_evidence=historical_evidence,
+                                               trusted_identity=identity)
+        _write_success_evidence(phase_name, report, phase_spec=phase)
     except Exception as exc:
         failed = _phase_failure_report(phase_name, f"report/marker write failed: {exc}", started, effective=effective,
                                        identity=identity, contract=contract, output=output,
-                                       lock_lifecycle=lock_lifecycle, watchdog_cancelled=watchdog_cancelled)
+                                       lock_lifecycle=lock_lifecycle, watchdog_cancelled=watchdog_cancelled,
+                                       phase_spec=phase)
         try:
-            _write_failure_evidence(phase_name, failed)
+            if attempt == 2:
+                _write_failure_evidence(phase_name, failed, phase_spec=phase)
+            else:
+                _write_failure_evidence(phase_name, failed)
         except Exception as evidence_error:
             failed["cleanup_warning"] = f"failure evidence write failed: {evidence_error}"
         return failed
     return report
 
 
+def _prepare_attempt2_launch_args(args: argparse.Namespace, phase_spec: dict[str, Any]) -> argparse.Namespace:
+    identity = attempt2_launch_identity()
+    pinned = dict(COMMON_VALUES)
+    pinned.update({"attempt": 2, "model": identity["model"], "data": identity["data"], "config": identity["config"],
+                   "adapter_path": phase_spec["adapter_path"], "resume_adapter_file": phase_spec["resume_adapter_file"],
+                   "train": True, "test": False, "hf_dataset": False, "iters": phase_spec["iters"],
+                   "steps_per_eval": phase_spec["steps_per_eval"], "log_path": phase_spec["namespace_paths"][f"{args.phase}-log"]})
+    for key, expected in pinned.items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, expected)
+    args._command_argv = tuple(canonical_attempt2_command(args.phase, phase_spec))
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.launch_check_only:
+        if args.attempt != 2 or not args.log_path:
+            print("launch-check-only requires --attempt 2 and --log-path", file=sys.stderr)
+            return 1
+        try:
+            phase_spec = attempt2_phase_specs()[args.phase]
+            args = _prepare_attempt2_launch_args(args, phase_spec)
+            config = _read_config(args.config)
+            validate_pins(args, phase_spec, config)
+            trusted_identity = _runtime_preflight(args, phase_spec, config)
+            print(json.dumps(check_attempt2_launch(args.phase, args.log_path,
+                                                   trusted_identity=trusted_identity), sort_keys=True))
+        except Exception as exc:
+            print(f"pilot launch check failed closed: {exc}", file=sys.stderr)
+            return 1
+        return 0
+    if args.attempt == 2 and not args.log_fd:
+        print("attempt 2 requires --log-fd from the exclusive catalog wrapper", file=sys.stderr)
+        return 1
     report = run_phase(args)
     if report.get("status") != "ok":
         print(f"pilot failed closed: {report.get('error', 'unknown failure')}", file=sys.stderr)
