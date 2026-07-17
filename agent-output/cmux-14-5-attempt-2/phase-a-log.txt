@@ -1,0 +1,11 @@
+attempt-2 namespace phase=phase-a output=/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a start=/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/phase-a-start.safetensors final=/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/adapters.safetensors config=/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/adapter_config.json log=/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt
+  [1miter   train_loss     tok/s     tokens[0m
+  [38;5;244m   1[0m    [1;35mval[0m [1m19.553[0m    [38;5;244m815.87s[0m
+  [38;5;244m   1[0m    [1;32m19.334 ▼[0m    [1m    7[0m    [38;5;244m  1.1k[0m
+  [1;32msave[0m  [38;5;244m0000001_adapters.safetensors[0m
+[WARNING] Some sequences are longer than 4096 tokens. The longest sentence 7739 will be truncated to 4096. Consider pre-splitting your data to save memory.
+  [38;5;244m   2[0m    [1;35mval[0m [1m19.841[0m    [38;5;244m1279.93s[0m
+  [38;5;244m   2[0m    [1;32m17.648 ▼[0m    [1m    4[0m    [38;5;244m  1.4k[0m
+  [1;32msave[0m  [38;5;244m0000002_adapters.safetensors[0m
+[1;34mtrain[0m [34m██████████████████████████████[0m [1;34m100%[0m [38;5;244m·[0m [1;34m    2[0m[38;5;244m/2[0m
+pilot failed closed: safetensors __metadata__ must be an object

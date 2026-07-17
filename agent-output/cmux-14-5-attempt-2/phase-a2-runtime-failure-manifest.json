@@ -1,0 +1,81 @@
+{
+  "attempt": 2,
+  "command_sha256": "38e6b1aa11d28c41c126fda6dab55cf68a9eb1d9a71fc177eec8875a3114b2de",
+  "error": "safetensors __metadata__ must be an object",
+  "exit_code": 1,
+  "files": [
+    {
+      "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt",
+      "sha256": "edf1ae2215083aab2b8648403cf53f395ce39c3da2277f80fa7da2e87976734e",
+      "size": 1432
+    },
+    {
+      "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-report.json",
+      "sha256": "d9cbc1895b62f4f182a25dcf58d851d077c6f92745bd3b0d387c78fa6dc8a500",
+      "size": 80454
+    },
+    {
+      "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/pilot-report.json",
+      "sha256": "84e8d26cf658f4ba15eda8346b4e507dc331d65da29b00b21aca1073eb97c0ce",
+      "size": 80567
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-phase-a-fail",
+      "sha256": "079c89c88bf87699562ce8e5866d88ba3e92adec6d2b0c787a481778d85b2918",
+      "size": 542
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-fail",
+      "sha256": "91b4dd994a3bd0319c5d0edf9d0c49f933cc95f2e49a1b1f359e4a92e609edfe",
+      "size": 539
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/0000001_adapters.safetensors",
+      "sha256": "89363e82325e095bc74f7cdb6e022280438fa1667d52abcf33f1dfb3db1a2d18",
+      "size": 22292892
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/0000002_adapters.safetensors",
+      "sha256": "2b173d701b09fc9da2bb0a9553cc7b7eb99bacebf9fa6f10e00d7b4305ba3652",
+      "size": 22292892
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/adapter_config.json",
+      "sha256": "13620f30b39a0de718f0769830b4b0a2233eaebea62d6fc43da08231d0a0691d",
+      "size": 339
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/adapters.safetensors",
+      "sha256": "2b173d701b09fc9da2bb0a9553cc7b7eb99bacebf9fa6f10e00d7b4305ba3652",
+      "size": 22292892
+    },
+    {
+      "path": "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/phase-a-start.safetensors",
+      "sha256": "c6dd9f67be04936c4dce58d7b3643403354516d6167e4e08d76c393890339e51",
+      "size": 22292892
+    }
+  ],
+  "lock_absent_after_exit": true,
+  "lock_lifecycle": {
+    "acquired": true,
+    "path": "/Volumes/Data NVME/mlx-ft/ds4/.ds4-ft.lock",
+    "release_attempts": 1,
+    "released": true
+  },
+  "namespace": "ds4-segmented-pilot-attempt-2",
+  "ok_markers_absent": true,
+  "retry_performed": false,
+  "revision": "e6d34fa03479316720430f35cc94d4606a45ef96",
+  "status": "fail",
+  "story": "14.5b",
+  "training_log_observations": {
+    "checkpoint1_saved": true,
+    "checkpoint2_saved": true,
+    "iter1_loss": "19.334",
+    "iter1_val_loss": "19.553",
+    "iter2_loss": "17.648",
+    "iter2_val_loss": "19.841"
+  },
+  "wall_seconds": 2444.2739184170496,
+  "watchdog_cancelled": true
+}

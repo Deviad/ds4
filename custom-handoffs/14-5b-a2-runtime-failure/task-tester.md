@@ -1,0 +1,3 @@
+# 14.5b A2 runtime failure — Test Manager closeout
+
+Independently verify 10-file manifest hashes/sizes, report and marker JSON bindings, log 2/2 update/save lines, four safetensors header metadata types, lock/process absence, OK absence, no retry, docs diff check/tracking. Closeout GREEN means evidence valid; execution remains BLOCKED. Write test-report.md + marker. Read-only/direct; no delegate/cleanup/real execution.

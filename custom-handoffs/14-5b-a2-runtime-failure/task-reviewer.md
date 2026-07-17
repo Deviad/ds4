@@ -1,0 +1,3 @@
+# 14.5b A2 runtime failure — Reviewer closeout
+
+Verify requirements, manifest, log/report/markers and docs diff. Confirm 2/2 updates/checkpoints, exact losses/validation/runtime/error, four safetensors metadata null observations, failure markers/report bindings, no OK, lock released, no process, no retry, attempt-2 consumed, B2 blocked, no overclaim. Hash all 10 evidence files against manifest; code remains e6d34fa. Write review.md PASS/BLOCKED + marker. Read-only/direct; no delegate/edit/cleanup/real execution.
