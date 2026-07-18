@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r12 final
+
+Review exact staged r12 vs r11 F1-F3. Verify six caller seams assert persisted phase/final failure reports and both fail markers exact bindings/no OK. Verify same coordinated substitution accepted by weakened lower verifier and rejected by public immutable guard at targeted error. Check no staged marker anywhere including nested handoff `.cmux-status`; exact tree/no drift. Canonical vendor-first 871+3, docs truthful, protected/tracking/diff. PASS/BLOCKED standby + marker. No edit/delegate/real access.

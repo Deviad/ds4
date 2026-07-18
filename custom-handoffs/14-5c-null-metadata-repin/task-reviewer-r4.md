@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r4 final
+
+Review exact staged r4 vs latest F1-F6. Direct adversarial probes. Verify mandatory phase command checks, external trusted A3 auth in B3, immutable A3 admission lineage captured pre-training and exact final revalidation; coordinated auth/history/identity/report/marker mutation rejects. Attempt2 roots independent and full authentic/mutation semantics. Exact marker schema. Complete metadata/tensor/MLX/publication/B3/final tests. Catalog external auth only; docs truthful; protected/tracking/diff/canonical suite. PASS/BLOCKED to standby + marker. No edits/delegate/real access.

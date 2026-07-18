@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r6 final
+
+Review exact staged r6 vs latest F2/F3/F4/F5/F6. Direct adversarial. Require nonoptional trusted lineage/auth at final validator; mutate every final field and embedded phase. Exact marker full-field type/value incl bool. Production attempt2 authentic fixture + per semantic/10 descriptor/target/8 absence/outer/coordinated mutations. Metadata absent/null/object every checkpoint; invalid publication rollback; tensor/MLX exact keys/dtype/shape/layout/payload; A3/B3/final write seams. External auth/catalog/attempt3/protected/docs/tracking/diff. Run canonical vendor-first 624+3. PASS/BLOCKED standby + marker. No edit/delegate/real access.

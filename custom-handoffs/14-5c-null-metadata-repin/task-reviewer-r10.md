@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r10 final
+
+Review exact staged r10 vs latest F1-F6. Direct adversarial. Verify catalog explicit phase auth/no zero mint; exhaustive matrices mutation-sensitive and reach intended guards: contract-consistent roots, attempt2 outer/coordinated, loaded MLX/tensor overlap/OOB, B3 invalid metadata, markers per field, caller-level failure evidence at all attempt3 seams. Reprobe production trust roots. Canonical vendor-first 862+3, no drift/markers, docs truthful, protected/tracking/diff. PASS/BLOCKED standby + marker. No edit/delegate/real access.

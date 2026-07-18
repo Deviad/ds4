@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r7 final
+
+Review exact staged r7 vs latest F4/F3/F5/F6. Direct adversarial. Final phase supplied objects must equal duplicate-safe report byte snapshots/hashes then strict canonical phase validation; coordinated embedded mutation rejects. Historical lower-level verifier uses real bytes/hashes/strict JSON 10/8 and production wrapper immutable locals; full matrix. Exact tensor keys/schema/layout/payload. Verify all required metadata/MLX/marker/publication write-seam matrices and docs. Canonical vendor-first 636+3, no drift/markers, protected/tracking/diff. PASS/BLOCKED standby + marker. No edit/delegate/real access.

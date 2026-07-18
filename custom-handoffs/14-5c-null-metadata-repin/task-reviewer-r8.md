@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r8 final
+
+Review exact staged r8 vs latest F4/F3/F5/F6. Verify independent B3 auth/cross-phase identity/history roots and no snapshot self-trust; coordinated substitution rejects. One snapshot hash/no reopen. Also explicitly adjudicate whether required attempt2/metadata/MLX/marker/publication/tensor matrices are now complete; do not accept counts alone. Canonical vendor-first six-file, no drift/markers, protected/tracking/docs. PASS/BLOCKED standby + marker. No edit/delegate/real access.

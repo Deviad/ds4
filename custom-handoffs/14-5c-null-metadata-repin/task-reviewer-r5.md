@@ -1,0 +1,3 @@
+# Story 14.5c — Reviewer r5 final
+
+Review exact settled staged r5 vs latest F0-F6. Confirm no unstaged code/test/doc drift and no marker staged. Adversarial direct probes: mandatory auth phase/hash; external A3 auth in B3; final requires explicit pre-training in-memory lineage/auth with no fallback; coordinated re-lineage fails. Attempt2 verifier internal literal trust root exact 10/8/full schema and coordinated substitution rejects. Exact final schema mandatory hashes. Required metadata/tensor/MLX/marker/publication matrices and docs truth. Run canonical vendor-first six-file 586+3, protected/tracking/diff. PASS/BLOCKED to standby + marker. No edit/delegate/real access.

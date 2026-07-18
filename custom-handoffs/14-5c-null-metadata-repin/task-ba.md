@@ -1,0 +1,7 @@
+# Story 14.5c — safetensors null-metadata compatibility + fixed attempt-3 repin
+
+Context: Story 14.5b reviewed revision e6d34fa ran one authorized A2 invocation. Training completed 2/2 updates/checkpoints within 2444.27s, then artifact validation failed closed: `safetensors __metadata__ must be an object`. All four MLX-written safetensors headers contain JSON `__metadata__: null`. Failure evidence committed at d8dc248; attempt-2 output/reports/failure markers exist, OK markers absent, lock released, no retry. Attempt-2 namespace consumed and immutable; B2 blocked.
+
+Produce requirements.md and update docs/backlog.md. Define exact compatibility: in canonical safetensors parser/digest, `__metadata__` absent or JSON null means no metadata; object remains accepted under existing strict rules; every other type fails. Tensor names/dtypes/shapes/data offsets/bytes and canonical tensor digest remain unchanged and loadable. Mutation-sensitive direct/parser/artifact/publication tests required.
+
+Define one fixed attempt-3 A3/B3/final namespace, command/catalog names, collision/no-write semantics, immutable attempt-1 + attempt-2 evidence bindings, one authorization per phase, unchanged model/data/config/provider/vendor/training budgets/cardinality. Retire attempt-2 runnable catalog commands; never delete/move/overwrite attempt-2 evidence; no dynamic suffix/attempt4/fallback/retry. A3 exactly 2 updates/2700s after gates and fresh exact revision binding; B3 separate after verified A3. No code/real execution/cleanup/commit/push. Write marker.

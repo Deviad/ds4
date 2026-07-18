@@ -1,0 +1,3 @@
+# Story 14.5c — Coder r12b docs-only exact-wording correction
+
+Change only docs/technical-spec.md exact error text from `attempt-2 runtime target bindings not immutable` to `attempt-2 runtime target bindings are not immutable`, matching production/test. Stage docs and this handoff/note; no other change. Verify no unstaged drift/markers, diff checks. Write coder-notes-r12b.md. No tests needed beyond exact grep/diff; no real execution/commit/push/delegate/cmux.

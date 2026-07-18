@@ -1,0 +1,3 @@
+# Story 14.5c — Test Manager r3
+
+Validate exact staged r3 canonical vendor-first: focused 208; full pilot 301; finetune 51; exact six-file 580+3 skips; external authorization operator-flow tests; phase-specific auth; attempt2 history; final lineage mutation; metadata/artifact/tensor/real MLX load; pycompile/diff/tracking/protected. Write test-report-r3.md GREEN/BLOCKED + marker. Direct only; no delegate/real training/cleanup.

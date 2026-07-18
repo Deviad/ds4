@@ -1,0 +1,3 @@
+# Story 14.5c — Test Manager
+
+Validate exact staged revision canonical vendor-first. Run focused metadata/attempt3/history/publication/catalog suites and exact six-file expected 536+3 skips; ensure real MLX save/load metadata-null test executes; pycompile/diff/tracking/protected hashes; no real attempt namespace access. Verify attempt2 evidence constants only/synthetic seams. GREEN/BLOCKED report + marker. Direct only; no delegate/real training/cleanup.

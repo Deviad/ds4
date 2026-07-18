@@ -75,8 +75,8 @@ MLX_STEPS = (
     "splice",
     "ds4-smoke",
     "ds4-segmented-smoke",
-    "ds4-segmented-pilot-attempt-2-phase-a",
-    "ds4-segmented-pilot-attempt-2-phase-b",
+    "ds4-segmented-pilot-attempt-3-phase-a",
+    "ds4-segmented-pilot-attempt-3-phase-b",
 )
 TORCH_MPS_STEPS = (
     "torch-env-create",
@@ -108,7 +108,7 @@ BACKEND_STEPS: dict[str, tuple[str, ...]] = {
 DEFAULT_BACKEND_STEPS: dict[str, tuple[str, ...]] = {
     # Raw `convert` is kept as an explicit diagnostic step, but the default
     # local path must route through FP8 emulation before mlx-lm conversion.
-    "local-mlx": tuple(step for step in MLX_STEPS if step not in ("convert", "ds4-segmented-smoke", "ds4-segmented-pilot-phase-a", "ds4-segmented-pilot-phase-b", "ds4-segmented-pilot-attempt-2-phase-a", "ds4-segmented-pilot-attempt-2-phase-b")),
+    "local-mlx": tuple(step for step in MLX_STEPS if step not in ("convert", "ds4-segmented-smoke", "ds4-segmented-pilot-phase-a", "ds4-segmented-pilot-phase-b", "ds4-segmented-pilot-attempt-3-phase-a", "ds4-segmented-pilot-attempt-3-phase-b")),
     "local-torch-mps": TORCH_MPS_STEPS,
     "remote-cuda": REMOTE_CUDA_STEPS,
     "cpu-check": CPU_CHECK_STEPS,
@@ -1296,7 +1296,7 @@ def compute_story_14_protected_manifest_report(project_root: pathlib.Path) -> di
     }
 
 
-def _central_attempt2_module(project_root: pathlib.Path):
+def _central_attempt3_module(project_root: pathlib.Path):
     module_name = "_ds4_segmented_pilot_catalog"
     module = sys.modules.get(module_name)
     if module is not None:
@@ -1304,47 +1304,61 @@ def _central_attempt2_module(project_root: pathlib.Path):
     module_path = project_root / "scripts" / "ds4_segmented_pilot.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load attempt-2 namespace source: {module_path}")
+        raise RuntimeError(f"cannot load attempt-3 namespace source: {module_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _central_attempt2_launch_identity(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, str]:
-    return _central_attempt2_module(repo_root).attempt2_launch_identity(repo_root=repo_root)
+def _central_attempt3_launch_identity(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, str]:
+    return _central_attempt3_module(repo_root).attempt3_launch_identity(repo_root=repo_root)
 
 
-def _central_attempt2_namespace(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, pathlib.Path]:
-    return _central_attempt2_module(repo_root).attempt2_namespace(repo_root=repo_root, workspace=workspace)
+def _central_attempt3_namespace(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, pathlib.Path]:
+    return _central_attempt3_module(repo_root).attempt3_namespace(repo_root=repo_root, workspace=workspace)
 
 
-def _central_attempt2_phase_specs(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, dict[str, Any]]:
-    return _central_attempt2_module(repo_root).attempt2_phase_specs(repo_root=repo_root, workspace=workspace)
+def _central_attempt3_phase_specs(*, repo_root: pathlib.Path, workspace: pathlib.Path) -> dict[str, dict[str, Any]]:
+    return _central_attempt3_module(repo_root).attempt3_phase_specs(repo_root=repo_root, workspace=workspace)
 
 
-def _pilot_attempt2_command(project_root: pathlib.Path, pilot_script: pathlib.Path,
-                            pilot_work: pathlib.Path, phase: str) -> str:
-    """Render the non-default attempt-2 wrapper with exclusive FD logging."""
-    identity = _central_attempt2_launch_identity(repo_root=project_root, workspace=pilot_work)
-    paths = _central_attempt2_namespace(repo_root=project_root, workspace=pilot_work)
-    phase_spec = _central_attempt2_phase_specs(repo_root=project_root, workspace=pilot_work)[phase]
+def _pilot_attempt3_command(project_root: pathlib.Path, pilot_script: pathlib.Path,
+                            pilot_work: pathlib.Path, phase: str, authorization_json: str | None = None,
+                            phase_a_authorization_json: str | None = None) -> str:
+    """Render the non-default attempt-3 wrapper with exclusive FD logging."""
+    identity = _central_attempt3_launch_identity(repo_root=project_root, workspace=pilot_work)
+    paths = _central_attempt3_namespace(repo_root=project_root, workspace=pilot_work)
+    phase_spec = _central_attempt3_phase_specs(repo_root=project_root, workspace=pilot_work)[phase]
+    auth_phase_spec = dict(phase_spec)
+    auth_phase_spec.setdefault("attempt", 3)
+    auth_phase_spec.setdefault("phase", phase)
+    auth_phase_spec.setdefault("namespace", "ds4-segmented-pilot-attempt-3")
+    auth_phase_spec.setdefault("namespace_paths", {key: str(value) for key, value in paths.items()})
+    if authorization_json is None:
+        raise PlanError("explicit attempt-3 authorization is required")
     phase_b = phase == "phase-b"
+    if phase_b and phase_a_authorization_json is None:
+        raise PlanError("explicit Phase A3 authorization is required for Phase B3")
+    authorization = authorization_json
     phase_var = phase.replace("-", "_").upper()
-    output_var = f"A2_{phase_var}_OUTPUT"
+    output_var = f"A3_{phase_var}_OUTPUT"
     log = paths[f"{phase}-log"]
-    resume = (f' \\\n  --resume-adapter-file "$A2_PHASE_B_RESUME"' if phase_b else "")
+    resume = (f' \\\n  --resume-adapter-file "$A3_PHASE_B_RESUME"' if phase_b else "")
     iters, eval_steps = phase_spec["iters"], phase_spec["steps_per_eval"]
-    binding_lines = [f'A2_{key.replace("-", "_").upper()}={q(value)}' for key, value in paths.items()]
+    binding_lines = [f'A3_{key.replace("-", "_").upper()}={q(value)}' for key, value in paths.items()]
     binding_lines.extend((f'PYTHON={q(identity["interpreter"])}', f'PILOT_SCRIPT={q(identity["script"])}',
                           f'MODEL={q(identity["model"])}', f'DATA={q(identity["data"])}',
-                          f'CONFIG={q(identity["config"])}', f'LOG={q(log)}'))
+                          f'CONFIG={q(identity["config"])}', f'LOG={q(log)}',
+                          f'AUTHORIZATION_JSON={q(authorization)}'))
+    if phase_b and phase_a_authorization_json is not None:
+        binding_lines.append(f'PHASE_A_AUTHORIZATION_JSON={q(phase_a_authorization_json)}')
     pythonpath = q(f'{project_root / "python-envs" / "mlx" / "src"}:{project_root / "vendor" / "mlx-lm"}')
     phase_key = phase.replace("-", "_").upper()
     namespace_printf = (
-        f"printf 'attempt-2 namespace phase={phase} output=%s start=%s final=%s config=%s log=%s\\n' "
-        f'\"$A2_{phase_key}_OUTPUT\" \"$A2_{phase_key}_START_CHECKPOINT\" '
-        f'\"$A2_{phase_key}_FINAL_CHECKPOINT\" \"$A2_{phase_key}_CONFIG\" \"$LOG\" >&3'
+        f"printf 'attempt-3 namespace phase={phase} output=%s start=%s final=%s config=%s log=%s\\n' "
+        f'\"$A3_{phase_key}_OUTPUT\" \"$A3_{phase_key}_START_CHECKPOINT\" '
+        f'\"$A3_{phase_key}_FINAL_CHECKPOINT\" \"$A3_{phase_key}_CONFIG\" \"$LOG\" >&3'
     )
     inner_script = "\n".join([
         "set -euo pipefail",
@@ -1352,15 +1366,17 @@ def _pilot_attempt2_command(project_root: pathlib.Path, pilot_script: pathlib.Pa
         "unset SSLKEYLOGFILE",
         *binding_lines,
         f'PYTHONUNBUFFERED=1 PYTHONPATH={pythonpath} "$PYTHON" "$PILOT_SCRIPT" \\\n'
-        f'  --attempt 2 --phase {phase} --launch-check-only --log-path "$LOG" \\\n'
+        f'  --attempt 3 --phase {phase} --launch-check-only --log-path "$LOG" --authorization-json "$AUTHORIZATION_JSON"'
+        + (' --phase-a-authorization-json "$PHASE_A_AUTHORIZATION_JSON"' if phase_b and phase_a_authorization_json is not None else '') + ' \\\n'
         f'  --model "$MODEL" --data "$DATA" --adapter-path "${output_var}" --config "$CONFIG"{resume}',
         'mkdir -p "$(dirname "$LOG")"',
         'set -o noclobber; exec 3>"$LOG"; set +o noclobber',
         namespace_printf,
-        *( ["printf 'attempt-2 resume=%s\\n' \"$A2_PHASE_B_RESUME\" >&3"] if phase_b else [] ),
+        *( ["printf 'attempt-3 resume=%s\\n' \"$A3_PHASE_B_RESUME\" >&3"] if phase_b else [] ),
         "set +e",
         f'PYTHONUNBUFFERED=1 PYTHONPATH={pythonpath} "$PYTHON" "$PILOT_SCRIPT" \\\n'
-        f'  --attempt 2 --phase {phase} --log-path "$LOG" --log-fd 3 \\\n'
+        f'  --attempt 3 --phase {phase} --log-path "$LOG" --log-fd 3 --authorization-json "$AUTHORIZATION_JSON"'
+        + (' --phase-a-authorization-json "$PHASE_A_AUTHORIZATION_JSON"' if phase_b and phase_a_authorization_json is not None else '') + ' \\\n'
         f'  --model "$MODEL" --data "$DATA" \\\n'
         f'  --adapter-path "${output_var}" \\\n'
         f'  --config "$CONFIG"{resume} \\\n'
@@ -1399,7 +1415,7 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
     lora_config = mlx_work / "lora-config.json"
     pilot_work = pathlib.Path("/Volumes/Data NVME/mlx-ft/ds4")
     project_root = pathlib.Path(__file__).resolve().parent.parent
-    pilot_identity = _central_attempt2_launch_identity(repo_root=project_root, workspace=pilot_work)
+    pilot_identity = _central_attempt3_launch_identity(repo_root=project_root, workspace=pilot_work)
     pilot_interpreter = pathlib.Path(pilot_identity["interpreter"])
     pilot_model = pathlib.Path(pilot_identity["model"])
     pilot_data = pathlib.Path(pilot_identity["data"])
@@ -1431,7 +1447,7 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
                 f"  --save-every 1 --segment-size 1{continuation}"
                 f"  2>&1 | tee {quote(log_path)}'")
 
-    return {
+    catalog = {
         "setup-env": [f"mkdir -p {q(mlx_work)} && cd {q(mlx_work)} && {{ test -d .venv || uv venv --seed .venv; }} && {activate} && pip install -U pip && pip install -e {q(project_root / 'python-envs' / 'mlx')} && python -c {q('from ds4_ft_mlx.mlx_lm_plugin import install_startup_pth_hook; print(install_startup_pth_hook())')}", setup_release_selector],
         "mlx-lm-source": mlx_lm_source_commands(getattr(args, "mlx_lm_source", "release"), mlx_work, project_root, script_path),
         "mlx-device": [f"cd {q(mlx_work)} && {activate} && python - <<'PY'\nimport mlx.core as mx\nprint(mx.default_device())\nPY"],
@@ -1466,8 +1482,6 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
         "splice-dry-run": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)} --dry-run"],
         "splice": [f"python3 {q(ds4_root / 'gguf-tools/mixed/splice_mixed_expert_layers_gguf.py')} --base {q(q2)} --donor {q(q4)} --q4-layers 37-42 --out {q(mixed)}"],
         "ds4-smoke": [f"cd {q(ds4_root)} && ./ds4 -m {q(mixed)} -p {q('Explain why deduplicating by question matters for supervised fine-tuning.')} -n 300"],
-        "ds4-segmented-pilot-attempt-2-phase-a": [_pilot_attempt2_command(project_root, pilot_script, pilot_work, "phase-a")],
-        "ds4-segmented-pilot-attempt-2-phase-b": [_pilot_attempt2_command(project_root, pilot_script, pilot_work, "phase-b")],
         "ds4-segmented-smoke": [f"cd {q(mlx_work)} && unset SSLKEYLOGFILE && . {q(mlx_work / '.venv/bin/activate')} && PYTHONPATH={q(project_root / 'python-envs' / 'mlx' / 'src')}:{q(project_root / 'vendor' / 'mlx-lm')} python {q(project_root / 'scripts' / 'ds4_segmented_smoke.py')} --model {q(mlx_work / 'model-4bit')} --data {q(dataset_root / "mlx-4096-smoke")} --adapter-path {q(mlx_work / 'adapters-segmented-smoke')} --config {q(lora_config)} --iters 1 --batch-size 1 --learning-rate 1e-5 --max-seq-length 4096 --mask-prompt --grad-checkpoint --segment-size 1 > {q(project_root / 'agent-output' / 'cmux-14-3' / 'smoke-log.txt')} 2>&1"],
         "torch-env-create": [
             f"mkdir -p {q(mlx_work)}",
@@ -1513,16 +1527,66 @@ def command_catalog(args: argparse.Namespace) -> dict[str, list[str]]:
         ],
     }
 
+    def external_authorization(phase: str) -> str | None:
+        phase_key = phase.replace("-", "_")
+        phase_file = getattr(args, f"attempt3_{phase_key}_authorization_file", None)
+        phase_value = getattr(args, f"attempt3_{phase_key}_authorization_json", None)
+        generic_file = getattr(args, "attempt3_authorization_file", None)
+        generic_value = getattr(args, "attempt3_authorization_json", None)
+        if phase_file or phase_value:
+            if phase_file and phase_value:
+                raise PlanError(f"choose one external {phase} authorization file or value")
+            source = path_arg(phase_file) if phase_file else None
+            if source is not None and not source.is_file():
+                raise PlanError(f"external {phase} authorization file missing: {source}")
+            raw = source.read_text(encoding="utf-8") if source is not None else phase_value
+        else:
+            if phase == "phase-b" and (generic_file or generic_value):
+                return None
+            if generic_file and generic_value:
+                raise PlanError("choose one external attempt-3 authorization file or value")
+            if not generic_file and not generic_value:
+                return None
+            source = path_arg(generic_file) if generic_file else None
+            if source is not None:
+                if not source.is_file():
+                    raise PlanError(f"external {phase} authorization file missing: {source}")
+                raw = source.read_text(encoding="utf-8")
+            else:
+                raw = generic_value
+        try:
+            _central_attempt3_module(project_root)._authorization_json(raw)
+        except Exception as exc:
+            raise PlanError(f"external {phase} authorization is invalid: {exc}") from exc
+        return raw
+
+    authorizations = {phase: external_authorization(phase) for phase in ("phase-a", "phase-b")}
+    for phase, authorization in authorizations.items():
+        if authorization is not None:
+            phase_a_authorization = authorizations["phase-a"] if phase == "phase-b" else None
+            if phase == "phase-b" and phase_a_authorization is None:
+                raise PlanError("separate external Phase A3 authorization is required for Phase B3")
+            catalog[f"ds4-segmented-pilot-attempt-3-{phase}"] = [
+                _pilot_attempt3_command(project_root, pilot_script, pilot_work, phase, authorization,
+                                        phase_a_authorization_json=phase_a_authorization)]
+    return catalog
+
 
 def emit_commands(args: argparse.Namespace) -> int:
     backend = args.backend
     if backend not in BACKEND_STEPS:
         raise PlanError(f"unknown backend {backend!r}")
     allowed_steps = BACKEND_STEPS[backend]
-    catalog = command_catalog(args)
     steps = args.steps or list(DEFAULT_BACKEND_STEPS[backend])
+    args._requested_steps = tuple(steps)
+    if {"ds4-segmented-pilot-attempt-3-phase-a", "ds4-segmented-pilot-attempt-3-phase-b"}.issubset(steps):
+        if not (getattr(args, "attempt3_phase_a_authorization_file", None) or getattr(args, "attempt3_phase_a_authorization_json", None)) or not (getattr(args, "attempt3_phase_b_authorization_file", None) or getattr(args, "attempt3_phase_b_authorization_json", None)):
+            raise PlanError("separate external Phase A3 and Phase B3 authorizations are required")
+    catalog = command_catalog(args)
     missing = [step for step in steps if step not in catalog]
     if missing:
+        if any(step.startswith("ds4-segmented-pilot-attempt-3-") for step in missing):
+            raise PlanError("external attempt-3 authorization file or value is required")
         raise PlanError(f"unknown command step(s): {', '.join(missing)}")
     disallowed = [step for step in steps if step not in allowed_steps]
     if disallowed:
@@ -5102,8 +5166,11 @@ def run_command(args: argparse.Namespace) -> int:
     if backend not in BACKEND_STEPS:
         raise PlanError(f"unknown backend {backend!r}")
     allowed_steps = BACKEND_STEPS[backend]
+    args._requested_steps = (args.step,)
     catalog = command_catalog(args)
     if args.step not in catalog:
+        if args.step.startswith("ds4-segmented-pilot-attempt-3-"):
+            raise PlanError("external attempt-3 authorization file or value is required")
         raise PlanError(f"unknown command step {args.step!r}")
     if args.step not in allowed_steps:
         raise PlanError(f"step {args.step!r} is not available for backend {backend!r}; use one of {', '.join(allowed_steps)}")
@@ -5249,6 +5316,12 @@ Conversion, training, GGUF quantization, splicing writes, and DS4 server runs ar
     p.add_argument("--fused-hf-model")
     p.add_argument("--ds4-imatrix")
     p.add_argument("--adapter-ds4", help="DS4-converted adapter.safetensors for cpu-check ds4-adapter-inspect")
+    p.add_argument("--attempt3-authorization-file", help="externally reviewed attempt-3 authorization JSON file")
+    p.add_argument("--attempt3-authorization-json", help="externally reviewed canonical attempt-3 authorization JSON value")
+    p.add_argument("--attempt3-phase-a-authorization-file", help="externally reviewed Phase A3 authorization JSON file")
+    p.add_argument("--attempt3-phase-a-authorization-json", help="externally reviewed canonical Phase A3 authorization JSON value")
+    p.add_argument("--attempt3-phase-b-authorization-file", help="externally reviewed Phase B3 authorization JSON file")
+    p.add_argument("--attempt3-phase-b-authorization-json", help="externally reviewed canonical Phase B3 authorization JSON value")
     p.set_defaults(func=emit_commands)
 
     p = sub.add_parser("run-command", help="dry-run or execute one expensive MLX/GGUF step; execute requires --yes")
@@ -5266,6 +5339,12 @@ Conversion, training, GGUF quantization, splicing writes, and DS4 server runs ar
     p.add_argument("--fused-hf-model")
     p.add_argument("--ds4-imatrix")
     p.add_argument("--adapter-ds4", help="DS4-converted adapter.safetensors for cpu-check ds4-adapter-inspect")
+    p.add_argument("--attempt3-authorization-file", help="externally reviewed attempt-3 authorization JSON file")
+    p.add_argument("--attempt3-authorization-json", help="externally reviewed canonical attempt-3 authorization JSON value")
+    p.add_argument("--attempt3-phase-a-authorization-file", help="externally reviewed Phase A3 authorization JSON file")
+    p.add_argument("--attempt3-phase-a-authorization-json", help="externally reviewed canonical Phase A3 authorization JSON value")
+    p.add_argument("--attempt3-phase-b-authorization-file", help="externally reviewed Phase B3 authorization JSON file")
+    p.add_argument("--attempt3-phase-b-authorization-json", help="externally reviewed canonical Phase B3 authorization JSON value")
     p.set_defaults(func=run_command)
     return parser
 

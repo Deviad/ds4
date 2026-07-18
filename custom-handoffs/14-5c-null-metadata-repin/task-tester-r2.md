@@ -1,0 +1,3 @@
+# Story 14.5c — Test Manager r2
+
+Validate exact staged r2 canonical vendor-first. Run focused 172 and exact six-file 543+3 skips; real MLX null save/load must execute; authorization no-write mutations; authentic synthetic attempt2 history matrix; attempt3 report/publication/B3/catalog; pycompile/diff/tracking/protected hashes. Write test-report-r2.md GREEN/BLOCKED + marker. Direct only; no delegate/real training/cleanup.

@@ -1,0 +1,5 @@
+# Story 14.5c — Reviewer r2
+
+Review exact staged r2 against previous BLOCKED findings F1-F5, requirements, architecture. Direct adversarial probes; no edit/delegate/real assets.
+
+Verify six-key authorization is independently anchored and cannot self-authorize; revision/command/pilot/catalog/protected/attempt2 manifest substitutions reject before writes, including actual operator generation flow. Attempt2 verifier matches authentic canonical nested manifest/exact paths/10 files/absence facts and mutation matrix. Attempt3 contract truly ordinal3 and reports/digests/markers bind attempt1+2 history + authorization. Test real MLX null save/load, artifact positions/invalid byte preservation, publication rollback, B3 exact A3. Catalog retires A2, no dynamic attempts. Docs truthful; backlog staged; protected/tracking/diff/full suite. PASS/BLOCKED to standby + marker.

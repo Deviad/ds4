@@ -1,0 +1,5 @@
+# Story 14.5c — Architect
+
+Read requirements.md, current safetensors canonical digest/artifact validator, attempt2 namespace/spec/catalog code and tests, attempt2 runtime manifest/reports, canonical docs. Design minimal compatibility and fixed attempt3 repin.
+
+Pin exact parser behavior for absent/null/object metadata; object schema; reject bool/list/string/number; preserve tensor digest/load semantics. Design centralized attempt3 namespace/spec/launch identity/catalog with attempt2 runnable retirement and immutable historical bindings for attempt1 plus consumed attempt2 10-file manifest/report markers. Define collision/no-write, canonical A3/B3 report/admission, exact mutation matrix, protected bytes, TDD sequence. Prefer reuse/generalization only if simpler and mutation-safe; no dynamic attempts. Update docs/architecture.md/technical-spec if durable. No code/real access/cleanup/commit/push. Write architecture.md + marker.

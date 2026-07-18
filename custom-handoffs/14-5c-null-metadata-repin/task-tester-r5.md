@@ -1,0 +1,3 @@
+# Story 14.5c — Test Manager r5 final
+
+Run exact staged r5 with `PYTHONPATH=$PWD/vendor/mlx-lm:$PWD/python-envs/mlx/src:$PWD` and project MLX interpreter. Exact six-file expected 586+3 skips; focused r5/metadata/history/auth/lineage/catalog; real MLX null test executed; pycompile/diff/cached-diff/tracking/protected; verify no unstaged code/test/docs and no staged marker. Write test-report-r5.md GREEN/BLOCKED + root marker. Direct only; no delegate/real training/cleanup.
