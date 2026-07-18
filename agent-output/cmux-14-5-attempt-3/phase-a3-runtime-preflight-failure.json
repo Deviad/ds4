@@ -1,0 +1,29 @@
+{
+  "adapter_output_absent": true,
+  "attempt": 3,
+  "authorization": {
+    "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-3/phase-a-authorization.json",
+    "sha256": "543e584621c133e6d8afc1a7b6d0a3bea296a78d2de18f77fd84fcb3bf23b065",
+    "size": 532
+  },
+  "error": "attempt-2 historical absence fact violated: /Volumes/Data NVME/mlx-ft/ds4/.ds4-ft.lock",
+  "exit_code": 1,
+  "failure_markers_absent": true,
+  "lock_absent_after_exit": true,
+  "log": {
+    "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-3/phase-a-log.txt",
+    "sha256": "77b2dc85dc02735dc1727ffc06f2fb9471230c90f8808d67da7e10bb852ca1bc",
+    "size": 619
+  },
+  "namespace": "ds4-segmented-pilot-attempt-3",
+  "optimizer_updates": 0,
+  "phase": "phase-a",
+  "provider_calls": 0,
+  "report_absent": true,
+  "retry_performed": false,
+  "revision": "9b906515f5aba3928542cdf099e5248a45030af9",
+  "status": "fail",
+  "story": "14.5d",
+  "training_calls": 0,
+  "wrapper_sha256": "788083f7d29d596a0acce61f61b9a6c385ccae1ce9d0f44ae34c630a5fa4d3e5"
+}

@@ -1,0 +1,3 @@
+# Story 14.5d — final A3 external authorization review
+
+Read committed HEAD `9b906515f5aba3928542cdf099e5248a45030af9`, `agent-output/cmux-14-5-attempt-3/phase-a-authorization.json`, `/tmp/ds4-phase-a3-command.sh`. Verify canonical compact six-key auth, revision/remote, Phase-A canonical command SHA `fa4ac097...`, pilot/catalog/protected/attempt2 hashes, production attempt1+2 verifiers PASS, fixed A3-only wrapper/order, 23 A3/B3/final destinations absent, no cleanup/retry/fallback. Write authorization-review-final.md PASS/BLOCKED. No code/training.
