@@ -1,0 +1,5 @@
+# Story 14.5d — canonical attempt-2 evidence path repair
+
+Context: committed 14.5c HEAD 7763f11 passed Reviewer/Test gates. External A3 authorization review blocked before launch because `verify_attempt2_historical_evidence()` constructs first three expected runtime-manifest paths as repo-relative while immutable committed manifest stores canonical absolute repo paths. Evidence bytes/hashes and all 10 targets/8 absence facts are intact. No A3 invocation/output.
+
+Define minimal requirement: production verifier normalizes/constructs expected first-three paths exactly as canonical absolute paths without modifying evidence; external authorization candidate must use production default phase specs (no workspace override), yielding fixed volume adapter path and exact command hash. Add tracked production verifier real-evidence read-only test or exact synthetic absolute-path fixture plus command-generation regression. Preserve attempt3 namespace/gates. Update backlog. No code/real training/cleanup/commit/push. Write requirements.md + marker.

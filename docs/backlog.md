@@ -5046,7 +5046,7 @@ Phase A2 requires all attempt-2 phase/final paths absent before its log opens. B
 5. No convergence, quality, continuity, or readiness inference is made from the bounded runtime observations.
 6. This closeout changes only `docs/backlog.md`, `training-next-status.md`, its handoff `requirements.md`, and the BA completion marker. No code, runtime artifact, cleanup, commit, or push occurs.
 
-### Story 14.5c — safetensors null-metadata compatibility + fixed attempt-3 repin — **Status: SYNTHETIC R12 CODER EVIDENCE CLOSURE — REVIEW/TEST GATES PENDING — A3/B3 BLOCKED**
+### Story 14.5c — safetensors null-metadata compatibility + fixed attempt-3 repin — **Status: [x] SYNTHETIC COMPLETE at `7763f11` — Reviewer PASS + Test Manager GREEN; external A3 authorization review BLOCKED before launch; no A3 invocation**
 
 As a DS4 fine-tuning operator (WHO), I want canonical safetensors validation to accept MLX-written null metadata and the consumed pilot to be repinned to one fixed attempt-3 namespace (WHAT), so that valid adapter tensors can pass fail-closed publication without weakening tensor integrity, historical evidence, collision safety, or one-invocation authorization (WHY).
 
@@ -5091,5 +5091,21 @@ Preserve collision-check → evidence/revision gate → noclobber FD log → exa
 9. No code implementation, real asset access, provider/training/inference execution, cleanup, commit, or push occurs in this BA slice.
 
 **STOP/ESCALATE:** Any broader metadata acceptance; duplicate-key/tensor/layout/digest weakening; attempt-1/attempt-2 mutation; attempt-2 reuse; attempt 4/dynamic namespace/fallback/retry; runtime identity/budget/cardinality change; A2 evidence satisfying A3/B3 success; protected-path drift; real execution before exact-revision double-green and explicit phase authorization; or untracked verdict file.
+
+### Story 14.5d — canonical attempt-2 evidence path repair — **Status: [ ] REQUIREMENTS READY — implementation/review/test pending; A3/B3 blocked**
+
+As a DS4 fine-tuning operator (WHO), I want the production attempt-2 history verifier to compare canonical absolute repository evidence paths (WHAT), so that intact immutable attempt-2 evidence can pass A3 admission without rewriting history or weakening authorization (WHY).
+
+**Canonical requirements:** `custom-handoffs/14-5d-attempt2-path-canonical/requirements.md`
+
+**Failure basis:** External A3 authorization review at committed HEAD `7763f118599d3624686ee27736b92000776a0866` blocked before launch. `verify_attempt2_historical_evidence()` constructs the first three expected runtime-manifest targets as repo-relative paths, while the immutable hash-pinned manifest stores canonical absolute repository paths. Evidence bytes remain exact: pre-log `990`/`cdb6b89d7f7384be84c33abe993311caefe4df3f1c2b94c9ef31a3e65e0fff41`, manifest `3123`/`2cc1d2359017cce2130a9428fd202e8c2f35b5d5810030c95aaac8b464fd3d88`, all ten target bindings, and all eight absence facts. No A3 invocation, log, output, or training occurred.
+
+**Minimal repair:** Construct the first three expected manifest paths as canonical absolute paths under the effective repository root; keep the seven volume paths unchanged. Do not edit or regenerate historical evidence. Preserve exact-schema, immutable-target, direct hash, report-identity, absence, and coordinated-substitution rejection gates. Add a tracked production-verifier real-evidence read-only test or exact synthetic absolute-path fixture plus a relative/substitution negative.
+
+**Authorization regression:** Production authorization must use default `attempt3_phase_specs()` with no workspace override. Phase A3 retains adapter path `/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-a` and canonical compact command SHA-256 `fa4ac09716b820d249030bd93c9fe3dc0817be49059acc437af9ef22a562ad1e` while command semantics remain unchanged. Add tracked command-generation regression. Synthetic workspace paths cannot supply the reviewed production authorization hash.
+
+**Acceptance:** Untouched canonical attempt-2 evidence passes the production verifier; path/hash/payload/schema/absence mutations still fail closed; Story 14.5c metadata, attempt-3 namespace, fixed paths, pins, A3 `2/2700s`, B3 `1/1500s`, total `3/4200s`, collision, authorization separation, publication, no-retry/no-fallback, and non-claim contracts remain unchanged. Reviewer PASS and Test Manager GREEN on the same committed revision precede fresh external A3 authorization review. A3/B3 remain unauthorized here.
+
+**STOP/ESCALATE:** Historical evidence mutation; relative-path compatibility fallback; trust-root weakening; workspace-overridden production authorization; command/runtime drift; collision cleanup; retry/fallback/attempt 4; real asset access/execution; untracked verdict test; commit/push.
 
 **EOF Epic 14**

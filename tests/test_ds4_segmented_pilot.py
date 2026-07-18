@@ -396,6 +396,21 @@ def test_attempt3_is_only_live_namespace_and_attempt2_is_not_launchable():
         p.build_parser().parse_args(["--attempt", "2", "--phase", "phase-a"])
 
 
+def test_attempt3_default_phase_a_command_is_canonical_and_workspace_override_is_distinct():
+    p = load_pilot()
+    default_spec = p.attempt3_phase_specs()["phase-a"]
+    default_command = p.canonical_attempt3_command("phase-a", default_spec)
+    assert default_spec["adapter_path"] == "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-a"
+    assert hashlib.sha256(json.dumps(default_command, sort_keys=True, separators=(",", ":")).encode()).hexdigest() == \
+        "fa4ac09716b820d249030bd93c9fe3dc0817be49059acc437af9ef22a562ad1e"
+
+    synthetic_spec = p.attempt3_phase_specs(workspace=pathlib.Path("/tmp/synthetic-ds4"))["phase-a"]
+    synthetic_command = p.canonical_attempt3_command("phase-a", synthetic_spec)
+    assert synthetic_spec["adapter_path"] != default_spec["adapter_path"]
+    assert hashlib.sha256(json.dumps(synthetic_command, sort_keys=True, separators=(",", ":")).encode()).hexdigest() != \
+        "fa4ac09716b820d249030bd93c9fe3dc0817be49059acc437af9ef22a562ad1e"
+
+
 def test_resume_proof_requires_equal_source_and_different_start(tmp_path):
     p = load_pilot()
     source = tmp_path / "source.safetensors"
@@ -3504,12 +3519,18 @@ def test_catalog_binds_distinct_external_phase_authorizations(tmp_path):
     assert auth_a in command_a and auth_b in command_b and auth_a in command_b
 
 
-def _install_r6_attempt2_fixture(tmp_path, monkeypatch, p):
+def _install_r6_attempt2_fixture(tmp_path, monkeypatch, p, *, canonical_first_three=False):
+    canonical_root = p.REPO_ROOT.resolve()
+
     def mapped(raw):
+        path = pathlib.Path(raw)
+        if path.is_absolute() and str(path).startswith(str(canonical_root) + os.sep):
+            return tmp_path / path.relative_to(canonical_root)
         return tmp_path / "attempt2" / raw.lstrip("/").replace("/", "__")
 
     monkeypatch.setattr(p, "_historical_path", lambda raw, _root: mapped(raw))
-    monkeypatch.setattr(p, "_attempt2_expected_path", lambda raw, _root: mapped(raw))
+    if not canonical_first_three:
+        monkeypatch.setattr(p, "_attempt2_expected_path", lambda raw, _root: mapped(raw))
     prelog_raw = "agent-output/cmux-14-5-attempt-2/phase-a2-prelog-failure.md"
     manifest_raw = "agent-output/cmux-14-5-attempt-2/phase-a2-runtime-failure-manifest.json"
     file_paths = [
@@ -3524,6 +3545,10 @@ def _install_r6_attempt2_fixture(tmp_path, monkeypatch, p):
         "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/adapters.safetensors",
         "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/phase-a-start.safetensors",
     ]
+    if canonical_first_three:
+        file_paths = [str(canonical_root / raw) for raw in file_paths[:3]] + [
+            str(canonical_root / f"synthetic-attempt2-target-{index}") for index in range(7)
+        ]
     report = {"attempt": 2, "namespace": "ds4-segmented-pilot-attempt-2", "effective": {}, "identity_manifest": {}}
     payloads = {
         raw: (json.dumps(report, sort_keys=True).encode() if raw.endswith("pilot-report.json")
@@ -3570,6 +3595,50 @@ def _install_r6_attempt2_fixture(tmp_path, monkeypatch, p):
         "expected_manifest": expected_manifest,
     }
     return fixture, expected_manifest, report
+
+
+def test_attempt2_public_verifier_accepts_committed_canonical_evidence_read_only():
+    p = load_pilot()
+    manifest_path = ROOT / "agent-output/cmux-14-5-attempt-2/phase-a2-runtime-failure-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert [item["path"] for item in manifest["files"][:3]] == [
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt",
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-report.json",
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/pilot-report.json",
+    ]
+    result = p.verify_attempt2_historical_evidence(repo_root=ROOT)
+    assert len(result["files"]) == 10
+    assert len(result["facts"]) == 9
+    assert len(p._ATTEMPT2_CANONICAL_ABSENT_PATHS) == 8
+
+
+def test_attempt2_canonical_fixture_rejects_relative_path_substitution(tmp_path, monkeypatch):
+    p = load_pilot()
+    fixture, expected_manifest, _ = _install_r6_attempt2_fixture(
+        tmp_path, monkeypatch, p, canonical_first_three=True
+    )
+    immutable = tuple(fixture["files_expected"])
+    result = p._verify_historical_evidence_snapshot(
+        repo_root=tmp_path, immutable_files_expected=immutable, **fixture
+    )
+    assert [item[0] for item in immutable[:3]] == [
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt",
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-report.json",
+        "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/pilot-report.json",
+    ]
+    assert len(result["files"]) == 10
+
+    relative = "agent-output/cmux-14-5-attempt-2/phase-a-log.txt"
+    broken_files = (relative, *immutable[0][1:]), *immutable[1:]
+    broken_manifest = dict(expected_manifest)
+    broken_manifest["files"] = [
+        {"path": path, "size": size, "sha256": sha} for path, size, sha in broken_files
+    ]
+    broken = dict(fixture, files_expected=broken_files, expected_manifest=broken_manifest)
+    with pytest.raises(p.PilotError, match="target bindings are not immutable"):
+        p._verify_historical_evidence_snapshot(
+            repo_root=tmp_path, immutable_files_expected=immutable, **broken
+        )
 
 
 def test_r6_attempt2_verifier_accepts_authentic_ten_file_eight_absence_fixture(tmp_path, monkeypatch):

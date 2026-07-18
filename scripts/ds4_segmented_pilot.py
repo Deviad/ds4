@@ -105,9 +105,9 @@ _ATTEMPT2_HISTORICAL_MANIFEST = {
     "sha256": "2cc1d2359017cce2130a9428fd202e8c2f35b5d5810030c95aaac8b464fd3d88",
 }
 _ATTEMPT2_HISTORICAL_FILES = (
-    ("agent-output/cmux-14-5-attempt-2/phase-a-log.txt", 1432, "edf1ae2215083aab2b8648403cf53f395ce39c3da2277f80fa7da2e87976734e"),
-    ("agent-output/cmux-14-5-attempt-2/phase-a-report.json", 80454, "d9cbc1895b62f4f182a25dcf58d851d077c6f92745bd3b0d387c78fa6dc8a500"),
-    ("agent-output/cmux-14-5-attempt-2/pilot-report.json", 80567, "84e8d26cf658f4ba15eda8346b4e507dc331d65da29b00b21aca1073eb97c0ce"),
+    ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt", 1432, "edf1ae2215083aab2b8648403cf53f395ce39c3da2277f80fa7da2e87976734e"),
+    ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-report.json", 80454, "d9cbc1895b62f4f182a25dcf58d851d077c6f92745bd3b0d387c78fa6dc8a500"),
+    ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/pilot-report.json", 80567, "84e8d26cf658f4ba15eda8346b4e507dc331d65da29b00b21aca1073eb97c0ce"),
     ("/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-phase-a-fail", 542, "079c89c88bf87699562ce8e5866d88ba3e92adec6d2b0c787a481778d85b2918"),
     ("/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-fail", 539, "91b4dd994a3bd0319c5d0edf9d0c49f933cc95f2e49a1b1f359e4a92e609edfe"),
     ("/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/0000001_adapters.safetensors", 22292892, "89363e82325e095bc74f7cdb6e022280438fa1667d52abcf33f1dfb3db1a2d18"),
@@ -723,9 +723,9 @@ def verify_attempt2_historical_evidence(*, repo_root: pathlib.Path | None = None
     manifest_expected = ("agent-output/cmux-14-5-attempt-2/phase-a2-runtime-failure-manifest.json", 3123,
                         "2cc1d2359017cce2130a9428fd202e8c2f35b5d5810030c95aaac8b464fd3d88")
     files_expected = (
-        ("agent-output/cmux-14-5-attempt-2/phase-a-log.txt", 1432, "edf1ae2215083aab2b8648403cf53f395ce39c3da2277f80fa7da2e87976734e"),
-        ("agent-output/cmux-14-5-attempt-2/phase-a-report.json", 80454, "d9cbc1895b62f4f182a25dcf58d851d077c6f92745bd3b0d387c78fa6dc8a500"),
-        ("agent-output/cmux-14-5-attempt-2/pilot-report.json", 80567, "84e8d26cf658f4ba15eda8346b4e507dc331d65da29b00b21aca1073eb97c0ce"),
+        ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-log.txt", 1432, "edf1ae2215083aab2b8648403cf53f395ce39c3da2277f80fa7da2e87976734e"),
+        ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/phase-a-report.json", 80454, "d9cbc1895b62f4f182a25dcf58d851d077c6f92745bd3b0d387c78fa6dc8a500"),
+        ("/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-2/pilot-report.json", 80567, "84e8d26cf658f4ba15eda8346b4e507dc331d65da29b00b21aca1073eb97c0ce"),
         ("/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-phase-a-fail", 542, "079c89c88bf87699562ce8e5866d88ba3e92adec6d2b0c787a481778d85b2918"),
         ("/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-2-fail", 539, "91b4dd994a3bd0319c5d0edf9d0c49f933cc95f2e49a1b1f359e4a92e609edfe"),
         ("/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-2-phase-a/0000001_adapters.safetensors", 22292892, "89363e82325e095bc74f7cdb6e022280438fa1667d52abcf33f1dfb3db1a2d18"),

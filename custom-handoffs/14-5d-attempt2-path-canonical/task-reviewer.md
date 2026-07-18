@@ -1,0 +1,3 @@
+# Story 14.5d — Reviewer final
+
+Review exact staged repair. Verify production attempt2 verifier authentic evidence PASS with canonical absolute first three paths; wrong relative/substituted paths reject at intended guard; all 10/8/prelog/manifest hashes unchanged. Verify default A3 phase spec adapter volume path and canonical command SHA `fa4ac097...`, workspace override distinct and never used by operator flow. Canonical vendor-first six-file, no drift/markers, protected/tracking/docs. PASS/BLOCKED standby + marker. No edits/real execution.

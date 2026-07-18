@@ -1,0 +1,3 @@
+# Story 14.5d — Architect
+
+Read requirements, authorization review, verifier code/manifest. Design minimal path correction: exact absolute canonical paths for first three repo evidence entries, no evidence rewrite; preserve 10/8 roots and all attempt3 behavior. Define TDD proving authentic production verifier PASS read-only and wrong relative/substituted path rejection; default phase-spec command hash regression vs workspace override misuse. Exact scope/protected bytes/docs. No code/training/cleanup/commit/push. Write architecture.md + marker.

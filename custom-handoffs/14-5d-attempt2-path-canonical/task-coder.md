@@ -1,0 +1,3 @@
+# Story 14.5d — Coder
+
+Read requirements/architecture. TDD RED→GREEN minimal: fix verifier-local first three attempt2 runtime manifest expected paths to exact canonical absolute repo paths; do not alter immutable evidence. Add tracked authentic production verifier read-only PASS and relative/substituted path rejection plus default phase-A3 command hash/path regression preventing workspace override misuse. Update technical spec/backlog if assigned. Preserve all 14.5c protected behavior. No real training/cleanup/commit/push/delegate/cmux. Stage exact tree, coder-notes.md.
