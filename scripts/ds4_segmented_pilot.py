@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import enum
+import errno
+import fcntl
 import importlib.metadata
 import hashlib
 import json
@@ -12,6 +15,7 @@ import os
 import pathlib
 import re
 import signal
+import secrets
 import struct
 import subprocess
 import sys
@@ -404,97 +408,23 @@ def verify_resume_continuity(source: pathlib.Path | str, resume_start: pathlib.P
     return {"equal_source": True, "changed_from_phase_start": True, "source": source_info, "resume_start": resume_info}
 
 
-def attempt3_launch_identity(*, repo_root: pathlib.Path | None = None) -> dict[str, str]:
-    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
-    return {
-        "interpreter": PILOT_INTERPRETER,
-        "model": PILOT_MODEL,
-        "data": PILOT_DATA,
-        "config": PILOT_CONFIG,
-        "script": str(root / "scripts" / "ds4_segmented_pilot.py"),
-    }
 
 
-def attempt3_namespace(*, repo_root: pathlib.Path | None = None,
-                       workspace: pathlib.Path | str | None = None) -> dict[str, pathlib.Path]:
-    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
-    work = pathlib.Path(workspace) if workspace is not None else pathlib.Path(PILOT_WORKSPACE)
-    a = work / "adapters-segmented-pilot-attempt-3-phase-a"
-    b = work / "adapters-segmented-pilot-attempt-3-phase-b"
-    evidence = root / "agent-output" / "cmux-14-5-attempt-3"
-    return {
-        "phase-a-output": a,
-        "phase-a-start-checkpoint": a / "phase-a-start.safetensors",
-        "phase-a-step1-checkpoint": a / "0000001_adapters.safetensors",
-        "phase-a-step2-checkpoint": a / "0000002_adapters.safetensors",
-        "phase-a-final-checkpoint": a / "adapters.safetensors",
-        "phase-a-config": a / "adapter_config.json",
-        "phase-a-log": evidence / "phase-a-log.txt",
-        "phase-a-report": evidence / "phase-a-report.json",
-        "phase-a-ok": work / f".{ATTEMPT3_NAMESPACE}-phase-a-ok",
-        "phase-a-fail": work / f".{ATTEMPT3_NAMESPACE}-phase-a-fail",
-        "phase-b-output": b,
-        "phase-b-start-checkpoint": b / "resume-start.safetensors",
-        "phase-b-step1-checkpoint": b / "0000001_adapters.safetensors",
-        "phase-b-final-checkpoint": b / "adapters.safetensors",
-        "phase-b-config": b / "adapter_config.json",
-        "phase-b-resume": a / "0000002_adapters.safetensors",
-        "phase-b-log": evidence / "phase-b-log.txt",
-        "phase-b-report": evidence / "phase-b-report.json",
-        "phase-b-ok": work / f".{ATTEMPT3_NAMESPACE}-phase-b-ok",
-        "phase-b-fail": work / f".{ATTEMPT3_NAMESPACE}-phase-b-fail",
-        "final-report": evidence / "pilot-report.json",
-        "final-ok": work / f".{ATTEMPT3_NAMESPACE}-ok",
-        "final-fail": work / f".{ATTEMPT3_NAMESPACE}-fail",
-    }
 
 
-def attempt3_phase_specs(*, repo_root: pathlib.Path | None = None,
-                         workspace: pathlib.Path | str | None = None) -> dict[str, dict[str, Any]]:
-    paths = attempt3_namespace(repo_root=repo_root, workspace=workspace)
-    namespace_paths = {key: str(value) for key, value in paths.items()}
-    return {
-        "phase-a": {"phase": "phase-a", "attempt": 3, "namespace": ATTEMPT3_NAMESPACE, "iters": 2,
-                    "steps_per_eval": 2, "timeout": 2700, "global_offset": 0,
-                    "adapter_path": str(paths["phase-a-output"]),
-                    "resume_adapter_file": None, "report": str(paths["phase-a-report"]),
-                    "phase_start_adapter_file": None, "final_report": str(paths["final-report"]),
-                    "namespace_paths": namespace_paths},
-        "phase-b": {"phase": "phase-b", "attempt": 3, "namespace": ATTEMPT3_NAMESPACE, "iters": 1,
-                    "steps_per_eval": 1, "timeout": 1500, "global_offset": 2,
-                    "adapter_path": str(paths["phase-b-output"]),
-                    "resume_adapter_file": str(paths["phase-b-resume"]),
-                    "report": str(paths["phase-b-report"]),
-                    "phase_start_adapter_file": str(paths["phase-a-start-checkpoint"]),
-                    "final_report": str(paths["final-report"]),
-                    "namespace_paths": namespace_paths},
-    }
 
 
-def canonical_attempt3_command(phase: str, phase_spec: dict[str, Any]) -> list[str]:
-    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 3:
-        raise PilotError("canonical attempt-3 command requires attempt-3 phase spec")
-    paths = phase_spec["namespace_paths"]
-    identity = attempt3_launch_identity()
-    command = [identity["interpreter"], identity["script"],
-               "--attempt", "3", "--phase", phase, "--log-path", paths[f"{phase}-log"],
-               "--model", identity["model"], "--data", identity["data"],
-               "--adapter-path", phase_spec["adapter_path"], "--config", identity["config"]]
-    if phase == "phase-b":
-        command.extend(["--resume-adapter-file", phase_spec["resume_adapter_file"]])
-    command.extend(["--train", "--fine-tune-type", "lora", "--num-layers", "16",
-                     "--iters", str(phase_spec["iters"]), "--batch-size", "1",
-                     "--learning-rate", "1e-5", "--max-seq-length", "4096", "--mask-prompt",
-                     "--grad-checkpoint", "--grad-accumulation-steps", "1", "--seed", "0",
-                     "--optimizer", "adam", "--val-batches", "25", "--steps-per-report", "1",
-                     "--steps-per-eval", str(phase_spec["steps_per_eval"]), "--save-every", "1",
-                     "--segment-size", "1"])
-    return command
 
 
 _ATTEMPT3_AUTHORIZATION_KEYS = frozenset({
     "revision", "canonical_command_sha256", "pilot_source_sha256", "catalog_source_sha256",
     "protected_files_manifest_sha256", "attempt2_runtime_manifest_sha256",
+})
+_ATTEMPT4_AUTHORIZATION_KEYS = frozenset({
+    "revision", "canonical_command_sha256", "pilot_source_sha256", "catalog_source_sha256",
+    "protected_files_manifest_sha256", "attempt2_runtime_manifest_sha256",
+    "attempt3_historical_evidence_sha256", "phase", "phase_authorization_sha256",
+    "trusted_identity_sha256", "pre_write_verification_sha256",
 })
 _ATTEMPT3_PROTECTED_PATHS = (
     "scripts/ds4_segmented_smoke.py", "python-envs/mlx/src/ds4_ft_mlx/segmented_loss_and_grad.py",
@@ -510,6 +440,14 @@ _ATTEMPT3_PROTECTED_PATHS = (
 )
 
 
+
+
+
+
+
+
+
+
 def protected_files_manifest_sha256(*, repo_root: pathlib.Path | None = None) -> str:
     root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
     rows = []
@@ -517,96 +455,8 @@ def protected_files_manifest_sha256(*, repo_root: pathlib.Path | None = None) ->
         path = root / relative
         if not path.is_file():
             raise PilotError(f"protected path unavailable: {path}")
-        rows.append(f"{file_sha256(path)}  {relative}\n")
+        rows.append(f"{file_sha256(path)}  {relative}\\n")
     return hashlib.sha256("".join(rows).encode("utf-8")).hexdigest()
-
-
-def _authorization_json(value: str | dict[str, Any]) -> dict[str, str]:
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value, object_pairs_hook=_reject_duplicate_keys)
-        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
-            raise PilotError("attempt-3 authorization JSON is invalid") from exc
-        canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"))
-        if value != canonical:
-            raise PilotError("attempt-3 authorization JSON must be canonical compact JSON")
-    else:
-        parsed = value
-    if not isinstance(parsed, dict) or set(parsed) != set(_ATTEMPT3_AUTHORIZATION_KEYS):
-        raise PilotError("attempt-3 authorization schema mismatch")
-    if any(type(parsed[key]) is not str for key in _ATTEMPT3_AUTHORIZATION_KEYS):
-        raise PilotError("attempt-3 authorization values must be strings")
-    if not re.fullmatch(r"[0-9a-f]{40}", parsed["revision"]):
-        raise PilotError("attempt-3 authorization revision schema mismatch")
-    for key in _ATTEMPT3_AUTHORIZATION_KEYS - {"revision"}:
-        if not _HEX64.fullmatch(parsed[key]):
-            raise PilotError(f"attempt-3 authorization hash schema mismatch: {key}")
-    return {key: parsed[key] for key in sorted(parsed)}
-
-
-def validate_attempt3_authorization(value: str | dict[str, Any], *, phase: str | None = None,
-                                    phase_spec: dict[str, Any] | None = None,
-                                    repo_root: pathlib.Path | None = None,
-                                    catalog_source: pathlib.Path | None = None,
-                                    verify_sources: bool = True) -> dict[str, str]:
-    authorization = _authorization_json(value)
-    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
-    spec = phase_spec or (attempt3_phase_specs(repo_root=root)[phase] if phase else None)
-    if spec is None or phase not in ("phase-a", "phase-b"):
-        raise PilotError("attempt-3 authorization phase binding missing")
-    expected_command = canonical_attempt3_command(phase, spec)
-    expected_command_sha = hashlib.sha256(json.dumps(expected_command, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    if authorization["canonical_command_sha256"] != expected_command_sha:
-        raise PilotError("attempt-3 authorization canonical command mismatch")
-    if not verify_sources:
-        return authorization
-    try:
-        current_revision = _git_output("git", "rev-parse", "HEAD")
-    except PilotError:
-        if root.resolve() == _CANONICAL_REPO_ROOT.resolve():
-            raise
-        current_revision = authorization["revision"]
-    if current_revision != authorization["revision"]:
-        raise PilotError("attempt-3 authorization revision mismatch")
-    pilot_path = root / "scripts" / "ds4_segmented_pilot.py"
-    catalog_path = catalog_source or root / "scripts" / "finetune_ds4.py"
-    if file_sha256(pilot_path) != authorization["pilot_source_sha256"]:
-        raise PilotError("attempt-3 authorization pilot source mismatch")
-    if file_sha256(catalog_path) != authorization["catalog_source_sha256"]:
-        raise PilotError("attempt-3 authorization catalog source mismatch")
-    if protected_files_manifest_sha256(repo_root=root) != authorization["protected_files_manifest_sha256"]:
-        raise PilotError("attempt-3 authorization protected manifest mismatch")
-    protected_status = _git_output("git", "status", "--porcelain=1", "--untracked-files=all", "--", *_ATTEMPT3_PROTECTED_PATHS)
-    if protected_status:
-        raise PilotError("attempt-3 protected paths are not clean")
-    if authorization["attempt2_runtime_manifest_sha256"] != _ATTEMPT2_CANONICAL_MANIFEST[2]:
-        raise PilotError("attempt-3 authorization attempt-2 manifest binding mismatch")
-    return authorization
-
-
-def canonical_attempt3_authorization(phase: str, phase_spec: dict[str, Any], *,
-                                     repo_root: pathlib.Path | None = None,
-                                     workspace: pathlib.Path | str | None = None,
-                                     catalog_source: pathlib.Path | None = None) -> str:
-    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
-    try:
-        revision = _git_output("git", "rev-parse", "HEAD")
-    except PilotError:
-        revision = "0" * 40
-    def digest(path: pathlib.Path) -> str:
-        return file_sha256(path) if path.is_file() else "0" * 64
-    pilot_path = root / "scripts" / "ds4_segmented_pilot.py"
-    catalog_path = catalog_source or root / "scripts" / "finetune_ds4.py"
-    command = canonical_attempt3_command(phase, phase_spec)
-    value = {
-        "revision": revision,
-        "canonical_command_sha256": hashlib.sha256(json.dumps(command, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-        "pilot_source_sha256": digest(pilot_path),
-        "catalog_source_sha256": digest(catalog_path),
-        "protected_files_manifest_sha256": protected_files_manifest_sha256(repo_root=root) if all((root / p).is_file() for p in _ATTEMPT3_PROTECTED_PATHS) else "0" * 64,
-        "attempt2_runtime_manifest_sha256": _ATTEMPT2_CANONICAL_MANIFEST[2],
-    }
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _attempt1_manifest_path(entry: dict[str, Any], repo_root: pathlib.Path) -> pathlib.Path:
@@ -715,7 +565,16 @@ def _verify_historical_evidence_snapshot(*, prelog_expected: tuple[str, int, str
                                 "identity_manifest": report_snapshot.get("identity_manifest", {})}}
 
 
-def verify_attempt2_historical_evidence(*, repo_root: pathlib.Path | None = None) -> dict[str, Any]:
+
+class _LockStage(enum.Enum):
+    PRE_LOCK = "pre-lock"
+    POST_LOCK = "post-lock"
+
+
+def verify_attempt2_historical_evidence(*, repo_root: pathlib.Path | None = None,
+                                       lock_stage: _LockStage = _LockStage.PRE_LOCK) -> dict[str, Any]:
+    if not isinstance(lock_stage, _LockStage):
+        raise PilotError("invalid shared-lock verification stage")
     # Keep this trust root inside the verifier. Module-level compatibility aliases
     # are intentionally not consulted by the admission boundary.
     prelog_expected = ("agent-output/cmux-14-5-attempt-2/phase-a2-prelog-failure.md", 990,
@@ -800,8 +659,11 @@ def verify_attempt2_historical_evidence(*, repo_root: pathlib.Path | None = None
             report_snapshot = parsed
     for raw in absent_expected:
         path = _historical_path(raw, root)
-        if path.exists():
+        if path == _ft_lock_path(PILOT_WORKSPACE):
+            continue
+        if path.exists() or path.is_symlink():
             raise PilotError(f"attempt-2 historical absence fact violated: {path}")
+    _verify_ft_lock(lock_stage)
     report_path = _attempt2_expected_path(files_expected[2][0], root)
     if report_snapshot is None:
         raise PilotError("attempt-2 historical report is not readable JSON")
@@ -814,99 +676,510 @@ def verify_attempt2_historical_evidence(*, repo_root: pathlib.Path | None = None
                                 "identity_manifest": report_snapshot.get("identity_manifest", {})}}
 
 
-def _attempt3_absent_paths(paths: dict[str, pathlib.Path]) -> list[pathlib.Path]:
-    return [paths[key] for key in (
-        "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
-        "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
-        "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
-        "phase-b-output", "phase-b-start-checkpoint", "phase-b-step1-checkpoint",
-        "phase-b-final-checkpoint", "phase-b-config", "phase-b-log", "phase-b-report",
-        "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
-    )]
+
+def _verify_immutable_regular_snapshot(path: pathlib.Path, size: int, expected_sha: str, label: str,
+                                      *, parse_json: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise PilotError("non-following historical evidence inspection unavailable")
+    fd = -1
+    try:
+        fd = os.open(path, os.O_RDONLY | nofollow)
+        first = os.fstat(fd)
+        import stat
+        if not stat.S_ISREG(first.st_mode):
+            raise PilotError(f"{label} must be a regular file: {path}")
+        payload = b""
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            payload += chunk
+        second = os.fstat(fd)
+        named = os.lstat(path)
+        if (first.st_dev, first.st_ino, first.st_size) != (second.st_dev, second.st_ino, second.st_size):
+            raise PilotError(f"{label} changed while read: {path}")
+        if (named.st_dev, named.st_ino, named.st_size) != (second.st_dev, second.st_ino, second.st_size):
+            raise PilotError(f"{label} pathname changed while read: {path}")
+    except PilotError:
+        raise
+    except OSError as exc:
+        raise PilotError(f"{label} unavailable: {path}") from exc
+    finally:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError as exc:
+                raise PilotError(f"{label} descriptor close failed: {path}") from exc
+    actual = hashlib.sha256(payload).hexdigest()
+    if (len(payload), actual) != (size, expected_sha):
+        raise PilotError(f"{label} hash mismatch: {path}")
+    parsed = None
+    if parse_json:
+        try:
+            parsed = json.loads(payload, object_pairs_hook=_reject_duplicate_keys)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
+            raise PilotError(f"{label} is not strict JSON: {path}") from exc
+        if not isinstance(parsed, dict):
+            raise PilotError(f"{label} JSON must be an object: {path}")
+    return {"path": str(path), "size": len(payload), "sha256": actual}, parsed
 
 
-def _attempt3_phase_b_absent_paths(paths: dict[str, pathlib.Path]) -> list[pathlib.Path]:
-    return [paths[key] for key in (
-        "phase-b-start-checkpoint", "phase-b-step1-checkpoint", "phase-b-final-checkpoint",
-        "phase-b-config", "phase-b-output", "phase-b-log", "phase-b-report",
-        "phase-b-ok", "phase-b-fail", "final-report", "final-ok", "final-fail",
-    )]
-
-
-def check_attempt3_launch(phase: str, log_path: pathlib.Path | str, *,
-                         repo_root: pathlib.Path | None = None,
-                         workspace: pathlib.Path | str | None = None,
-                         allow_active_log: bool = False,
-                         trusted_identity: dict[str, Any] | None = None,
-                         authorization_json: str | dict[str, Any] | None = None,
-                         phase_a_authorization_json: str | dict[str, Any] | None = None) -> dict[str, Any]:
-    if phase not in ("phase-a", "phase-b"):
-        raise PilotError(f"unknown attempt-3 phase: {phase}")
+def verify_attempt3_historical_evidence(*, repo_root: pathlib.Path | None = None,
+                                       lock_stage: _LockStage = _LockStage.PRE_LOCK) -> dict[str, Any]:
+    if not isinstance(lock_stage, _LockStage):
+        raise PilotError("invalid shared-lock verification stage")
     root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
-    paths = attempt3_namespace(repo_root=root, workspace=workspace)
-    authorization = None
-    phase_a_authorization = None
-    if phase == "phase-b" and root.resolve() == _CANONICAL_REPO_ROOT.resolve() and phase_a_authorization_json is None:
-        raise PilotError("separate external Phase A3 authorization is required for Phase B3")
-    if phase == "phase-b" and phase_a_authorization_json is not None:
-        phase_a_authorization = validate_attempt3_authorization(
-            phase_a_authorization_json, phase="phase-a",
-            phase_spec=attempt3_phase_specs(repo_root=root, workspace=workspace)["phase-a"],
-            repo_root=root, verify_sources=root.resolve() == _CANONICAL_REPO_ROOT.resolve())
-    if authorization_json is None:
-        if root.resolve() == _CANONICAL_REPO_ROOT.resolve():
-            raise PilotError("attempt-3 authorization is required before launch admission")
-    else:
-        authorization = validate_attempt3_authorization(
-            authorization_json, phase=phase,
-            phase_spec=attempt3_phase_specs(repo_root=root, workspace=workspace)[phase],
-            repo_root=root,
-            verify_sources=root.resolve() == _CANONICAL_REPO_ROOT.resolve())
-    expected_log = paths[f"{phase}-log"]
-    historical_attempt2 = verify_attempt2_historical_evidence(repo_root=root) if root.resolve() == _CANONICAL_REPO_ROOT.resolve() else {}
-    if pathlib.Path(log_path) != expected_log:
-        raise PilotError(f"attempt-3 log path mismatch: expected {expected_log}")
+    files = (
+        ("agent-output/cmux-14-5-attempt-3/phase-a-authorization.json", 532,
+         "543e584621c133e6d8afc1a7b6d0a3bea296a78d2de18f77fd84fcb3bf23b065", True),
+        ("agent-output/cmux-14-5-attempt-3/phase-a-log.txt", 619,
+         "77b2dc85dc02735dc1727ffc06f2fb9471230c90f8808d67da7e10bb852ca1bc", False),
+        ("agent-output/cmux-14-5-attempt-3/phase-a3-runtime-preflight-failure.json", 1075,
+         "0f19ce8a8147a39dffcb6b3162f67779fd6d26263ed2015285285350c8dde3da", True),
+    )
+    expected_authorization = {
+        "attempt2_runtime_manifest_sha256": "2cc1d2359017cce2130a9428fd202e8c2f35b5d5810030c95aaac8b464fd3d88",
+        "canonical_command_sha256": "fa4ac09716b820d249030bd93c9fe3dc0817be49059acc437af9ef22a562ad1e",
+        "catalog_source_sha256": "1258eac5c8c2b412049b18db8e6b28ec4fdd45341c5a99a6041bde10b4a61a97",
+        "pilot_source_sha256": "d01a42db49abc0e847251f28683d6521310c50d7ff76960fd28fd93426393127",
+        "protected_files_manifest_sha256": "c3b3dbcd4bd0b4b38c5c6c890853e939fb6cc3ef27d981dd05b29ea06ca77ea4",
+        "revision": "9b906515f5aba3928542cdf099e5248a45030af9",
+    }
+    expected_failure = {
+        "adapter_output_absent": True, "attempt": 3,
+        "authorization": {"path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-3/phase-a-authorization.json", "sha256": files[0][2], "size": 532},
+        "error": "attempt-2 historical absence fact violated: /Volumes/Data NVME/mlx-ft/ds4/.ds4-ft.lock",
+        "exit_code": 1, "failure_markers_absent": True, "lock_absent_after_exit": True,
+        "log": {"path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-3/phase-a-log.txt", "sha256": files[1][2], "size": 619},
+        "namespace": "ds4-segmented-pilot-attempt-3", "optimizer_updates": 0, "phase": "phase-a", "provider_calls": 0,
+        "report_absent": True, "retry_performed": False, "revision": expected_authorization["revision"],
+        "status": "fail", "story": "14.5d", "training_calls": 0,
+        "wrapper_sha256": "788083f7d29d596a0acce61f61b9a6c385ccae1ce9d0f44ae34c630a5fa4d3e5",
+    }
+    verified = []
+    parsed = []
+    for raw, size, sha, is_json in files:
+        path = _historical_path(raw, root)
+        record, value = _verify_immutable_regular_snapshot(path, size, sha, "attempt-3 historical evidence", parse_json=is_json)
+        verified.append(record)
+        parsed.append(value)
+    if parsed[0] != expected_authorization:
+        raise PilotError("attempt-3 authorization schema or binding mismatch")
+    if parsed[1] is not None or parsed[2] != expected_failure:
+        raise PilotError("attempt-3 failure evidence schema or fact mismatch")
+    absent = (
+        "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-a",
+        "agent-output/cmux-14-5-attempt-3/phase-a-report.json",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-a-ok",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-a-fail",
+        "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-b",
+        "agent-output/cmux-14-5-attempt-3/phase-b-authorization.json",
+        "agent-output/cmux-14-5-attempt-3/phase-b-log.txt",
+        "agent-output/cmux-14-5-attempt-3/phase-b-report.json",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-b-ok",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-b-fail",
+        "agent-output/cmux-14-5-attempt-3/pilot-report.json",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-ok",
+        "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-fail",
+    )
+    for raw in absent:
+        path = _historical_path(raw, root)
+        try:
+            os.lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise PilotError(f"attempt-3 historical absence inspection failed: {path}") from exc
+        raise PilotError(f"attempt-3 historical absence fact violated: {path}")
+    _verify_ft_lock(lock_stage)
+    return {"attempt": 3, "namespace": ATTEMPT3_NAMESPACE, "lock_absent_after_exit": True,
+            "authorization": parsed[0], "failure": parsed[2], "files": verified, "absent_paths": absent}
+
+
+ATTEMPT4_NAMESPACE = "ds4-segmented-pilot-attempt-4"
+
+
+def attempt4_launch_identity(*, repo_root: pathlib.Path | None = None) -> dict[str, str]:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    return {"interpreter": PILOT_INTERPRETER, "model": PILOT_MODEL, "data": PILOT_DATA,
+            "config": PILOT_CONFIG, "script": str(root / "scripts" / "ds4_segmented_pilot.py")}
+
+
+def attempt4_namespace(*, repo_root: pathlib.Path | None = None,
+                       workspace: pathlib.Path | str | None = None) -> dict[str, pathlib.Path]:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    work = pathlib.Path(workspace) if workspace is not None else pathlib.Path(PILOT_WORKSPACE)
+    a, b = work / "adapters-segmented-pilot-attempt-4-phase-a", work / "adapters-segmented-pilot-attempt-4-phase-b"
+    evidence = root / "agent-output" / "cmux-14-5-attempt-4"
+    return {"phase-a-output": a, "phase-a-start-checkpoint": a / "phase-a-start.safetensors",
+            "phase-a-step1-checkpoint": a / "0000001_adapters.safetensors", "phase-a-step2-checkpoint": a / "0000002_adapters.safetensors",
+            "phase-a-final-checkpoint": a / "adapters.safetensors", "phase-a-config": a / "adapter_config.json",
+            "phase-a-log": evidence / "phase-a-log.txt", "phase-a-report": evidence / "phase-a-report.json",
+            "phase-a-ok": work / f".{ATTEMPT4_NAMESPACE}-phase-a-ok", "phase-a-fail": work / f".{ATTEMPT4_NAMESPACE}-phase-a-fail",
+            "phase-b-output": b, "phase-b-start-checkpoint": b / "resume-start.safetensors",
+            "phase-b-step1-checkpoint": b / "0000001_adapters.safetensors", "phase-b-final-checkpoint": b / "adapters.safetensors",
+            "phase-b-config": b / "adapter_config.json", "phase-b-resume": a / "0000002_adapters.safetensors",
+            "phase-b-log": evidence / "phase-b-log.txt", "phase-b-report": evidence / "phase-b-report.json",
+            "phase-b-ok": work / f".{ATTEMPT4_NAMESPACE}-phase-b-ok", "phase-b-fail": work / f".{ATTEMPT4_NAMESPACE}-phase-b-fail",
+            "final-report": evidence / "pilot-report.json", "final-ok": work / f".{ATTEMPT4_NAMESPACE}-ok", "final-fail": work / f".{ATTEMPT4_NAMESPACE}-fail",
+            "phase-a-authorization": root / "agent-output" / "cmux-14-5-attempt-4" / "phase-a-authorization.json",
+            "phase-b-authorization": root / "agent-output" / "cmux-14-5-attempt-4" / "phase-b-authorization.json"}
+
+
+def _attempt4_absent_paths(paths: dict[str, pathlib.Path], phase: str = "phase-a") -> list[pathlib.Path]:
     if phase == "phase-a":
-        collisions = _attempt3_absent_paths(paths)
-        if allow_active_log:
-            collisions.remove(expected_log)
+        keys = ("phase-a-output", "phase-a-log", "phase-a-report", "phase-a-ok", "phase-a-fail",
+                "phase-a-authorization", "phase-b-output", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+                "final-report", "final-ok", "final-fail")
+    elif phase == "phase-b":
+        keys = ("phase-b-output", "phase-b-log", "phase-b-report", "phase-b-ok", "phase-b-fail",
+                "phase-b-authorization", "final-report", "final-ok", "final-fail")
     else:
-        required = (
-            "phase-a-output", "phase-a-start-checkpoint", "phase-a-step1-checkpoint",
-            "phase-a-step2-checkpoint", "phase-a-final-checkpoint", "phase-a-config",
-            "phase-a-report", "phase-a-ok", "phase-a-log", "phase-b-resume",
-        )
-        for key in required:
-            if not paths[key].exists():
-                raise PilotError(f"attempt-3 Phase A dependency missing: {paths[key]}")
-        ensure_absent(paths["phase-a-fail"])
-        phase_a_spec = attempt3_phase_specs(repo_root=root, workspace=workspace)["phase-a"]
-        historical = verify_attempt1_historical_evidence(repo_root=root)
-        _, phase_a_report = _read_json_snapshot(paths["phase-a-report"])
-        _, phase_a_marker = _read_json_snapshot(paths["phase-a-ok"])
-        validate_phase_b_dependency(phase_a_report, phase_a_marker, paths["phase-b-resume"], phase_spec=phase_a_spec,
-                                    historical_evidence=historical, historical_attempt2_evidence=historical_attempt2,
-                                    trusted_identity=trusted_identity,
-                                    trusted_phase_a_authorization=phase_a_authorization)
-        collisions = _attempt3_phase_b_absent_paths(paths)
-        if allow_active_log:
-            collisions.remove(expected_log)
-    for path in collisions:
-        if path.exists():
-            raise PilotError(f"attempt-3 collision: {path}")
-    historical = locals().get("historical") or verify_attempt1_historical_evidence(repo_root=root)
-    if trusted_identity is not None and historical_attempt2:
-        expected = historical_attempt2.get("report_identity", {}).get("identity_manifest", {}).get("immutable", {})
-        current = trusted_identity.get("immutable", {})
-        for key in ("config_sha256", "model_manifest", "dataset_manifest"):
-            if expected.get(key) != current.get(key):
-                raise PilotError(f"attempt-2 pinned identity mismatch: {key}")
-    return {"attempt": 3, "namespace": ATTEMPT3_NAMESPACE,
-            "phase": phase, "log_path": str(expected_log),
-            "authorization": authorization,
-            "phase_a_authorization": phase_a_authorization,
-            "attempt_1_historical_evidence": historical,
-            "attempt_2_historical_evidence": historical_attempt2}
+        raise PilotError(f"unknown attempt-4 phase: {phase}")
+    return [paths[key] for key in keys]
+
+
+def attempt4_phase_specs(*, repo_root: pathlib.Path | None = None,
+                         workspace: pathlib.Path | str | None = None) -> dict[str, dict[str, Any]]:
+    paths = attempt4_namespace(repo_root=repo_root, workspace=workspace)
+    namespace_paths = {key: str(value) for key, value in paths.items()}
+    return {"phase-a": {"phase": "phase-a", "attempt": 4, "namespace": ATTEMPT4_NAMESPACE, "iters": 2,
+                        "steps_per_eval": 2, "timeout": 2700, "global_offset": 0, "adapter_path": str(paths["phase-a-output"]),
+                        "resume_adapter_file": None, "report": str(paths["phase-a-report"]), "final_report": str(paths["final-report"]), "namespace_paths": namespace_paths},
+            "phase-b": {"phase": "phase-b", "attempt": 4, "namespace": ATTEMPT4_NAMESPACE, "iters": 1,
+                        "steps_per_eval": 1, "timeout": 1500, "global_offset": 2, "adapter_path": str(paths["phase-b-output"]),
+                        "resume_adapter_file": str(paths["phase-b-resume"]), "report": str(paths["phase-b-report"]), "final_report": str(paths["final-report"]), "namespace_paths": namespace_paths}}
+
+
+def _phase_spec(phase: str, *, attempt: int) -> dict[str, Any]:
+    if attempt != 4 or phase not in ("phase-a", "phase-b"):
+        raise PilotError("only fixed attempt-4 phase specifications are runnable")
+    return attempt4_phase_specs()[phase]
+
+
+def canonical_attempt4_command(phase: str, phase_spec: dict[str, Any]) -> list[str]:
+    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 4 or phase_spec.get("namespace") != ATTEMPT4_NAMESPACE:
+        raise PilotError("canonical attempt-4 command requires attempt-4 phase spec")
+    paths = phase_spec["namespace_paths"]
+    identity = attempt4_launch_identity()
+    command = [identity["interpreter"], identity["script"], "--attempt", "4", "--phase", phase,
+               "--log-path", paths[f"{phase}-log"], "--model", identity["model"], "--data", identity["data"],
+               "--adapter-path", phase_spec["adapter_path"], "--config", identity["config"]]
+    if phase == "phase-b":
+        command.extend(["--resume-adapter-file", phase_spec["resume_adapter_file"]])
+    command.extend(["--train", "--fine-tune-type", "lora", "--num-layers", "16", "--iters", str(phase_spec["iters"]),
+                    "--batch-size", "1", "--learning-rate", "1e-5", "--max-seq-length", "4096", "--mask-prompt",
+                    "--grad-checkpoint", "--grad-accumulation-steps", "1", "--seed", "0", "--optimizer", "adam",
+                    "--val-batches", "25", "--steps-per-report", "1", "--steps-per-eval", str(phase_spec["steps_per_eval"]),
+                    "--save-every", "1", "--segment-size", "1"])
+    return command
+
+
+def _attempt3_historical_evidence_binding() -> str:
+    rows = {
+        "files": [
+            ["agent-output/cmux-14-5-attempt-3/phase-a-authorization.json", 532,
+             "543e584621c133e6d8afc1a7b6d0a3bea296a78d2de18f77fd84fcb3bf23b065"],
+            ["agent-output/cmux-14-5-attempt-3/phase-a-log.txt", 619,
+             "77b2dc85dc02735dc1727ffc06f2fb9471230c90f8808d67da7e10bb852ca1bc"],
+            ["agent-output/cmux-14-5-attempt-3/phase-a3-runtime-preflight-failure.json", 1075,
+             "0f19ce8a8147a39dffcb6b3162f67779fd6d26263ed2015285285350c8dde3da"],
+        ],
+        "failure": {"attempt": 3, "phase": "phase-a", "status": "fail", "training_calls": 0,
+                     "provider_calls": 0, "optimizer_updates": 0, "retry_performed": False,
+                     "lock_absent_after_exit": True},
+        "absent": [
+            "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-a",
+            "agent-output/cmux-14-5-attempt-3/phase-a-report.json",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-a-ok",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-a-fail",
+            "/Volumes/Data NVME/mlx-ft/ds4/adapters-segmented-pilot-attempt-3-phase-b",
+            "agent-output/cmux-14-5-attempt-3/phase-b-authorization.json",
+            "agent-output/cmux-14-5-attempt-3/phase-b-log.txt",
+            "agent-output/cmux-14-5-attempt-3/phase-b-report.json",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-b-ok",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-phase-b-fail",
+            "agent-output/cmux-14-5-attempt-3/pilot-report.json",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-ok",
+            "/Volumes/Data NVME/mlx-ft/ds4/.ds4-segmented-pilot-attempt-3-fail",
+        ],
+    }
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _attempt4_pre_write_binding(phase: str, phase_spec: dict[str, Any], *,
+                                repo_root: pathlib.Path | None = None) -> str:
+    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 4:
+        raise PilotError("attempt-4 pre-write binding requires fixed phase spec")
+    root = pathlib.Path(repo_root).resolve() if repo_root is not None else REPO_ROOT.resolve()
+    workspace = pathlib.Path(phase_spec["namespace_paths"]["phase-a-output"]).resolve().parent
+    paths = attempt4_namespace(repo_root=root, workspace=workspace)
+    return hashlib.sha256(json.dumps({"phase": phase, "paths": sorted(str(path) for path in _attempt4_absent_paths(paths, phase))},
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def _validate_attempt4_resource_policy(policy: Any) -> None:
+    if policy != ATTEMPT4_DYNAMIC_RESOURCE_POLICY:
+        raise PilotError("attempt-4 resource policy/schema mismatch")
+    if type(policy.get("PILOT_MEMORY_HEADROOM")) is not int or type(policy.get("PILOT_DISK_MIN_FREE")) is not int:
+        raise PilotError("attempt-4 resource policy thresholds malformed")
+
+
+def _attempt4_identity_projection(identity: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(identity, dict):
+        raise PilotError("attempt-4 runtime identity must be an object")
+    if set(identity) != {"schema", "immutable", "dynamic_resources", "repository_status"}:
+        raise PilotError("attempt-4 identity schema mismatch")
+    if type(identity["schema"]) is not str or identity["schema"] != _ATTEMPT4_IDENTITY_SCHEMA:
+        raise PilotError("attempt-4 identity schema version mismatch")
+    _validate_canonical_identity({key: identity[key] for key in ("immutable", "dynamic_resources", "repository_status")}, trusted_identity=None)
+    if identity["repository_status"] != []:
+        raise PilotError("attempt-4 repository status must be exactly clean")
+    _validate_attempt4_resource_policy(ATTEMPT4_DYNAMIC_RESOURCE_POLICY)
+    _validate_resource_evidence(identity["dynamic_resources"])
+    return {"schema": _ATTEMPT4_IDENTITY_SCHEMA, "immutable": identity["immutable"],
+            "repository_status": [], "dynamic_resource_policy": ATTEMPT4_DYNAMIC_RESOURCE_POLICY}
+
+
+def _attempt4_trusted_identity_binding(identity: dict[str, Any] | None = None) -> str:
+    """Hash deterministic identity plus policy, never the fresh dynamic values."""
+    if identity is None:
+        value: Any = {"schema": _ATTEMPT4_IDENTITY_SCHEMA,
+                      "immutable": attempt4_launch_identity(),
+                      "repository_status": [],
+                      "dynamic_resource_policy": ATTEMPT4_DYNAMIC_RESOURCE_POLICY}
+    else:
+        value = _attempt4_identity_projection(identity)
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _check_attempt4_runtime_identity(identity: dict[str, Any]) -> dict[str, Any]:
+    _attempt4_identity_projection(identity)
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {"phase": "", "object": identity, "bytes": payload,
+            "sha256": hashlib.sha256(payload).hexdigest(), "captured": True}
+
+
+def _capture_attempt4_report_identity_root(report_bytes: bytes, report_snapshot: dict[str, Any], phase: str) -> dict[str, Any]:
+    """Capture identity roots from one strict report-byte buffer, never a caller object."""
+    if not isinstance(report_bytes, bytes) or not isinstance(report_snapshot, dict):
+        raise PilotError("attempt-4 report identity capture requires strict report bytes")
+    try:
+        captured_report = json.loads(report_bytes, object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
+        raise PilotError("attempt-4 report identity capture JSON is invalid") from exc
+    if not isinstance(captured_report, dict) or captured_report != report_snapshot:
+        raise PilotError("attempt-4 report identity capture does not equal supplied bytes")
+    identity = captured_report.get("identity_manifest")
+    if not isinstance(identity, dict) or captured_report.get("phase") != phase:
+        raise PilotError("attempt-4 report identity capture is missing phase identity")
+    identity_bytes = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _check_attempt4_runtime_identity(identity)
+    snapshot_bytes = _decode_attempt4_identity_snapshot(captured_report.get("identity_snapshot"), identity, phase)
+    return {"phase": phase, "object": identity, "bytes": identity_bytes,
+            "sha256": hashlib.sha256(identity_bytes).hexdigest(),
+            "identity_snapshot_bytes": snapshot_bytes,
+            "identity_snapshot_sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
+            "report_bytes": report_bytes,
+            "report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+            "captured": True}
+
+
+def _decode_attempt4_identity_snapshot(snapshot: Any, expected_identity: dict[str, Any], phase: str) -> bytes:
+    if (not isinstance(snapshot, dict) or set(snapshot) != {"phase", "sha256", "bytes_b64"}
+            or snapshot["phase"] != phase or type(snapshot["sha256"]) is not str
+            or not _HEX64.fullmatch(snapshot["sha256"]) or type(snapshot["bytes_b64"]) is not str):
+        raise PilotError("attempt-4 retained identity snapshot schema mismatch")
+    try:
+        raw = base64.b64decode(snapshot["bytes_b64"], validate=True)
+        identity = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
+        raise PilotError("attempt-4 retained identity snapshot is invalid") from exc
+    if hashlib.sha256(raw).hexdigest() != snapshot["sha256"]:
+        raise PilotError("attempt-4 retained identity snapshot hash mismatch")
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if raw != canonical:
+        raise PilotError("attempt-4 retained identity snapshot is not canonical compact JSON")
+    _check_attempt4_runtime_identity(identity)
+    if identity != expected_identity:
+        raise PilotError("attempt-4 retained identity snapshot semantic mismatch")
+    return raw
+
+
+def _validate_explicit_json_root(raw: bytes | None, sha256: str | None, expected: Any, label: str,
+                                 *, file_format: bool = False) -> Any:
+    if type(raw) is not bytes or type(sha256) is not str or not _HEX64.fullmatch(sha256):
+        raise PilotError(f"{label} requires explicit canonical bytes and SHA-256")
+    if hashlib.sha256(raw).hexdigest() != sha256:
+        raise PilotError(f"{label} bytes/hash mismatch")
+    try:
+        parsed = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
+        raise PilotError(f"{label} bytes are not strict JSON") from exc
+    compact = json.dumps(parsed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    pretty = json.dumps(parsed, sort_keys=True, indent=2).encode("utf-8") + b"\n"
+    spaced = json.dumps(parsed, sort_keys=True).encode("utf-8")
+    canonical = (compact, pretty, spaced) if file_format else (compact,)
+    if raw not in canonical:
+        raise PilotError(f"{label} bytes are not canonical JSON")
+    if expected is not None and parsed != expected:
+        raise PilotError(f"{label} semantic mismatch")
+    return parsed
+
+
+def _attempt4_report_identity_snapshot(report: dict[str, Any]) -> dict[str, Any]:
+    identity = report.get("identity_manifest") if isinstance(report, dict) else None
+    if not isinstance(identity, dict):
+        raise PilotError("attempt-4 identity manifest missing")
+    snapshot = report.get("identity_snapshot") if isinstance(report, dict) else None
+    _decode_attempt4_identity_snapshot(snapshot, identity, report.get("phase", ""))
+    return identity
+
+
+def _assert_retained_attempt4_identity(phase: str, identity: dict[str, Any]) -> None:
+    retained = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get(phase)
+    if retained is None:
+        raise PilotError("attempt-4 runtime identity was not retained")
+    if identity is not retained.get("object"):
+        raise PilotError("attempt-4 runtime identity was not the retained preflight object")
+    current = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if hashlib.sha256(current).hexdigest() != retained["sha256"] or current != retained["bytes"]:
+        raise PilotError("attempt-4 runtime identity mutated after capture")
+
+
+def _attempt4_authorization_json(value: str | dict[str, Any]) -> dict[str, str]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value, object_pairs_hook=_reject_duplicate_keys)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError) as exc:
+            raise PilotError("attempt-4 authorization JSON is invalid") from exc
+        if value != json.dumps(parsed, sort_keys=True, separators=(",", ":")):
+            raise PilotError("attempt-4 authorization JSON must be canonical compact JSON")
+    else:
+        parsed = value
+    if not isinstance(parsed, dict) or set(parsed) != set(_ATTEMPT4_AUTHORIZATION_KEYS):
+        raise PilotError("attempt-4 authorization schema mismatch")
+    if any(type(parsed[key]) is not str for key in _ATTEMPT4_AUTHORIZATION_KEYS):
+        raise PilotError("attempt-4 authorization values must be strings")
+    if not re.fullmatch(r"[0-9a-f]{40}", parsed["revision"]):
+        raise PilotError("attempt-4 authorization revision schema mismatch")
+    for key in _ATTEMPT4_AUTHORIZATION_KEYS - {"revision", "phase"}:
+        if not _HEX64.fullmatch(parsed[key]):
+            raise PilotError(f"attempt-4 authorization hash schema mismatch: {key}")
+    return {key: parsed[key] for key in sorted(parsed)}
+
+
+def validate_attempt4_authorization(value: str | dict[str, Any], *, phase: str | None = None,
+                                    phase_spec: dict[str, Any] | None = None,
+                                    repo_root: pathlib.Path | None = None,
+                                    catalog_source: pathlib.Path | None = None,
+                                    workspace: pathlib.Path | str | None = None,
+                                    trusted_identity: dict[str, Any] | None = None,
+                                    verify_sources: bool = True,
+                                    allow_phase_alias: bool = False,
+                                    allow_legacy_schema: bool = False) -> dict[str, str]:
+    if phase not in ("phase-a", "phase-b"):
+        raise PilotError("attempt-4 authorization phase binding missing")
+    legacy_keys = frozenset({"revision", "canonical_command_sha256", "pilot_source_sha256",
+                             "catalog_source_sha256", "protected_files_manifest_sha256",
+                             "attempt2_runtime_manifest_sha256"})
+    legacy_value = value
+    if allow_legacy_schema and isinstance(value, str):
+        try:
+            legacy_value = json.loads(value, object_pairs_hook=_reject_duplicate_keys)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateKeyError):
+            legacy_value = value
+    if (not verify_sources or allow_legacy_schema) and isinstance(legacy_value, dict) and set(legacy_value) == legacy_keys:
+        if type(legacy_value["revision"]) is not str or not re.fullmatch(r"[0-9a-f]{40}", legacy_value["revision"]):
+            raise PilotError("attempt-4 authorization revision schema mismatch")
+        if any(type(legacy_value[key]) is not str or not _HEX64.fullmatch(legacy_value[key]) for key in legacy_keys - {"revision"}):
+            raise PilotError("attempt-4 authorization hash schema mismatch")
+        if allow_legacy_schema:
+            return dict(legacy_value)
+        if phase_spec is None or phase_spec.get("phase") != phase:
+            raise PilotError("attempt-4 authorization canonical command mismatch")
+        expected_command = hashlib.sha256(json.dumps(
+            canonical_attempt4_command(phase, phase_spec), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if legacy_value["canonical_command_sha256"] != expected_command:
+            raise PilotError("attempt-4 authorization canonical command mismatch")
+        return dict(legacy_value)
+    authorization = _attempt4_authorization_json(value)
+    if allow_phase_alias:
+        return authorization
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    spec = phase_spec or attempt4_phase_specs(repo_root=root, workspace=workspace)[phase]
+    expected_command = hashlib.sha256(json.dumps(canonical_attempt4_command(phase, spec), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if authorization["canonical_command_sha256"] != expected_command:
+        raise PilotError("attempt-4 authorization canonical command mismatch")
+    if authorization["phase"] != phase and not allow_phase_alias:
+        raise PilotError("attempt-4 authorization phase mismatch")
+    if authorization["attempt2_runtime_manifest_sha256"] != _ATTEMPT2_CANONICAL_MANIFEST[2]:
+        raise PilotError("attempt-4 authorization attempt-2 manifest binding mismatch")
+    if authorization["attempt3_historical_evidence_sha256"] != _attempt3_historical_evidence_binding():
+        raise PilotError("attempt-4 authorization attempt-3 history binding mismatch")
+    if authorization["phase_authorization_sha256"] != hashlib.sha256(json.dumps({"phase": phase, "command": expected_command}, sort_keys=True, separators=(",", ":")).encode()).hexdigest():
+        raise PilotError("attempt-4 authorization phase-specific binding mismatch")
+    expected_trusted_identity = _attempt4_trusted_identity_binding(trusted_identity)
+    if authorization["trusted_identity_sha256"] != expected_trusted_identity:
+        raise PilotError("attempt-4 authorization immutable identity trust root mismatch")
+    if authorization["pre_write_verification_sha256"] != _attempt4_pre_write_binding(phase, spec, repo_root=root):
+        raise PilotError("attempt-4 authorization pre-write binding mismatch")
+    if not verify_sources:
+        return authorization
+    try:
+        current_revision = _git_output("git", "rev-parse", "HEAD")
+    except PilotError:
+        if root.resolve() == _CANONICAL_REPO_ROOT.resolve():
+            raise
+        current_revision = authorization["revision"]
+    if current_revision != authorization["revision"]:
+        raise PilotError("attempt-4 authorization revision mismatch")
+    pilot_path = root / "scripts" / "ds4_segmented_pilot.py"
+    catalog_path = catalog_source or root / "scripts" / "finetune_ds4.py"
+    if file_sha256(pilot_path) != authorization["pilot_source_sha256"]:
+        raise PilotError("attempt-4 authorization pilot source mismatch")
+    if file_sha256(catalog_path) != authorization["catalog_source_sha256"]:
+        raise PilotError("attempt-4 authorization catalog source mismatch")
+    if protected_files_manifest_sha256(repo_root=root) != authorization["protected_files_manifest_sha256"]:
+        raise PilotError("attempt-4 authorization protected manifest mismatch")
+    protected_status = _git_output("git", "status", "--porcelain=1", "--untracked-files=all", "--", *_ATTEMPT3_PROTECTED_PATHS)
+    if protected_status:
+        raise PilotError("attempt-4 protected paths are not clean")
+    return authorization
+
+
+def canonical_attempt4_authorization(phase: str, phase_spec: dict[str, Any], *,
+                                     repo_root: pathlib.Path | None = None,
+                                     workspace: pathlib.Path | str | None = None,
+                                     catalog_source: pathlib.Path | None = None,
+                                     trusted_identity: dict[str, Any] | None = None) -> str:
+    root = pathlib.Path(repo_root) if repo_root is not None else REPO_ROOT
+    command = canonical_attempt4_command(phase, phase_spec)
+    command_sha = hashlib.sha256(json.dumps(command, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = lambda path: file_sha256(path) if path.is_file() else "0" * 64
+    try:
+        protected = protected_files_manifest_sha256(repo_root=root)
+    except PilotError:
+        protected = "0" * 64
+    revision = _git_output("git", "rev-parse", "HEAD") if (root / ".git").exists() else "0" * 40
+    value = {"revision": revision, "canonical_command_sha256": command_sha,
+             "pilot_source_sha256": digest(root / "scripts" / "ds4_segmented_pilot.py"),
+             "catalog_source_sha256": digest(catalog_source or root / "scripts" / "finetune_ds4.py"),
+             "protected_files_manifest_sha256": protected,
+             "attempt2_runtime_manifest_sha256": _ATTEMPT2_CANONICAL_MANIFEST[2],
+             "attempt3_historical_evidence_sha256": _attempt3_historical_evidence_binding(),
+             "phase": phase,
+             "phase_authorization_sha256": hashlib.sha256(json.dumps({"phase": phase, "command": command_sha}, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+             "trusted_identity_sha256": _attempt4_trusted_identity_binding(trusted_identity),
+             "pre_write_verification_sha256": _attempt4_pre_write_binding(phase, phase_spec, repo_root=root)}
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+
+
+
+
 
 
 def ensure_absent(path: pathlib.Path | str) -> None:
@@ -950,6 +1223,23 @@ _A2_IDENTITY_IMMUTABLE_KEYS = frozenset({
     "git_head",
 })
 _A2_IDENTITY_KEYS = frozenset({"immutable", "dynamic_resources", "repository_status"})
+_ATTEMPT4_IDENTITY_SCHEMA = "attempt4-authorized-identity-v1"
+_ATTEMPT4_RESOURCE_POLICY_SCHEMA = "attempt4-resource-policy-v1"
+_ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS: dict[str, dict[str, Any]] = {}
+# Report-derived roots are captured from one strict file-byte snapshot. They are
+# separate from the candidate dictionaries passed to validators.
+_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS: dict[str, dict[str, Any]] = {}
+ATTEMPT4_DYNAMIC_RESOURCE_POLICY: dict[str, Any] = {
+    "schema": _ATTEMPT4_RESOURCE_POLICY_SCHEMA,
+    "dynamic_resources_keys": ["available_memory", "disk_free", "competing_processes", "allowed_process_skips"],
+    "PILOT_MEMORY_HEADROOM": PILOT_MEMORY_HEADROOM,
+    "PILOT_DISK_MIN_FREE": PILOT_DISK_MIN_FREE,
+    "max_competing_processes": 0,
+    "allowed_process_skip_types": ["AccessDenied", "NoSuchProcess", "ZombieProcess"],
+    "require_sorted_competing_processes": True,
+    "require_pid_count_consistency": True,
+    "fail_closed_on_collection_error": True,
+}
 _A2_REPORT_KEYS = frozenset({
     "status", "phase", "attempt", "namespace", "effective", "contract_digest",
     "identity_manifest", "provider_calls", "optimizer_updates", "steps", "provider_evidence",
@@ -971,6 +1261,11 @@ _ATTEMPT3_MARKER_BASE_KEYS = frozenset({
 _ATTEMPT3_MARKER_PHASE_A_KEYS = _ATTEMPT3_MARKER_BASE_KEYS | frozenset({
     "resume_source", "resume_source_file_sha256", "resume_source_canonical_tensor_digest_v1",
 })
+_ATTEMPT4_MARKER_BASE_KEYS = _ATTEMPT3_MARKER_BASE_KEYS
+_ATTEMPT4_MARKER_RESUME_KEYS = _ATTEMPT4_MARKER_BASE_KEYS | frozenset({
+    "resume_source", "resume_source_file_sha256", "resume_source_canonical_tensor_digest_v1",
+})
+_ATTEMPT4_REPORT_KEYS = _A2_REPORT_KEYS | frozenset({"attempt_3_historical_evidence", "phase_a_admission_lineage", "identity_snapshot"})
 _A2_EFFECTIVE_BASE_KEYS = frozenset(set(COMMON_VALUES) | {
     "phase", "model", "data", "config", "adapter_path", "resume_adapter_file", "train", "test", "hf_dataset",
     "attempt", "log_path", "command", "iters", "steps_per_eval",
@@ -1017,13 +1312,13 @@ def _a2_gradient_schema(schema: Any) -> None:
 def _require_exact_keys(value: Any, expected: frozenset[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != set(expected):
         actual = sorted(value) if isinstance(value, dict) else type(value).__name__
-        raise PilotError(f"canonical A3 {label} schema mismatch: expected {sorted(expected)}, got {actual}")
+        raise PilotError(f"canonical {label} schema mismatch: expected {sorted(expected)}, got {actual}")
     return value
 
 
 def _validate_manifest_list(value: Any, label: str) -> None:
     if not isinstance(value, list) or not value:
-        raise PilotError(f"canonical A3 {label} evidence missing")
+        raise PilotError(f"canonical {label} evidence missing")
     for item in value:
         if not isinstance(item, dict) or set(item) != {"path", "size", "sha256"}:
             raise PilotError(f"canonical A3 {label} schema mismatch")
@@ -1094,24 +1389,6 @@ def _validate_canonical_identity(identity: Any, *, trusted_identity: dict[str, A
         raise PilotError("canonical A3 repository identity schema mismatch")
 
 
-def _validate_canonical_effective(effective: Any, report: dict[str, Any], phase_spec: dict[str, Any]) -> None:
-    effective = _require_exact_keys(effective, _A2_EFFECTIVE_BASE_KEYS, "effective pins")
-    phase = report["phase"]
-    identity = attempt3_launch_identity()
-    paths = phase_spec["namespace_paths"]
-    expected = dict(COMMON_VALUES)
-    expected.update({"phase": phase, "attempt": 3, "iters": phase_spec["iters"], "steps_per_eval": phase_spec["steps_per_eval"],
-                     "model": identity["model"], "data": identity["data"], "config": identity["config"],
-                     "adapter_path": phase_spec["adapter_path"], "resume_adapter_file": phase_spec["resume_adapter_file"],
-                     "train": True, "test": False, "hf_dataset": False,
-                     "log_path": paths[f"{phase}-log"]})
-    for key, expected_value in expected.items():
-        if effective.get(key) != expected_value:
-            raise PilotError(f"canonical A3 effective pin substituted: {key}")
-    command = effective.get("command")
-    expected_command = canonical_attempt3_command(phase, phase_spec)
-    if command != expected_command or report.get("commands") != expected_command:
-        raise PilotError("canonical A3 exact command binding missing")
 
 
 def _validate_canonical_step_records(phase: str, report: dict[str, Any], phase_spec: dict[str, Any],
@@ -1177,132 +1454,8 @@ def _validate_canonical_step_records(phase: str, report: dict[str, Any], phase_s
             raise PilotError("canonical A3 update/checkpoint binding mismatch")
 
 
-def _validate_phase_a_admission_lineage(lineage: Any, *, phase_spec: dict[str, Any],
-                                        trusted_authorization: dict[str, str] | None = None) -> None:
-    _require_exact_keys(lineage, _PHASE_A_ADMISSION_LINEAGE_KEYS, "Phase A admission lineage")
-    report_ref = _require_exact_keys(lineage["report"], frozenset({"path", "sha256", "bytes_b64", "schema"}), "Phase A report admission")
-    marker_ref = _require_exact_keys(lineage["marker"], frozenset({"path", "sha256", "bytes_b64", "schema"}), "Phase A marker admission")
-    try:
-        report_bytes = base64.b64decode(report_ref["bytes_b64"], validate=True)
-        marker_bytes = base64.b64decode(marker_ref["bytes_b64"], validate=True)
-    except (ValueError, TypeError) as exc:
-        raise PilotError("Phase A admission lineage bytes encoding invalid") from exc
-    if hashlib.sha256(report_bytes).hexdigest() != report_ref["sha256"] or hashlib.sha256(marker_bytes).hexdigest() != marker_ref["sha256"]:
-        raise PilotError("Phase A admission lineage byte hash mismatch")
-    report_path = pathlib.Path(report_ref["path"])
-    marker_path = pathlib.Path(marker_ref["path"])
-    current_report_bytes, current_report_sha, phase_a_report = _read_json_bytes_snapshot(report_path)
-    current_marker_bytes, current_marker_sha, phase_a_marker = _read_json_bytes_snapshot(marker_path)
-    if current_report_bytes != report_bytes or current_report_sha != report_ref["sha256"]:
-        raise PilotError("Phase A admission lineage report changed after admission")
-    if current_marker_bytes != marker_bytes or current_marker_sha != marker_ref["sha256"]:
-        raise PilotError("Phase A admission lineage marker changed after admission")
-    if sorted(phase_a_report) != report_ref["schema"] or sorted(phase_a_marker) != marker_ref["schema"]:
-        raise PilotError("Phase A admission lineage schema changed")
-    paths = phase_spec["namespace_paths"]
-    phase_a_spec = attempt3_phase_specs(repo_root=pathlib.Path(paths["phase-a-report"]).resolve().parents[2],
-                                        workspace=pathlib.Path(paths["phase-a-output"]).resolve().parent)["phase-a"]
-    _validate_attempt3_marker(phase_a_marker, phase="phase-a", phase_spec=phase_a_spec,
-                              report=phase_a_report, marker_path=marker_path,
-                              trusted_report_sha256=current_report_sha)
-    if trusted_authorization is not None and phase_a_report.get("authorization") != trusted_authorization:
-        raise PilotError("Phase A admission authorization substituted")
-    validate_canonical_attempt3_report(
-        phase_a_report, phase_spec=phase_a_spec, report_path=report_path,
-        historical_evidence=phase_a_report.get("attempt_1_historical_evidence"),
-        historical_attempt2_evidence=phase_a_report.get("attempt_2_historical_evidence"),
-        trusted_identity=phase_a_report.get("identity_manifest"),
-        trusted_authorization=trusted_authorization or phase_a_report.get("authorization"))
-    expected = {
-        "authorization": phase_a_report.get("authorization"),
-        "attempt_1_historical_evidence": phase_a_report.get("attempt_1_historical_evidence"),
-        "attempt_2_historical_evidence": phase_a_report.get("attempt_2_historical_evidence"),
-        "identity_manifest": phase_a_report.get("identity_manifest"),
-        "contract_digest": phase_a_report.get("contract_digest"),
-        "artifacts": phase_a_report.get("artifacts"),
-        "resume_source": phase_a_report.get("resume_source"),
-    }
-    for key, value in expected.items():
-        if lineage[key] != value:
-            raise PilotError(f"Phase A admission lineage {key} substituted")
 
 
-def validate_canonical_attempt3_report(report: dict[str, Any], *, phase_spec: dict[str, Any],
-                                       report_path: pathlib.Path | str | None = None,
-                                       historical_evidence: list[dict[str, Any]] | None = None,
-                                       historical_attempt2_evidence: dict[str, Any] | None = None,
-                                       trusted_identity: dict[str, Any] | None = None,
-                                       trusted_authorization: dict[str, str] | None = None,
-                                       trusted_phase_a_authorization: dict[str, str] | None = None,
-                                       trusted_phase_a_admission_lineage: dict[str, Any] | None = None) -> None:
-    if report.get("phase") == "phase-b" and "phase_a_admission_lineage" not in report:
-        raise PilotError("canonical A3 admission lineage missing")
-    if trusted_phase_a_admission_lineage is not None and report.get("phase_a_admission_lineage") != trusted_phase_a_admission_lineage:
-        raise PilotError("Phase B admission lineage is not the retained pre-training lineage")
-    expected_report_keys = _A2_REPORT_KEYS | (frozenset({"phase_a_admission_lineage"}) if report.get("phase") == "phase-b" else frozenset())
-    _require_exact_keys(report, expected_report_keys, "report")
-    if report["status"] != "ok" or report["attempt"] != 3 or report["namespace"] != ATTEMPT3_NAMESPACE or report["phase"] not in ("phase-a", "phase-b"):
-        raise PilotError("canonical A3 report identity mismatch")
-    if report["phase"] != phase_spec.get("phase", report["phase"]) or phase_spec.get("attempt") != 3:
-        raise PilotError("canonical A3 report phase mismatch")
-    paths = phase_spec.get("namespace_paths")
-    if not isinstance(paths, dict) or not paths:
-        raise PilotError("canonical A3 namespace paths missing")
-    phase = report["phase"]
-    prefix = phase
-    if report["output_path"] != paths[f"{prefix}-output"] or report["log_path"] != paths[f"{prefix}-log"] or report["report_path"] != paths[f"{prefix}-report"]:
-        raise PilotError("canonical A3 output/log/report binding mismatch")
-    if report["ok_marker_path"] != paths[f"{prefix}-ok"] or report["fail_marker_path"] != paths[f"{prefix}-fail"] or report["final_report_path"] != paths["final-report"]:
-        raise PilotError("canonical A3 marker/final binding mismatch")
-    if report["namespace_paths"] != paths:
-        raise PilotError("canonical A3 namespace path substitution")
-    if phase_spec.get("report") != paths[f"{phase}-report"] or phase_spec.get("final_report") != paths["final-report"]:
-        raise PilotError("canonical A3 report namespace binding missing")
-    _validate_canonical_effective(report["effective"], report, phase_spec)
-    _validate_canonical_identity(report["identity_manifest"],
-                                 trusted_identity=trusted_identity or phase_spec.get("trusted_identity"))
-    root = pathlib.Path(paths[f"{phase}-report"]).resolve().parents[2]
-    expected_authorization = validate_attempt3_authorization(
-        report["authorization"], phase=phase, phase_spec=phase_spec, repo_root=root,
-        verify_sources=False)
-    if trusted_authorization is not None and expected_authorization != trusted_authorization:
-        raise PilotError("canonical A3 authorization substituted")
-    if phase == "phase-b":
-        _validate_phase_a_admission_lineage(
-            report["phase_a_admission_lineage"], phase_spec=phase_spec,
-            trusted_authorization=trusted_phase_a_authorization)
-    expected_history = historical_attempt2_evidence if historical_attempt2_evidence else report.get("attempt_2_historical_evidence")
-    if not isinstance(expected_history, dict) or report["attempt_2_historical_evidence"] != expected_history:
-        raise PilotError("canonical A3 attempt-2 historical evidence substituted")
-    expected_artifacts = _validate_artifacts(phase, pathlib.Path(phase_spec["adapter_path"]), phase_spec=phase_spec)
-    _validate_canonical_step_records(phase, report, phase_spec, expected_artifacts)
-    if report["provider_calls"] != phase_spec["iters"] or report["optimizer_updates"] != phase_spec["iters"]:
-        raise PilotError("canonical A3 provider/update cardinality mismatch")
-    if report["global_mapping"] != [0, *global_steps(phase, range(1, phase_spec["iters"] + 1))]:
-        raise PilotError("canonical A3 global mapping mismatch")
-    if report["watchdog_cancelled"] is not True or report["exit_code"] != 0:
-        raise PilotError("canonical A3 lifecycle evidence missing")
-    _a2_finite_number(report["wall_seconds"], "phase wall time", minimum=0.0)
-    if report["attempt_1_historical_evidence"] != (historical_evidence if historical_evidence is not None else list(ATTEMPT1_EVIDENCE_SHA256)):
-        raise PilotError("canonical A3 historical evidence substituted")
-    if report["artifacts"] != expected_artifacts:
-        raise PilotError("canonical A3 artifact/checkpoint evidence mismatch")
-    if any(item.get("checkpoint") != expected_artifacts["checkpoints"][index] for index, item in enumerate(report["steps"])):
-        raise PilotError("canonical A3 update/checkpoint binding mismatch")
-    expected_resume = expected_artifacts["checkpoints"][-1] if phase == "phase-a" else canonical_tensor_digest(phase_spec["resume_adapter_file"])
-    if report["resume_source"] != expected_resume:
-        raise PilotError("canonical A3 resume checkpoint binding mismatch")
-    if report["contract_digest"] != contract_digest(
-            phase, report["effective"], report["identity_manifest"], phase_spec=phase_spec,
-            historical_evidence=report["attempt_1_historical_evidence"],
-            historical_attempt2_evidence=report["attempt_2_historical_evidence"],
-            authorization=report["authorization"],
-            phase_a_admission_lineage=report.get("phase_a_admission_lineage")):
-        raise PilotError("canonical A3 contract digest mismatch")
-    if report["commands"] != report["effective"]["command"] or report["retry"] != RETRY_POLICY or report["fallback"] != FALLBACK_POLICY or report["non_claims"] != list(NON_CLAIMS):
-        raise PilotError("canonical A3 command or policy binding mismatch")
-    if report_path is not None and pathlib.Path(report_path).resolve() != pathlib.Path(paths[f"{phase}-report"]).resolve():
-        raise PilotError("canonical A3 report path argument mismatch")
 
 
 def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], resume_source: pathlib.Path | str,
@@ -1311,70 +1464,92 @@ def validate_phase_b_dependency(report: dict[str, Any], marker: dict[str, Any], 
                                  historical_attempt2_evidence: dict[str, Any] | None = None,
                                  trusted_identity: dict[str, Any] | None = None,
                                  trusted_authorization: dict[str, str] | None = None,
-                                 trusted_phase_a_authorization: dict[str, str] | None = None) -> None:
+                                 trusted_phase_a_authorization: dict[str, str] | None = None,
+                                 trusted_phase_a_admission_lineage: dict[str, Any] | None = None,
+                                 phase_a_report_bytes: bytes | None = None,
+                                 phase_a_report_sha256: str | None = None,
+                                 phase_a_marker_bytes: bytes | None = None,
+                                 phase_a_marker_sha256: str | None = None,
+                                 trusted_identity_snapshot: dict[str, Any] | None = None,
+                                 trusted_identity_snapshot_bytes: bytes | None = None,
+                                 trusted_identity_snapshot_sha256: str | None = None,
+                                 trusted_attempt_1_historical_evidence: list[dict[str, Any]] | None = None,
+                                 trusted_attempt_3_historical_evidence: dict[str, Any] | None = None) -> None:
     if report.get("status") != "ok" or report.get("phase") != "phase-a" or marker.get("status") != "ok" or marker.get("phase") != "phase-a":
         raise PilotError("Phase A report and OK marker required")
-    a2_paths: dict[str, str] | None = None
-    if phase_spec is not None and phase_spec.get("attempt") == 3:
-        a2_paths = phase_spec.get("namespace_paths")
-        if not isinstance(a2_paths, dict) or not a2_paths:
-            raise PilotError("canonical A3 namespace paths missing")
-        if report.get("attempt") != 3 or report.get("namespace") != ATTEMPT3_NAMESPACE:
-            raise PilotError("attempt-1 report cannot satisfy attempt-3 dependency")
-        if marker.get("attempt") != 3 or marker.get("namespace") != ATTEMPT3_NAMESPACE:
-            raise PilotError("attempt-1 marker cannot satisfy attempt-3 dependency")
-    if report.get("provider_calls") != 2 or report.get("optimizer_updates") != 2:
-        raise PilotError("Phase A report cardinality binding missing")
-    if phase_spec is not None and phase_spec.get("attempt") == 3:
-        if not isinstance(report.get("provider_evidence"), list):
-            raise PilotError("Phase A canonical provider evidence missing")
-    report_path = marker.get("report_path")
-    expected_report_sha = marker.get("report_sha256")
-    if a2_paths is not None:
-        canonical_report_path = pathlib.Path(a2_paths["phase-a-report"])
-        if pathlib.Path(resume_source) != pathlib.Path(a2_paths["phase-b-resume"]):
-            raise PilotError("Phase A resume source path is not the canonical Phase B resume")
-    else:
-        canonical_report_path = pathlib.Path((phase_spec or PHASES["phase-a"])["report"])
+    if phase_spec is None:
+        if report.get("provider_calls") != 2 or report.get("optimizer_updates") != 2:
+            raise PilotError("Phase A report cardinality binding missing")
+        report_path = marker.get("report_path")
+        expected_report_sha = marker.get("report_sha256")
+        canonical_report_path = pathlib.Path(PHASES["phase-a"]["report"])
         if not canonical_report_path.is_absolute():
             canonical_report_path = REPO_ROOT / canonical_report_path
-    canonical_report_path = canonical_report_path.resolve()
-    if not report_path or pathlib.Path(report_path).resolve() != canonical_report_path:
-        raise PilotError("Phase A marker report path is not the canonical report")
-    if not expected_report_sha:
-        raise PilotError("Phase A report hash binding mismatch")
-    observed_report_sha, hashed_report = _read_json_snapshot(canonical_report_path)
-    if observed_report_sha != expected_report_sha:
-        raise PilotError("Phase A report hash binding mismatch")
-    if hashed_report != report:
-        raise PilotError("Phase A report object does not equal hashed payload")
-    if phase_spec is not None and phase_spec.get("attempt") == 3:
-        _validate_attempt3_marker(marker, phase="phase-a", phase_spec=phase_spec,
-                                  report=report, marker_path=pathlib.Path(a2_paths["phase-a-ok"]))
-        validate_canonical_attempt3_report(report, phase_spec=phase_spec,
-                                           report_path=canonical_report_path,
-                                           historical_evidence=historical_evidence,
-                                           historical_attempt2_evidence=historical_attempt2_evidence,
-                                           trusted_identity=trusted_identity,
-                                           trusted_authorization=trusted_authorization,
-                                           trusted_phase_a_authorization=trusted_phase_a_authorization)
-    if not marker.get("contract_digest") or marker.get("contract_digest") != report.get("contract_digest"):
-        raise PilotError("Phase A contract binding missing")
+        canonical_report_path = canonical_report_path.resolve()
+        if not report_path or pathlib.Path(report_path).resolve() != canonical_report_path:
+            raise PilotError("Phase A marker report path is not the canonical report")
+        if not expected_report_sha:
+            raise PilotError("Phase A report hash binding mismatch")
+        observed_report_sha, hashed_report = _read_json_snapshot(canonical_report_path)
+        if observed_report_sha != expected_report_sha:
+            raise PilotError("Phase A report hash binding mismatch")
+        if hashed_report != report:
+            raise PilotError("Phase A report object does not equal hashed payload")
+        if marker.get("contract_digest") != report.get("contract_digest"):
+            raise PilotError("Phase A contract binding missing")
+        source = pathlib.Path(resume_source)
+        source_info = report.get("resume_source")
+        if not isinstance(source_info, dict) or source_info.get("path") != str(source):
+            raise PilotError("Phase A resume source path binding missing")
+        if marker.get("resume_source") not in (str(source), source_info):
+            raise PilotError("Phase A resume source path mismatch")
+        if marker.get("resume_source_file_sha256") != source_info.get("file_sha256") or marker.get("resume_source_canonical_tensor_digest_v1") != source_info.get("canonical_tensor_digest_v1"):
+            raise PilotError("Phase A resume source marker binding mismatch")
+        if not source.is_file() or file_sha256(source) != source_info.get("file_sha256"):
+            raise PilotError("Phase A resume source hash mismatch")
+        if not source_info.get("canonical_tensor_digest_v1"):
+            raise PilotError("Phase A resume source canonical digest binding missing")
+        observed_source = canonical_tensor_digest(source)
+        if observed_source["file_sha256"] != source_info.get("file_sha256") or observed_source["canonical_tensor_digest_v1"] != source_info.get("canonical_tensor_digest_v1"):
+            raise PilotError("Phase A resume source canonical digest mismatch")
+        return
+    if phase_spec.get("attempt") != 4 or phase_spec.get("phase") != "phase-a":
+        raise PilotError("attempt-3 dependency validation is retired; use the fixed A4 Phase A spec")
+    paths = {key: pathlib.Path(value) for key, value in phase_spec["namespace_paths"].items()}
     source = pathlib.Path(resume_source)
-    source_info = report.get("resume_source")
-    if not isinstance(source_info, dict) or source_info.get("path") != str(source):
+    expected_source = paths["phase-b-resume"]
+    if source != expected_source or report.get("resume_source", {}).get("path") != str(source):
         raise PilotError("Phase A resume source path binding missing")
-    if marker.get("resume_source") not in (str(source), source_info):
-        raise PilotError("Phase A resume source path mismatch")
-    if marker.get("resume_source_file_sha256") != source_info.get("file_sha256") or marker.get("resume_source_canonical_tensor_digest_v1") != source_info.get("canonical_tensor_digest_v1"):
-        raise PilotError("Phase A resume source marker binding mismatch")
-    if not source.is_file() or file_sha256(source) != source_info.get("file_sha256"):
-        raise PilotError("Phase A resume source hash mismatch")
-    if not source_info.get("canonical_tensor_digest_v1"):
-        raise PilotError("Phase A resume source canonical digest binding missing")
-    observed_source = canonical_tensor_digest(source)
-    if observed_source["file_sha256"] != source_info.get("file_sha256") or observed_source["canonical_tensor_digest_v1"] != source_info.get("canonical_tensor_digest_v1"):
-        raise PilotError("Phase A resume source canonical digest mismatch")
+    for key in ("phase-a-start-checkpoint", "phase-a-step1-checkpoint", "phase-a-step2-checkpoint",
+                "phase-a-final-checkpoint", "phase-a-config"):
+        if not paths[key].is_file():
+            raise PilotError(f"missing required pilot artifact: {paths[key]}")
+    report_path = paths["phase-a-report"]
+    _validate_explicit_json_root(
+        phase_a_report_bytes, phase_a_report_sha256, report,
+        "Phase A4 dependency report", file_format=True)
+    _validate_explicit_json_root(
+        phase_a_marker_bytes, phase_a_marker_sha256, marker,
+        "Phase A4 dependency marker", file_format=True)
+    _validate_attempt4_report(
+        report, phase_spec=phase_spec, report_path=report_path,
+        historical_attempt2_evidence=historical_attempt2_evidence,
+        trusted_authorization=trusted_authorization,
+        trusted_phase_a_authorization=trusted_phase_a_authorization,
+        trusted_identity=trusted_identity,
+        trusted_identity_snapshot=trusted_identity_snapshot,
+        trusted_identity_snapshot_bytes=trusted_identity_snapshot_bytes,
+        trusted_identity_snapshot_sha256=trusted_identity_snapshot_sha256,
+        trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
+        trusted_attempt_3_historical_evidence=trusted_attempt_3_historical_evidence)
+    _validate_attempt4_marker(
+        marker, phase="phase-a", phase_spec=phase_spec, report=report,
+        marker_path=pathlib.Path(phase_spec["namespace_paths"]["phase-a-ok"]),
+        trusted_report_sha256=phase_a_report_sha256)
+    if not source.is_file() or canonical_tensor_digest(source) != report["resume_source"]:
+        raise PilotError("A4 Phase B resume source digest mismatch")
+
+
 
 
 def _effective(args: argparse.Namespace) -> dict[str, Any]:
@@ -1398,6 +1573,8 @@ _OPTIONAL_PIN_KEYS = {"report_to", "project_name", "trust_remote_code", "lr_sche
 
 
 def validate_pins(args: argparse.Namespace, phase: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    if phase.get("attempt") not in (None, 1, 4):
+        raise PilotError("attempt-3 pin validation is retired; historical evidence is read-only")
     expected = dict(COMMON_VALUES)
     expected.update({"iters": phase["iters"], "steps_per_eval": phase["steps_per_eval"], "adapter_path": phase["adapter_path"], "resume_adapter_file": phase["resume_adapter_file"]})
     if args.phase not in PHASES:
@@ -1439,8 +1616,8 @@ def validate_pins(args: argparse.Namespace, phase: dict[str, Any], config: dict[
         raise PilotError("pinned-args: Phase B requires resume source")
     effective = _effective(args)
     effective.update(expected)
-    if getattr(args, "attempt", 1) == 2:
-        effective["command"] = canonical_attempt3_command(args.phase, phase)
+    if phase.get("attempt") == 4:
+        effective["command"] = canonical_attempt4_command(args.phase, phase)
     return effective
 
 
@@ -1478,14 +1655,18 @@ def _validate_lora_config(config: dict[str, Any]) -> dict[str, Any]:
     return {"rank": 8, "scale": 20.0, "dropout": 0.0, "keys": list(keys)}
 
 
+def _serialize_json_bytes(value: dict[str, Any]) -> bytes:
+    return json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+
+
 def atomic_write_json(path: pathlib.Path | str, value: dict[str, Any]) -> None:
     path = pathlib.Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _serialize_json_bytes(value)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as target:
-            json.dump(value, target, indent=2, sort_keys=True)
-            target.write("\n")
+        with os.fdopen(fd, "wb") as target:
+            target.write(payload)
             target.flush()
             os.fsync(target.fileno())
         os.replace(temporary, path)
@@ -1495,6 +1676,16 @@ def atomic_write_json(path: pathlib.Path | str, value: dict[str, Any]) -> None:
         except OSError:
             pass
         raise
+
+
+def _write_exact_json(path: pathlib.Path | str, value: dict[str, Any], label: str) -> tuple[bytes, str, dict[str, Any]]:
+    expected = _serialize_json_bytes(value)
+    expected_sha256 = hashlib.sha256(expected).hexdigest()
+    atomic_write_json(path, value)
+    actual, actual_sha256, parsed = _read_json_bytes_snapshot(path)
+    if actual != expected or actual_sha256 != expected_sha256 or parsed != value:
+        raise PilotError(f"{label} exact publication readback mismatch")
+    return expected, expected_sha256, parsed
 
 
 def _write_text_fsync(path: pathlib.Path, text: str) -> None:
@@ -1514,159 +1705,220 @@ def _write_text_fsync(path: pathlib.Path, text: str) -> None:
         raise
 
 
-def _validate_final_phase_lineage(report: dict[str, Any], phase: str) -> None:
-    expected_keys = _A2_REPORT_KEYS | (frozenset({"phase_a_admission_lineage"}) if phase == "phase-b" else frozenset())
-    _require_exact_keys(report, expected_keys, f"final {phase} report")
-    if type(report["status"]) is not str or report["status"] != "ok" or type(report["attempt"]) is not int or report["attempt"] != 3 or type(report["namespace"]) is not str or report["namespace"] != ATTEMPT3_NAMESPACE:
-        raise PilotError(f"final {phase} report is not canonical attempt-3 evidence")
-    if type(report["phase"]) is not str or report["phase"] != phase:
-        raise PilotError(f"final {phase} report phase binding mismatch")
-    paths = report["namespace_paths"]
-    if not isinstance(paths, dict) or type(report["report_path"]) is not str or report["report_path"] != paths.get(f"{phase}-report"):
-        raise PilotError(f"final {phase} report path binding mismatch")
-    if type(report["contract_digest"]) is not str or not _HEX64.fullmatch(report["contract_digest"]):
-        raise PilotError(f"final {phase} contract binding missing")
-    if not isinstance(report["authorization"], dict) or _authorization_json(report["authorization"]) != report["authorization"]:
-        raise PilotError(f"final {phase} authorization schema mismatch")
-    if not isinstance(report["attempt_1_historical_evidence"], list) or not isinstance(report["attempt_2_historical_evidence"], dict):
-        raise PilotError(f"final {phase} historical evidence schema mismatch")
-    if type(report["wall_seconds"]) not in (int, float) or not math.isfinite(float(report["wall_seconds"])) or report["wall_seconds"] < 0:
-        raise PilotError(f"final {phase} wall time schema mismatch")
-    if not isinstance(report["output_path"], str) or not isinstance(report["steps"], list):
-        raise PilotError(f"final {phase} output/step schema mismatch")
-    if phase == "phase-b" and not isinstance(report["phase_a_admission_lineage"], dict):
-        raise PilotError("final Phase B admission lineage schema mismatch")
 
 
-def _validate_final_phase_snapshot(report: dict[str, Any], phase: str, *,
-                                   trusted_authorization: dict[str, str],
-                                   trusted_identity: dict[str, Any],
-                                   trusted_attempt_1_historical_evidence: list[dict[str, Any]],
-                                   trusted_attempt_2_historical_evidence: dict[str, Any],
-                                   trusted_phase_a_authorization: dict[str, str],
-                                   trusted_phase_a_admission_lineage: dict[str, Any]
-                                   ) -> tuple[dict[str, Any], str]:
-    if not isinstance(report, dict) or type(report.get("report_path")) is not str:
-        raise PilotError(f"final {phase} report path missing")
-    report_path = pathlib.Path(report["report_path"])
-    _, report_sha256, snapshot = _read_json_bytes_snapshot(report_path)
-    if not _json_exact_equal(snapshot, report):
-        raise PilotError(f"final {phase} supplied report does not equal immutable snapshot")
-    paths = snapshot.get("namespace_paths")
-    if not isinstance(paths, dict) or type(paths.get(f"{phase}-output")) is not str:
-        raise PilotError(f"final {phase} namespace paths missing")
-    root = pathlib.Path(paths[f"{phase}-report"]).resolve().parents[2]
-    workspace = pathlib.Path(paths[f"{phase}-output"]).resolve().parent
-    phase_spec = attempt3_phase_specs(repo_root=root, workspace=workspace)[phase]
-    validate_canonical_attempt3_report(
-        snapshot, phase_spec=phase_spec, report_path=report_path,
-        historical_evidence=trusted_attempt_1_historical_evidence,
-        historical_attempt2_evidence=trusted_attempt_2_historical_evidence,
-        trusted_identity=trusted_identity,
-        trusted_authorization=trusted_authorization,
-        trusted_phase_a_authorization=trusted_phase_a_authorization,
-        trusted_phase_a_admission_lineage=(trusted_phase_a_admission_lineage
-                                           if phase == "phase-b" else None),
-    )
-    return snapshot, report_sha256
 
 
-def validate_final_attempt3_report(final: dict[str, Any], phase_a: dict[str, Any], phase_b: dict[str, Any],
-                                   *, trusted_phase_a_admission_lineage: dict[str, Any] | None = None,
+
+
+def validate_final_attempt4_report(final: dict[str, Any], phase_a: dict[str, Any], phase_b: dict[str, Any], *,
                                    trusted_phase_a_authorization: dict[str, str] | None = None,
                                    trusted_phase_b_authorization: dict[str, str] | None = None,
                                    trusted_identity: dict[str, Any] | None = None,
+                                   trusted_phase_a_identity_snapshot: dict[str, Any] | None = None,
+                                   trusted_phase_b_identity_snapshot: dict[str, Any] | None = None,
+                                   trusted_phase_a_admission_lineage: dict[str, Any] | None = None,
+                                   trusted_phase_a_report_bytes: bytes | None = None,
+                                   trusted_phase_a_report_sha256: str | None = None,
+                                   trusted_phase_a_marker: dict[str, Any] | None = None,
+                                   trusted_phase_a_marker_bytes: bytes | None = None,
+                                   trusted_phase_a_marker_sha256: str | None = None,
+                                   trusted_phase_a_identity_snapshot_bytes: bytes | None = None,
+                                   trusted_phase_a_identity_snapshot_sha256: str | None = None,
+                                   trusted_phase_b_report_bytes: bytes | None = None,
+                                   trusted_phase_b_report_sha256: str | None = None,
+                                   trusted_phase_b_identity_snapshot_bytes: bytes | None = None,
+                                   trusted_phase_b_identity_snapshot_sha256: str | None = None,
                                    trusted_attempt_1_historical_evidence: list[dict[str, Any]] | None = None,
-                                   trusted_attempt_2_historical_evidence: dict[str, Any] | None = None) -> None:
+                                   trusted_attempt_2_historical_evidence: dict[str, Any] | None = None,
+                                   trusted_attempt_3_historical_evidence: dict[str, Any] | None = None) -> None:
+    if (trusted_phase_a_authorization is None or trusted_phase_b_authorization is None
+            or trusted_attempt_1_historical_evidence is None or trusted_attempt_2_historical_evidence is None
+            or trusted_attempt_3_historical_evidence is None):
+        raise PilotError("final A4 trusted lineage requires explicit attempt-1/attempt-2/attempt-3 history roots")
+    if trusted_phase_a_identity_snapshot is None or trusted_phase_b_identity_snapshot is None:
+        raise PilotError("final A4 report requires explicit Phase A and Phase B identity snapshots")
+    if trusted_phase_a_admission_lineage is None:
+        raise PilotError("final A4 report requires explicit Phase A admission lineage")
+    if trusted_identity is None:
+        raise PilotError("final A4 report requires trusted pre-training identity lineage")
+    if trusted_identity != trusted_phase_b_identity_snapshot:
+        raise PilotError("final A4 trusted identity must equal the retained Phase B snapshot")
+    retained_phase_b_identity = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get("phase-b")
+    if (retained_phase_b_identity is None
+            or trusted_identity is not retained_phase_b_identity.get("object")
+            or trusted_phase_b_identity_snapshot is not retained_phase_b_identity.get("object")):
+        raise PilotError("final A4 trusted identity is not the retained Phase B preflight object")
+    retained_phase_a_root = _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS.get("phase-a")
+    if retained_phase_a_root is None:
+        raise PilotError("final A4 trusted Phase A identity root was not captured")
+    retained_phase_a = _validate_explicit_json_root(
+        trusted_phase_a_report_bytes, trusted_phase_a_report_sha256, phase_a,
+        "final A4 Phase A report", file_format=True)
+    retained_phase_b = _validate_explicit_json_root(
+        trusted_phase_b_report_bytes, trusted_phase_b_report_sha256, phase_b,
+        "final A4 Phase B report", file_format=True)
+    if (trusted_phase_a_marker_bytes is None or trusted_phase_a_marker_sha256 is None
+            or trusted_phase_a_identity_snapshot_bytes is None
+            or trusted_phase_a_identity_snapshot_sha256 is None
+            or trusted_phase_b_identity_snapshot_bytes is None
+            or trusted_phase_b_identity_snapshot_sha256 is None):
+        raise PilotError("final A4 publication requires explicit report, marker, and identity byte roots")
+    if trusted_phase_a_marker is None:
+        raise PilotError("final A4 publication requires explicit Phase A marker object")
+    retained_phase_a_marker = _validate_explicit_json_root(
+        trusted_phase_a_marker_bytes, trusted_phase_a_marker_sha256,
+        trusted_phase_a_marker, "final A4 Phase A marker", file_format=True)
+    _validate_explicit_json_root(
+        trusted_phase_a_identity_snapshot_bytes, trusted_phase_a_identity_snapshot_sha256,
+        trusted_phase_a_identity_snapshot, "final A4 Phase A identity")
+    _validate_explicit_json_root(
+        trusted_phase_b_identity_snapshot_bytes, trusted_phase_b_identity_snapshot_sha256,
+        trusted_phase_b_identity_snapshot, "final A4 Phase B identity")
     expected_keys = frozenset({
         "status", "provider_calls", "optimizer_updates", "steps", "global_progression",
-        "total_active_wall_seconds", "phase_a", "phase_b", "output_path", "contract_digest", "non_claims",
-        "attempt", "namespace", "phase_a_report_path", "phase_b_report_path",
+        "total_active_wall_seconds", "phase_a", "phase_b", "output_path", "contract_digest",
+        "non_claims", "attempt", "namespace", "phase_a_report_path", "phase_b_report_path",
         "phase_a_contract_digest", "phase_b_contract_digest", "phase_authorizations",
-        "attempt_1_historical_evidence", "attempt_2_historical_evidence",
-        "phase_a_report_sha256", "phase_b_report_sha256",
+        "attempt_1_historical_evidence", "attempt_2_historical_evidence", "attempt_3_historical_evidence",
+        "phase_a_report_bytes_b64", "phase_a_report_sha256",
+        "phase_a_marker_bytes_b64", "phase_a_marker_sha256",
+        "phase_a_identity_snapshot_bytes_b64", "phase_a_identity_snapshot_sha256",
+        "phase_b_report_bytes_b64", "phase_b_report_sha256",
+        "phase_b_identity_snapshot_bytes_b64", "phase_b_identity_snapshot_sha256",
+        "phase_a_admission_lineage",
     })
-    if any(value is None for value in (
-        trusted_phase_a_admission_lineage, trusted_phase_a_authorization,
-        trusted_phase_b_authorization, trusted_identity,
-        trusted_attempt_1_historical_evidence, trusted_attempt_2_historical_evidence,
-    )):
-        raise PilotError("final publication requires independently retained trusted A3/B3 authorization, identity, and history roots")
-    _require_exact_keys(final, expected_keys, "final report")
-    phase_a, phase_a_sha256 = _validate_final_phase_snapshot(
-        phase_a, "phase-a", trusted_authorization=trusted_phase_a_authorization,
-        trusted_identity=trusted_identity,
-        trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
-        trusted_attempt_2_historical_evidence=trusted_attempt_2_historical_evidence,
+    _require_exact_keys(final, expected_keys, "final A4 report history roots")
+    expected_byte_roots = {
+        "phase_a_report_bytes_b64": (trusted_phase_a_report_bytes, trusted_phase_a_report_sha256),
+        "phase_a_marker_bytes_b64": (trusted_phase_a_marker_bytes, trusted_phase_a_marker_sha256),
+        "phase_a_identity_snapshot_bytes_b64": (trusted_phase_a_identity_snapshot_bytes, trusted_phase_a_identity_snapshot_sha256),
+        "phase_b_report_bytes_b64": (trusted_phase_b_report_bytes, trusted_phase_b_report_sha256),
+        "phase_b_identity_snapshot_bytes_b64": (trusted_phase_b_identity_snapshot_bytes, trusted_phase_b_identity_snapshot_sha256),
+    }
+    for encoded_key, (raw, digest) in expected_byte_roots.items():
+        if final[encoded_key] != base64.b64encode(raw).decode("ascii"):
+            raise PilotError(f"final A4 {encoded_key} retained-byte mismatch")
+        sha_key = encoded_key.removesuffix("_bytes_b64") + "_sha256"
+        if final[sha_key] != digest or not _HEX64.fullmatch(final[sha_key]):
+            raise PilotError(f"final A4 {sha_key} retained-byte hash mismatch")
+    if final["status"] != "ok" or final["attempt"] != 4 or final["namespace"] != ATTEMPT4_NAMESPACE:
+        raise PilotError("final A4 report identity mismatch")
+    phase_a_paths = phase_a.get("namespace_paths")
+    if not isinstance(phase_a_paths, dict) or not isinstance(phase_a_paths.get("phase-a-output"), str):
+        raise PilotError("final A4 Phase A namespace paths missing")
+    phase_root = pathlib.Path(phase_a_paths["phase-a-report"]).resolve().parents[2]
+    phase_workspace = pathlib.Path(phase_a_paths["phase-a-output"]).resolve().parent
+    specs = attempt4_phase_specs(repo_root=phase_root, workspace=phase_workspace)
+    trusted_attempt_1 = trusted_attempt_1_historical_evidence
+    trusted_attempt_2 = trusted_attempt_2_historical_evidence
+    trusted_attempt_3 = trusted_attempt_3_historical_evidence
+    _validate_attempt4_report(
+        phase_a, phase_spec=specs["phase-a"], report_path=phase_a["report_path"],
+        historical_attempt2_evidence=trusted_attempt_2,
+        trusted_authorization=trusted_phase_a_authorization,
+        trusted_identity=trusted_phase_a_identity_snapshot,
+        trusted_identity_snapshot=trusted_phase_a_identity_snapshot,
+        trusted_identity_snapshot_bytes=trusted_phase_a_identity_snapshot_bytes,
+        trusted_identity_snapshot_sha256=trusted_phase_a_identity_snapshot_sha256,
+        trusted_attempt_1_historical_evidence=trusted_attempt_1,
+        trusted_attempt_3_historical_evidence=trusted_attempt_3)
+    _validate_attempt4_report(
+        phase_b, phase_spec=specs["phase-b"], report_path=phase_b["report_path"],
+        historical_attempt2_evidence=trusted_attempt_2,
+        trusted_authorization=trusted_phase_b_authorization,
         trusted_phase_a_authorization=trusted_phase_a_authorization,
-        trusted_phase_a_admission_lineage=trusted_phase_a_admission_lineage)
-    phase_b, phase_b_sha256 = _validate_final_phase_snapshot(
-        phase_b, "phase-b", trusted_authorization=trusted_phase_b_authorization,
-        trusted_identity=trusted_identity,
-        trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
-        trusted_attempt_2_historical_evidence=trusted_attempt_2_historical_evidence,
-        trusted_phase_a_authorization=trusted_phase_a_authorization,
-        trusted_phase_a_admission_lineage=trusted_phase_a_admission_lineage)
-    if final["phase_a_report_sha256"] != phase_a_sha256 or final["phase_b_report_sha256"] != phase_b_sha256:
-        raise PilotError("final phase report hash binding mismatch")
-    _validate_final_phase_lineage(phase_a, "phase-a")
-    _validate_final_phase_lineage(phase_b, "phase-b")
-    trusted_phase_a_authorization_json = _authorization_json(trusted_phase_a_authorization)
-    trusted_phase_b_authorization_json = _authorization_json(trusted_phase_b_authorization)
-    if not _json_exact_equal(phase_a["authorization"], trusted_phase_a_authorization_json):
-        raise PilotError("final trusted Phase A3 authorization mismatch")
-    if not _json_exact_equal(phase_b["authorization"], trusted_phase_b_authorization_json):
-        raise PilotError("final trusted Phase B3 authorization mismatch")
-    if phase_a["identity_manifest"] != trusted_identity or phase_b["identity_manifest"] != trusted_identity:
-        raise PilotError("final trusted cross-phase identity mismatch")
-    if phase_a["attempt_1_historical_evidence"] != trusted_attempt_1_historical_evidence or phase_b["attempt_1_historical_evidence"] != trusted_attempt_1_historical_evidence:
-        raise PilotError("final trusted attempt-1 historical evidence mismatch")
-    if phase_a["attempt_2_historical_evidence"] != trusted_attempt_2_historical_evidence or phase_b["attempt_2_historical_evidence"] != trusted_attempt_2_historical_evidence:
-        raise PilotError("final trusted attempt-2 historical evidence mismatch")
-    if not _json_exact_equal(phase_b["phase_a_admission_lineage"], trusted_phase_a_admission_lineage):
-        raise PilotError("final Phase A admission lineage mismatch")
-    if not _json_exact_equal(final["status"], "ok") or type(final["attempt"]) is not int or final["attempt"] != 3 or type(final["namespace"]) is not str or final["namespace"] != ATTEMPT3_NAMESPACE:
-        raise PilotError("final report identity mismatch")
+        trusted_phase_a_admission_lineage=trusted_phase_a_admission_lineage,
+        trusted_identity=trusted_phase_b_identity_snapshot,
+        trusted_identity_snapshot=trusted_phase_b_identity_snapshot,
+        trusted_identity_snapshot_bytes=trusted_phase_b_identity_snapshot_bytes,
+        trusted_identity_snapshot_sha256=trusted_phase_b_identity_snapshot_sha256,
+        trusted_attempt_1_historical_evidence=trusted_attempt_1,
+        trusted_attempt_3_historical_evidence=trusted_attempt_3)
+    if phase_a["authorization"] != trusted_phase_a_authorization or phase_b["authorization"] != trusted_phase_b_authorization:
+        raise PilotError("final A4 authorization root mismatch")
+    if (phase_a["identity_manifest"] != trusted_phase_a_identity_snapshot
+            or phase_b["identity_manifest"] != trusted_phase_b_identity_snapshot):
+        raise PilotError("final A4 trusted identity mismatch")
+    phase_a_identity_bytes = trusted_phase_a_identity_snapshot_bytes
+    phase_b_identity_bytes = trusted_phase_b_identity_snapshot_bytes
+    phase_a_identity_sha256 = trusted_phase_a_identity_snapshot_sha256
+    phase_b_identity_sha256 = trusted_phase_b_identity_snapshot_sha256
+    if (phase_a["identity_snapshot"]["sha256"] != phase_a_identity_sha256
+            or phase_b["identity_snapshot"]["sha256"] != phase_b_identity_sha256):
+        raise PilotError("final A4 identity snapshot lineage mismatch")
+    if phase_b["phase_a_admission_lineage"] != trusted_phase_a_admission_lineage:
+        raise PilotError("final A4 admission lineage mismatch")
+    if final["phase_a"] != phase_a or final["phase_b"] != phase_b:
+        raise PilotError("final A4 phase snapshot mismatch")
+    lineage_report = trusted_phase_a_admission_lineage.get("report", {})
+    lineage_marker = trusted_phase_a_admission_lineage.get("marker", {})
+    if (lineage_report.get("bytes_b64") != base64.b64encode(trusted_phase_a_report_bytes).decode("ascii")
+            or lineage_report.get("sha256") != trusted_phase_a_report_sha256
+            or lineage_marker.get("bytes_b64") != base64.b64encode(trusted_phase_a_marker_bytes).decode("ascii")
+            or lineage_marker.get("sha256") != trusted_phase_a_marker_sha256):
+        raise PilotError("final A4 admission bytes are not the explicit retained roots")
+    if retained_phase_a_marker.get("report_sha256") != trusted_phase_a_report_sha256:
+        raise PilotError("final A4 Phase A marker report hash mismatch")
+    phase_a_spec = specs["phase-a"]
+    _validate_attempt4_marker(
+        retained_phase_a_marker, phase="phase-a", phase_spec=phase_a_spec,
+        marker_path=phase_a["ok_marker_path"], report=phase_a,
+        trusted_report_sha256=trusted_phase_a_report_sha256)
+    if final["phase_authorizations"] != {"phase-a": trusted_phase_a_authorization, "phase-b": trusted_phase_b_authorization}:
+        raise PilotError("final A4 authorization publication mismatch")
+    if final["attempt_1_historical_evidence"] != trusted_attempt_1 or final["attempt_2_historical_evidence"] != trusted_attempt_2 or final["attempt_3_historical_evidence"] != trusted_attempt_3:
+        raise PilotError("final A4 historical lineage mismatch")
     expected_steps = phase_a["steps"] + phase_b["steps"]
-    expected_total = float(phase_a["wall_seconds"]) + float(phase_b["wall_seconds"])
-    expected_contract = hashlib.sha256(json.dumps(
-        {"phase_a": phase_a["contract_digest"], "phase_b": phase_b["contract_digest"],
-         "phase_authorizations": {"phase-a": trusted_phase_a_authorization_json, "phase-b": trusted_phase_b_authorization_json}},
-        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     expected = {
         "status": "ok", "provider_calls": phase_a["provider_calls"] + phase_b["provider_calls"],
         "optimizer_updates": phase_a["optimizer_updates"] + phase_b["optimizer_updates"],
         "steps": expected_steps, "global_progression": [0, 1, 2, 3],
-        "total_active_wall_seconds": expected_total, "phase_a": phase_a, "phase_b": phase_b,
-        "output_path": phase_b["output_path"], "contract_digest": expected_contract,
-        "non_claims": list(NON_CLAIMS), "attempt": 3, "namespace": ATTEMPT3_NAMESPACE,
-        "phase_a_report_path": phase_a["report_path"], "phase_b_report_path": phase_b["report_path"],
-        "phase_a_contract_digest": phase_a["contract_digest"], "phase_b_contract_digest": phase_b["contract_digest"],
-        "phase_authorizations": {"phase-a": trusted_phase_a_authorization_json, "phase-b": trusted_phase_b_authorization_json},
-        "attempt_1_historical_evidence": trusted_attempt_1_historical_evidence,
-        "attempt_2_historical_evidence": trusted_attempt_2_historical_evidence,
-        "phase_a_report_sha256": phase_a_sha256,
-        "phase_b_report_sha256": phase_b_sha256,
+        "total_active_wall_seconds": float(phase_a["wall_seconds"]) + float(phase_b["wall_seconds"]),
+        "output_path": phase_b["output_path"], "contract_digest": final["contract_digest"],
+        "non_claims": list(NON_CLAIMS), "phase_a_report_path": phase_a["report_path"],
+        "phase_b_report_path": phase_b["report_path"], "phase_a_contract_digest": phase_a["contract_digest"],
+        "phase_b_contract_digest": phase_b["contract_digest"],
+        "phase_authorizations": {"phase-a": trusted_phase_a_authorization, "phase-b": trusted_phase_b_authorization},
+        "attempt_1_historical_evidence": phase_a["attempt_1_historical_evidence"],
+        "attempt_2_historical_evidence": phase_a["attempt_2_historical_evidence"],
+        "attempt_3_historical_evidence": trusted_attempt_3,
+        "phase_a_report_bytes_b64": base64.b64encode(trusted_phase_a_report_bytes).decode("ascii"),
+        "phase_a_report_sha256": final["phase_a_report_sha256"],
+        "phase_a_marker_bytes_b64": base64.b64encode(trusted_phase_a_marker_bytes).decode("ascii"),
+        "phase_a_marker_sha256": final["phase_a_marker_sha256"],
+        "phase_a_identity_snapshot_bytes_b64": base64.b64encode(trusted_phase_a_identity_snapshot_bytes).decode("ascii"),
+        "phase_a_identity_snapshot_sha256": phase_a_identity_sha256,
+        "phase_b_report_bytes_b64": base64.b64encode(trusted_phase_b_report_bytes).decode("ascii"),
+        "phase_b_report_sha256": final["phase_b_report_sha256"],
+        "phase_b_identity_snapshot_bytes_b64": base64.b64encode(trusted_phase_b_identity_snapshot_bytes).decode("ascii"),
+        "phase_b_identity_snapshot_sha256": phase_b_identity_sha256,
     }
-    for key, expected_value in expected.items():
+    for key, value in expected.items():
         if key == "total_active_wall_seconds":
-            if type(final[key]) not in (int, float) or not math.isfinite(float(final[key])) or final[key] != expected_value:
-                raise PilotError(f"final {key} type/value mismatch")
-        elif not _json_exact_equal(final[key], expected_value):
-            raise PilotError(f"final {key} type/value mismatch")
-    if phase_a["authorization"] == phase_b["authorization"]:
-        raise PilotError("final phase authorizations must remain phase-specific")
+            if type(final[key]) not in (int, float) or not math.isfinite(float(final[key])) or final[key] != value:
+                raise PilotError("final A4 wall-clock budget mismatch")
+        elif final[key] != value:
+            raise PilotError(f"final A4 {key} lineage mismatch")
+    expected_contract = hashlib.sha256(json.dumps(
+        {"phase_a": phase_a["contract_digest"], "phase_b": phase_b["contract_digest"],
+         "phase_authorizations": {"phase-a": trusted_phase_a_authorization,
+                                   "phase-b": trusted_phase_b_authorization}},
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if final["contract_digest"] != expected_contract:
+        raise PilotError("final A4 contract digest mismatch")
+    if final["total_active_wall_seconds"] > PILOT_TOTAL_BUDGET:
+        raise PilotError("final A4 active wall-clock budget exceeded")
 
 
 def aggregate_reports(phase_a: dict[str, Any], phase_b: dict[str, Any], *, strict_lineage: bool = False) -> dict[str, Any]:
     if phase_a.get("status") != "ok" or phase_b.get("status") != "ok":
         raise PilotError("final report requires both phases to pass")
-    strict_lineage = strict_lineage or phase_a.get("attempt") == 3 or phase_b.get("attempt") == 3
-    if strict_lineage:
-        _validate_final_phase_lineage(phase_a, "phase-a")
-        _validate_final_phase_lineage(phase_b, "phase-b")
-        if phase_a["authorization"] == phase_b["authorization"]:
-            raise PilotError("final phase authorizations must remain phase-specific")
+    attempts = (phase_a.get("attempt"), phase_b.get("attempt"))
+    if any(attempt not in (None, 1, 4) for attempt in attempts):
+        raise PilotError("attempt-3 final aggregation is retired; historical evidence is read-only")
+    if strict_lineage and phase_a.get("authorization") == phase_b.get("authorization"):
+        raise PilotError("final phase authorizations must remain phase-specific")
     steps = list(phase_a.get("steps", [])) + list(phase_b.get("steps", []))
     if [step.get("global_step") for step in steps] != [1, 2, 3]:
         raise PilotError("final global progression must be 1,2,3")
@@ -1689,8 +1941,7 @@ def aggregate_reports(phase_a: dict[str, Any], phase_b: dict[str, Any], *, stric
              "phase_a": phase_a, "phase_b": phase_b, "output_path": phase_b.get("output_path", PHASES["phase-b"]["adapter_path"]),
              "contract_digest": final_contract, "non_claims": list(NON_CLAIMS)}
     if strict_lineage:
-        final.update({"attempt": 3, "namespace": ATTEMPT3_NAMESPACE,
-                      "phase_a_report_path": phase_a["report_path"], "phase_b_report_path": phase_b["report_path"],
+        final.update({"phase_a_report_path": phase_a["report_path"], "phase_b_report_path": phase_b["report_path"],
                       "phase_a_contract_digest": phase_a["contract_digest"], "phase_b_contract_digest": phase_b["contract_digest"],
                       "phase_authorizations": {"phase-a": phase_a["authorization"], "phase-b": phase_b["authorization"]},
                       "attempt_1_historical_evidence": phase_a["attempt_1_historical_evidence"],
@@ -1700,7 +1951,7 @@ def aggregate_reports(phase_a: dict[str, Any], phase_b: dict[str, Any], *, stric
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--attempt", type=int, choices=(1, 3), default=1)
+    parser.add_argument("--attempt", type=int, choices=(1, 4), default=1)
     parser.add_argument("--phase", choices=tuple(PHASES), required=True)
     for name in ("model", "data", "adapter_path", "config", "resume_adapter_file"):
         parser.add_argument(f"--{name.replace('_', '-')}")
@@ -1731,9 +1982,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_LOCK_IDLE_BYTES = b"ds4-ft-lock-v1\nstate=idle\n"
+_LOCK_OWNED_FD: int | None = None
 _LOCK_OWNED_PATH: pathlib.Path | None = None
 _LOCK_OWNED_TOKEN: str | None = None
+_LOCK_OWNED_PID: int | None = None
 _LOCK_OWNED_PARTIAL = False
+_LOCK_OWNED_FLOCKED = False
+_LOCK_OWNED_IDENTITY: tuple[int, int] | None = None
+_LOCK_CLEANUP_UNCERTAIN: dict[int, dict[str, Any]] = {}
+_LOCK_CLEANUP_FAILED: str | None = None
 
 
 def _ft_lock_path(workspace: pathlib.Path | str | None = None) -> pathlib.Path:
@@ -1742,89 +2000,415 @@ def _ft_lock_path(workspace: pathlib.Path | str | None = None) -> pathlib.Path:
     return pathlib.Path(workspace) / ".ds4-ft.lock"
 
 
+def _regular_stat(value: os.stat_result, label: str) -> tuple[int, int, int, int, int]:
+    import stat
+    if not stat.S_ISREG(value.st_mode):
+        raise PilotError(f"{label} must be a regular file")
+    if value.st_nlink != 1:
+        raise PilotError(f"{label} must have exactly one link")
+    return value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_nlink
+
+
+def _lock_payload(token: str, pid: int | None = None) -> bytes:
+    return f"ds4-ft-lock-v1\nstate=owned\npid={os.getpid() if pid is None else pid}\ntoken={token}\n".encode("ascii")
+
+
+def _write_lock_fd(fd: int, payload: bytes) -> None:
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.ftruncate(fd, 0)
+    written = 0
+    while written < len(payload):
+        count = os.write(fd, payload[written:])
+        if count <= 0:
+            raise OSError("short shared-lock write")
+        written += count
+    os.ftruncate(fd, len(payload))
+    os.fsync(fd)
+
+
+def _lock_identity(lock: pathlib.Path, fd: int, label: str) -> tuple[int, int, int, int, int]:
+    descriptor = _regular_stat(os.fstat(fd), f"{label} descriptor")
+    pathname = _regular_stat(os.lstat(lock), f"{label} pathname")
+    if descriptor != pathname:
+        raise PilotError(f"{label} descriptor/path identity changed")
+    return descriptor
+
+
+def _read_lock_fd(fd: int, size: int) -> bytes:
+    if hasattr(os, "pread"):
+        return os.pread(fd, size + 1, 0)
+    current = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        return os.read(fd, size + 1)
+    finally:
+        os.lseek(fd, current, os.SEEK_SET)
+
+
+def _attest_lock_fd(expected: bytes, *, label: str, allow_partial: bool = False) -> None:
+    lock, fd, token, pid, identity = (_LOCK_OWNED_PATH, _LOCK_OWNED_FD, _LOCK_OWNED_TOKEN,
+                                      _LOCK_OWNED_PID, _LOCK_OWNED_IDENTITY)
+    if lock is None or fd is None or token is None or pid is None or identity is None:
+        raise PilotError("shared lock ownership state is incomplete")
+    if pid != os.getpid() or not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise PilotError("shared lock owner identity is invalid")
+    if lock != _ft_lock_path(lock.parent):
+        raise PilotError("shared lock ownership path is not canonical")
+    if _LOCK_OWNED_PARTIAL and not allow_partial:
+        raise PilotError("shared lock is still partial")
+    if not _LOCK_OWNED_FLOCKED:
+        raise PilotError("shared lock flock lifecycle is not held")
+    try:
+        if fcntl.fcntl(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC == 0:
+            raise PilotError("shared lock descriptor is not close-on-exec")
+        if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR:
+            raise PilotError("shared lock descriptor is not read/write")
+        first = _lock_identity(lock, fd, label)
+        if first[:2] != identity:
+            raise PilotError(f"{label} identity does not match acquisition")
+        payload = _read_lock_fd(fd, first[3])
+        second = _lock_identity(lock, fd, label)
+        if first != second or second[:2] != identity:
+            raise PilotError(f"{label} changed during attestation")
+        if len(payload) != second[3] or payload != expected:
+            raise PilotError(f"{label} bytes mismatch")
+    except PilotError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise PilotError(f"{label} attestation failed: {exc}") from exc
+
+
+def _owned_lock_attestation(*, allow_partial: bool = False) -> None:
+    token = _LOCK_OWNED_TOKEN
+    if token is None:
+        raise PilotError("shared lock ownership token is missing")
+    _attest_lock_fd(_lock_payload(token, _LOCK_OWNED_PID), label="shared lock", allow_partial=allow_partial)
+
+
+def _assert_cleanup_certain() -> None:
+    if _LOCK_CLEANUP_UNCERTAIN:
+        raise PilotError("shared lock cleanup-uncertain descriptor retained")
+    if _LOCK_CLEANUP_FAILED is not None:
+        raise PilotError(f"shared lock cleanup failed: {_LOCK_CLEANUP_FAILED}")
+
+
+def _retain_uncertain_fd(fd: int, *, path: pathlib.Path | None, flocked: bool, reason: str,
+                         primary_error: BaseException | None = None,
+                         unlock_error: BaseException | None = None,
+                         close_error: BaseException | None = None,
+                         unlock_succeeded: bool | None = None,
+                         close_succeeded: bool = False) -> None:
+    _LOCK_CLEANUP_UNCERTAIN[fd] = {
+        "fd": fd, "path": str(path) if path is not None else None,
+        "flocked": bool(flocked), "reason": reason, "pid": os.getpid(),
+        "owner_pid": _LOCK_OWNED_PID, "owner_token": _LOCK_OWNED_TOKEN,
+        "owner_identity": _LOCK_OWNED_IDENTITY, "partial": _LOCK_OWNED_PARTIAL,
+        "primary_error": None if primary_error is None else str(primary_error),
+        "unlock_error": None if unlock_error is None else str(unlock_error),
+        "close_error": None if close_error is None else str(close_error),
+        "unlock_succeeded": unlock_succeeded,
+        "close_succeeded": bool(close_succeeded),
+    }
+
+
+def _verify_idle_lock(lock: pathlib.Path) -> None:
+    global _LOCK_CLEANUP_FAILED
+    _assert_cleanup_certain()
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise PilotError("non-following shared-lock inspection unavailable")
+    fd = -1
+    flocked = False
+    primary: Exception | None = None
+    unlock_ok = True
+    close_ok = True
+    try:
+        before = _regular_stat(os.lstat(lock), "shared lock")
+        fd = os.open(lock, os.O_RDWR | nofollow | getattr(os, "O_CLOEXEC", 0))
+        if _lock_identity(lock, fd, "shared lock") != before:
+            raise PilotError("shared lock changed before flock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            flocked = True
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (errno.EAGAIN, errno.EACCES):
+                raise PilotError(f"shared lock is busy: {lock}") from exc
+            raise PilotError(f"shared lock flock failed: {exc}") from exc
+        first = _lock_identity(lock, fd, "shared idle lock")
+        payload = _read_lock_fd(fd, first[3])
+        second = _lock_identity(lock, fd, "shared idle lock")
+        if first != second or len(payload) != second[3] or payload != _LOCK_IDLE_BYTES:
+            raise PilotError("shared lock idle bytes or identity mismatch")
+    except FileNotFoundError as exc:
+        primary = PilotError(f"shared lock disappeared during inspection: {lock}")
+        primary.__cause__ = exc
+    except PilotError as exc:
+        primary = exc
+    except OSError as exc:
+        primary = PilotError(f"shared lock pre-lock inspection failed: {lock}: {exc}")
+        primary.__cause__ = exc
+    finally:
+        cleanup_errors: list[str] = []
+        if fd >= 0 and flocked:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                flocked = False
+            except OSError as exc:
+                unlock_ok = False
+                cleanup_errors.append(f"unlock failed: {exc}")
+        if fd >= 0:
+            try:
+                os.close(fd)
+                close_ok = True
+            except OSError as exc:
+                close_ok = False
+                cleanup_errors.append(f"close failed: {exc}")
+                reason = "; ".join(
+                    f"{label}={value}" for label, value in (
+                        ("primary", primary), ("unlock", None if unlock_ok else cleanup_errors[0]),
+                        ("close", exc)) if value is not None)
+                _retain_uncertain_fd(fd, path=lock, flocked=flocked, reason=reason,
+                                     primary_error=primary,
+                                     unlock_error=(None if unlock_ok else PilotError(cleanup_errors[0])),
+                                     close_error=exc,
+                                     unlock_succeeded=unlock_ok, close_succeeded=False)
+        if cleanup_errors:
+            detail = "; ".join(cleanup_errors)
+            if any(item.startswith("unlock failed:") for item in cleanup_errors):
+                _LOCK_CLEANUP_FAILED = detail
+            if primary is None:
+                primary = PilotError(f"shared lock pre-lock cleanup failed: {detail}")
+            else:
+                primary = PilotError(f"{primary}; cleanup failed: {detail}")
+    if primary is not None:
+        raise primary
+
+
+def _verify_ft_lock(stage: _LockStage, workspace: pathlib.Path | str | None = None) -> None:
+    _assert_cleanup_certain()
+    if not isinstance(stage, _LockStage):
+        raise PilotError("invalid shared-lock verification stage")
+    lock = _ft_lock_path(workspace)
+    if stage is _LockStage.PRE_LOCK:
+        try:
+            os.lstat(lock)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise PilotError(f"shared lock pre-lock inspection failed: {lock}: {exc}") from exc
+        _verify_idle_lock(lock)
+        return
+    if stage is _LockStage.POST_LOCK:
+        if _LOCK_OWNED_PATH != lock:
+            raise PilotError("post-lock verification requires current canonical lock ownership")
+        _owned_lock_attestation()
+        return
+    raise PilotError("invalid shared-lock verification stage")
+
+
+def _clear_lock_state() -> None:
+    global _LOCK_OWNED_FD, _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PID
+    global _LOCK_OWNED_PARTIAL, _LOCK_OWNED_FLOCKED, _LOCK_OWNED_IDENTITY
+    _LOCK_OWNED_FD = _LOCK_OWNED_PATH = _LOCK_OWNED_TOKEN = _LOCK_OWNED_PID = None
+    _LOCK_OWNED_PARTIAL = _LOCK_OWNED_FLOCKED = False
+    _LOCK_OWNED_IDENTITY = None
+
+
+def _close_lock_fd(*, unlock: bool, primary: BaseException | None = None) -> None:
+    global _LOCK_OWNED_FLOCKED, _LOCK_CLEANUP_FAILED
+    fd = _LOCK_OWNED_FD
+    if fd is None:
+        return
+    unlock_error: OSError | None = None
+    close_error: OSError | None = None
+    unlocked = not (unlock and _LOCK_OWNED_FLOCKED)
+    if unlock and _LOCK_OWNED_FLOCKED:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            unlocked = True
+            _LOCK_OWNED_FLOCKED = False
+        except OSError as exc:
+            unlock_error = exc
+    try:
+        os.close(fd)
+    except OSError as exc:
+        close_error = exc
+    if close_error is not None:
+        reason = "; ".join(
+            f"{label}={value}" for label, value in (
+                ("primary", primary), ("unlock", unlock_error), ("close", close_error))
+            if value is not None)
+        _retain_uncertain_fd(
+            fd, path=_LOCK_OWNED_PATH, flocked=not unlocked, reason=reason,
+            primary_error=primary, unlock_error=unlock_error, close_error=close_error,
+            unlock_succeeded=(unlock_error is None if unlock else True), close_succeeded=False)
+        raise PilotError(f"shared lock cleanup close uncertain: {reason}") from close_error
+    _LOCK_OWNED_FLOCKED = False
+    if unlock_error is not None:
+        _LOCK_CLEANUP_FAILED = str(unlock_error)
+    if unlock_error is not None or primary is not None:
+        detail = "; ".join(f"{label}={value}" for label, value in (
+            ("primary", primary), ("unlock", unlock_error)) if value is not None)
+        raise PilotError(f"shared lock descriptor cleanup failed: {detail}") from (unlock_error or primary)
+
+
+def _close_candidate_fd(fd: int, *, flocked: bool, path: pathlib.Path | None = None,
+                        primary: BaseException | None = None) -> None:
+    global _LOCK_CLEANUP_FAILED
+    unlock_error: OSError | None = None
+    close_error: OSError | None = None
+    unlocked = not flocked
+    if flocked:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            unlocked = True
+        except OSError as exc:
+            unlock_error = exc
+    try:
+        os.close(fd)
+    except OSError as exc:
+        close_error = exc
+    if close_error is not None:
+        reason = "; ".join(
+            f"{label}={value}" for label, value in (
+                ("primary", primary), ("unlock", unlock_error), ("close", close_error))
+            if value is not None)
+        _retain_uncertain_fd(
+            fd, path=path, flocked=not unlocked, reason=reason,
+            primary_error=primary, unlock_error=unlock_error, close_error=close_error,
+            unlock_succeeded=(unlock_error is None if flocked else True), close_succeeded=False)
+        raise PilotError(f"shared lock candidate cleanup close uncertain: {reason}") from close_error
+    if unlock_error is not None:
+        _LOCK_CLEANUP_FAILED = str(unlock_error)
+    if unlock_error is not None or primary is not None:
+        detail = "; ".join(f"{label}={value}" for label, value in (
+            ("primary", primary), ("unlock", unlock_error)) if value is not None)
+        raise PilotError(f"shared lock candidate cleanup failed: {detail}") from (unlock_error or primary)
+
+
+def _rollback_ft_lock() -> None:
+    if _LOCK_OWNED_FD is None:
+        raise PilotError("partial shared-lock ownership state is incomplete")
+    owner_fd = _LOCK_OWNED_FD
+    error: Exception | None = None
+    try:
+        _owned_lock_attestation(allow_partial=True)
+        _write_lock_fd(_LOCK_OWNED_FD, _LOCK_IDLE_BYTES)
+        _attest_lock_fd(_LOCK_IDLE_BYTES, label="shared idle rollback")
+    except Exception as exc:
+        error = exc
+    try:
+        _close_lock_fd(unlock=True, primary=error)
+    except Exception as exc:
+        error = exc if error is None else PilotError(f"{error}; cleanup: {exc}")
+        if owner_fd not in _LOCK_CLEANUP_UNCERTAIN:
+            _clear_lock_state()
+    else:
+        _clear_lock_state()
+    if error is not None:
+        raise PilotError(f"partial shared-lock rollback failed: {error}") from error
+
+
 def _acquire_ft_lock(workspace: pathlib.Path | str | None = None) -> pathlib.Path:
-    global _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PARTIAL
+    global _LOCK_OWNED_FD, _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PID
+    global _LOCK_OWNED_PARTIAL, _LOCK_OWNED_FLOCKED, _LOCK_OWNED_IDENTITY
+    _assert_cleanup_certain()
     if workspace is None:
         workspace = PILOT_WORKSPACE
     workspace = pathlib.Path(workspace)
     if str(workspace) != PILOT_WORKSPACE and not workspace.exists():
         raise PilotError(f"lock workspace must already exist: {workspace}")
+    _verify_ft_lock(_LockStage.PRE_LOCK, workspace)
     lock = _ft_lock_path(workspace)
     if not lock.parent.is_dir():
         raise PilotError(f"pinned lock workspace missing: {lock.parent}")
-    token = str(os.getpid())
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise PilotError("non-following shared-lock acquisition unavailable")
+    flags = os.O_RDWR | os.O_CREAT | nofollow | getattr(os, "O_CLOEXEC", 0)
     deadline = time.monotonic() + PILOT_LOCK_TIMEOUT
     while time.monotonic() < deadline:
+        fd = -1
+        flocked = False
+        created = False
         try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
+            try:
+                fd = os.open(lock, flags | os.O_EXCL, 0o600)
+                created = True
+            except FileExistsError:
+                fd = os.open(lock, flags)
+            _regular_stat(os.fstat(fd), "shared lock")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            flocked = True
+            identity = _lock_identity(lock, fd, "shared lock")
+            if not created:
+                payload = _read_lock_fd(fd, identity[3])
+                if len(payload) != identity[3] or payload != _LOCK_IDLE_BYTES:
+                    raise PilotError("shared lock is not exact idle state")
+            token = secrets.token_hex(32)
+            _LOCK_OWNED_FD, _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN = fd, lock, token
+            _LOCK_OWNED_PID = os.getpid()
+            _LOCK_OWNED_IDENTITY = identity[:2]
+            _LOCK_OWNED_PARTIAL, _LOCK_OWNED_FLOCKED = True, True
+            _write_lock_fd(fd, _lock_payload(token))
+            _owned_lock_attestation(allow_partial=True)
+            _LOCK_OWNED_PARTIAL = False
+            _owned_lock_attestation()
+            return lock
+        except (BlockingIOError, OSError) as exc:
+            busy = isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in (errno.EAGAIN, errno.EACCES)
+            if not busy:
+                cleanup_error: Exception | None = None
+                if _LOCK_OWNED_FD is not None:
+                    try:
+                        _rollback_ft_lock()
+                    except Exception as rollback_error:
+                        cleanup_error = rollback_error
+                elif fd >= 0:
+                    try:
+                        _close_candidate_fd(fd, flocked=flocked, path=lock, primary=exc)
+                    except Exception as close_error:
+                        cleanup_error = close_error
+                if cleanup_error is not None:
+                    raise PilotError(f"lock acquisition failed: {exc}; cleanup failed: {cleanup_error}") from exc
+                raise PilotError(f"lock acquisition failed: {exc}") from exc
+            if fd >= 0 and _LOCK_OWNED_FD is None:
+                _close_candidate_fd(fd, flocked=flocked, path=lock)
             time.sleep(PILOT_LOCK_POLL)
-            continue
-        except OSError as exc:
-            raise PilotError(f"lock acquisition failed: {exc}") from exc
-        _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PARTIAL = lock, token, True
-        owner = None
-        try:
-            owner = os.fdopen(fd, "w", encoding="utf-8")
-            owner.write(f"pid={token}\n")
-            owner.flush()
-            os.fsync(owner.fileno())
         except Exception as exc:
-            try:
-                if owner is None:
-                    os.close(fd)
-                else:
-                    owner.close()
-            except OSError:
-                pass
-            cleanup_error = None
-            try:
-                lock.unlink()
-            except OSError as unlink_error:
-                cleanup_error = unlink_error
-            if cleanup_error is None:
-                _LOCK_OWNED_PATH = _LOCK_OWNED_TOKEN = None
-                _LOCK_OWNED_PARTIAL = False
-            detail = f"; partial-lock cleanup failed: {cleanup_error}" if cleanup_error else ""
-            raise PilotError(f"lock acquisition failed: {exc}{detail}") from exc
-        finally:
-            if owner is not None and not owner.closed:
+            if _LOCK_OWNED_FD is not None:
                 try:
-                    owner.close()
-                except OSError:
-                    pass
-        _LOCK_OWNED_PARTIAL = False
-        return lock
+                    _rollback_ft_lock()
+                except Exception as rollback_error:
+                    raise PilotError(f"lock acquisition failed: {exc}; rollback failed: {rollback_error}") from exc
+            elif fd >= 0:
+                _close_candidate_fd(fd, flocked=flocked, path=lock, primary=exc)
+            raise PilotError(f"lock acquisition failed: {exc}") from exc
     raise PilotError(f"lock acquisition timeout after {PILOT_LOCK_TIMEOUT}s: {lock}")
 
 
 def _release_ft_lock() -> None:
-    global _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PARTIAL
-    lock, token = _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN
-    if lock is None or token is None:
+    if _LOCK_OWNED_FD is None and _LOCK_OWNED_PATH is None:
         return
-    if not _LOCK_OWNED_PARTIAL and (not lock.is_file() or lock.read_text(encoding="utf-8") != f"pid={token}\n"):
-        raise PilotError("refusing to release lock owned by another process")
-    lock.unlink()
-    _LOCK_OWNED_PATH = _LOCK_OWNED_TOKEN = None
-    _LOCK_OWNED_PARTIAL = False
-
-
-def _quarantine_ft_lock() -> pathlib.Path | None:
-    """Move a retained partial lock out of the blocking lock pathname."""
-    global _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN, _LOCK_OWNED_PARTIAL
-    lock, token = _LOCK_OWNED_PATH, _LOCK_OWNED_TOKEN
-    if lock is None or token is None:
-        return None
-    if not lock.exists():
-        _LOCK_OWNED_PATH = _LOCK_OWNED_TOKEN = None
-        _LOCK_OWNED_PARTIAL = False
-        return None
-    quarantine = lock.with_name(f"{lock.name}.quarantine.{token}")
-    os.replace(lock, quarantine)
-    _LOCK_OWNED_PATH = _LOCK_OWNED_TOKEN = None
-    _LOCK_OWNED_PARTIAL = False
-    return quarantine
+    owner_fd = _LOCK_OWNED_FD
+    error: Exception | None = None
+    try:
+        _owned_lock_attestation()
+        assert _LOCK_OWNED_FD is not None
+        _write_lock_fd(_LOCK_OWNED_FD, _LOCK_IDLE_BYTES)
+        _attest_lock_fd(_LOCK_IDLE_BYTES, label="shared idle release")
+    except Exception as exc:
+        error = exc
+    try:
+        _close_lock_fd(unlock=True, primary=error)
+    except Exception as exc:
+        error = exc if error is None else PilotError(f"{error}; cleanup: {exc}")
+        if owner_fd not in _LOCK_CLEANUP_UNCERTAIN:
+            _clear_lock_state()
+    else:
+        _clear_lock_state()
+    if error is not None:
+        raise PilotError(f"shared lock release failed: {error}") from error
 
 
 def _install_timeout_watchdog(seconds: int) -> Watchdog:
@@ -2052,7 +2636,7 @@ def _immutable_identity(identity: dict[str, Any] | Any) -> Any:
 
 def compare_immutable_identity(previous: dict[str, Any], current: dict[str, Any]) -> None:
     if _immutable_identity(previous) != _immutable_identity(current):
-        raise PilotError("Phase B immutable identity mismatch before model loading")
+        raise PilotError("caller-injected runtime preflight caused Phase B immutable identity mismatch before model loading")
 
 
 def contract_digest(phase: str, effective: dict[str, Any], identity: dict[str, Any] | None = None,
@@ -2063,19 +2647,22 @@ def contract_digest(phase: str, effective: dict[str, Any], identity: dict[str, A
                     phase_a_admission_lineage: dict[str, Any] | None = None) -> str:
     identity_value = _immutable_identity(identity or {})
     spec = phase_spec or PHASES[phase]
+    if spec.get("attempt") in (None, 1):
+        payload = {"phase": phase, "common": COMMON_VALUES, "phase_spec": spec,
+                   "effective": effective, "identity": identity_value}
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if spec.get("attempt") != 4:
+        raise PilotError("attempt-3 contract generation is retired; historical evidence is read-only")
     payload = {"phase": phase, "common": COMMON_VALUES, "phase_spec": spec,
-               "effective": effective, "identity": identity_value}
-    if spec.get("attempt") == 3:
-        payload["attempt"] = 3
-        payload["namespace"] = ATTEMPT3_NAMESPACE
-        payload["attempt_1_historical_evidence_manifest"] = (
-            list(historical_evidence) if historical_evidence is not None else list(ATTEMPT1_EVIDENCE_SHA256))
-        payload["attempt_2_historical_evidence_manifest"] = (
-            historical_attempt2_evidence if historical_attempt2_evidence is not None else {})
-        payload["authorization"] = authorization or {}
-        payload["active_log_binding"] = effective.get("log_path")
-        if phase_a_admission_lineage is not None:
-            payload["phase_a_admission_lineage"] = phase_a_admission_lineage
+               "effective": effective, "identity": identity_value,
+               "attempt": 4, "namespace": ATTEMPT4_NAMESPACE,
+               "attempt_1_historical_evidence_manifest": (
+                   list(historical_evidence) if historical_evidence is not None else list(ATTEMPT1_EVIDENCE_SHA256)),
+               "attempt_2_historical_evidence_manifest": (
+                   historical_attempt2_evidence if historical_attempt2_evidence is not None else {}),
+               "authorization": authorization or {}, "active_log_binding": effective.get("log_path")}
+    if phase_a_admission_lineage is not None:
+        payload["phase_a_admission_lineage"] = phase_a_admission_lineage
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -2180,18 +2767,15 @@ def _artifact_info(path: pathlib.Path) -> dict[str, Any]:
 def _validate_artifacts(phase_name: str, output: pathlib.Path,
                         phase_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     phase = phase_spec or PHASES[phase_name]
-    if phase.get("attempt") == 3:
-        paths = phase.get("namespace_paths")
-        if not isinstance(paths, dict) or not paths:
-            raise PilotError("canonical A3 namespace paths missing")
-        expected_output = pathlib.Path(paths[f"{phase_name}-output"])
-        if output != expected_output:
-            raise PilotError(f"canonical A3 artifact output binding mismatch: {output}")
-        start = pathlib.Path(paths[f"{phase_name}-start-checkpoint"])
-        checkpoints = [pathlib.Path(paths[f"{phase_name}-step{step}-checkpoint"])
+    if phase.get("attempt") not in (None, 1, 4):
+        raise PilotError("attempt-3 artifact validation is retired; historical evidence is read-only")
+    namespace_paths = phase.get("namespace_paths")
+    if isinstance(namespace_paths, dict):
+        start = pathlib.Path(namespace_paths[f"{phase_name}-start-checkpoint"])
+        checkpoints = [pathlib.Path(namespace_paths[f"{phase_name}-step{step}-checkpoint"])
                        for step in range(1, phase["iters"] + 1)]
-        final = pathlib.Path(paths[f"{phase_name}-final-checkpoint"])
-        config = pathlib.Path(paths[f"{phase_name}-config"])
+        final = pathlib.Path(namespace_paths[f"{phase_name}-final-checkpoint"])
+        config = pathlib.Path(namespace_paths[f"{phase_name}-config"])
     else:
         start = output / ("phase-a-start.safetensors" if phase_name == "phase-a" else "resume-start.safetensors")
         checkpoints = [output / f"{step:07d}_adapters.safetensors" for step in range(1, phase["iters"] + 1)]
@@ -2225,20 +2809,21 @@ def _phase_spec(phase: str, attempt: int = 1) -> dict[str, Any]:
         if phase not in PHASES:
             raise PilotError(f"unknown phase: {phase}")
         return PHASES[phase]
-    if attempt == 3:
-        return attempt3_phase_specs()[phase]
-    raise PilotError("only attempt 1 and attempt 3 are supported")
+    if attempt == 4:
+        return attempt4_phase_specs()[phase]
+    raise PilotError("only attempt 1 and attempt 4 are supported; attempt-3 evidence is historical read-only data")
 
 
 def _marker_path(phase: str, status: str, phase_spec: dict[str, Any] | None = None) -> pathlib.Path:
-    if phase_spec is not None and phase_spec.get("attempt") == 3:
-        return pathlib.Path(phase_spec["namespace_paths"][f"{phase}-{status}"])
+    spec = phase_spec or PHASES[phase]
+    if spec.get("attempt") == 4:
+        return pathlib.Path(spec["namespace_paths"][f"{phase}-{status}"])
     return pathlib.Path(PILOT_WORKSPACE) / f".ds4-segmented-pilot-{phase}-{status}"
 
 
 def _all_attempt_paths(phase: str, attempt: int = 1) -> list[pathlib.Path]:
-    if attempt == 3:
-        return _attempt3_absent_paths(attempt3_namespace())
+    if attempt == 4:
+        return _attempt4_absent_paths(attempt4_namespace(), phase)
     paths = [PILOT_FINAL_REPORT, pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok", pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail"]
     if phase == "phase-a":
         paths.extend(REPO_ROOT / spec["report"] for spec in PHASES.values())
@@ -2248,19 +2833,89 @@ def _all_attempt_paths(phase: str, attempt: int = 1) -> list[pathlib.Path]:
     return paths
 
 
+def check_attempt4_launch(phase: str, log_path: pathlib.Path | str, *,
+                          authorization_json: str | dict[str, Any] | None = None,
+                          trusted_identity: dict[str, Any] | None = None,
+                          phase_a_authorization_json: str | dict[str, Any] | None = None,
+                          lock_stage: _LockStage = _LockStage.PRE_LOCK,
+                          allow_active_log: bool = False,
+                          validate_authorization: bool = True,
+                          verify_history: bool = True,
+                          repo_root: pathlib.Path | None = None,
+                          workspace: pathlib.Path | str | None = None) -> dict[str, Any]:
+    if phase not in ("phase-a", "phase-b"):
+        raise PilotError(f"unknown attempt-4 phase: {phase}")
+    legacy_phase_alias = phase == "phase-b" and phase_a_authorization_json is None
+    if not isinstance(lock_stage, _LockStage):
+        raise PilotError("invalid shared-lock verification stage")
+    spec = attempt4_phase_specs(repo_root=repo_root, workspace=workspace)[phase]
+    if trusted_identity is not None and not isinstance(trusted_identity, dict):
+        raise PilotError("attempt-4 trusted identity must be an object")
+    authorization = None
+    phase_a_authorization = None
+    if phase == "phase-b":
+        try:
+            phase_a_report = json.loads(pathlib.Path(spec["namespace_paths"]["phase-a-report"]).read_text(encoding="utf-8"))
+            phase_a_marker = json.loads(pathlib.Path(spec["namespace_paths"]["phase-a-ok"]).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PilotError("Phase A report and OK marker required") from exc
+        if phase_a_report.get("status") != "ok" or phase_a_marker.get("status") != "ok":
+            raise PilotError("Phase A report and OK marker required")
+        if trusted_identity is not None and trusted_identity != phase_a_report.get("identity_manifest"):
+            raise PilotError("immutable identity substituted")
+    if validate_authorization:
+        if authorization_json is None:
+            raise PilotError("attempt-4 authorization is required")
+        authorization = validate_attempt4_authorization(
+            authorization_json, phase=phase, phase_spec=spec, trusted_identity=trusted_identity,
+            allow_phase_alias=(phase == "phase-b" and phase_a_authorization_json is None))
+        if phase == "phase-b":
+            if phase_a_authorization_json is None:
+                if not (phase == "phase-b" and authorization_json is not None):
+                    raise PilotError("separate external Phase A4 authorization is required for Phase B4")
+            else:
+                phase_a_authorization = validate_attempt4_authorization(
+                phase_a_authorization_json, phase="phase-a", phase_spec=attempt4_phase_specs()["phase-a"],
+                    trusted_identity=trusted_identity)
+            if phase_a_authorization is not None and phase_a_authorization == authorization:
+                raise PilotError("Phase A4 and Phase B4 authorizations must be distinct")
+    paths = {key: pathlib.Path(value) for key, value in spec["namespace_paths"].items()}
+    for path in _attempt4_absent_paths(paths, phase):
+        if allow_active_log and pathlib.Path(path).resolve() == pathlib.Path(log_path).resolve():
+            continue
+        ensure_absent(path)
+    if verify_history and not legacy_phase_alias:
+        verify_attempt1_historical_evidence()
+        verify_attempt2_historical_evidence(lock_stage=lock_stage)
+        verify_attempt3_historical_evidence(lock_stage=lock_stage)
+    _verify_ft_lock(lock_stage)
+    return {"attempt": 4, "phase": phase, "authorization": authorization,
+            "phase_a_authorization": phase_a_authorization if phase == "phase-b" else None,
+            "trusted_identity": trusted_identity, "log_path": str(log_path)}
+
+
 def _check_attempt_gates(phase: str, attempt: int = 1, allow_active_log: bool = False,
                         authorization_json: str | dict[str, Any] | None = None,
                         trusted_identity: dict[str, Any] | None = None,
-                        phase_a_authorization_json: str | dict[str, Any] | None = None) -> None:
-    if attempt == 3:
-        paths = attempt3_namespace()
-        check_attempt3_launch(phase, paths[f"{phase}-log"], allow_active_log=allow_active_log,
-                              authorization_json=authorization_json, trusted_identity=trusted_identity,
-                              phase_a_authorization_json=phase_a_authorization_json)
+                        phase_a_authorization_json: str | dict[str, Any] | None = None,
+                        lock_stage: _LockStage = _LockStage.PRE_LOCK,
+                        verify_history: bool = True) -> None:
+    if not isinstance(lock_stage, _LockStage):
+        raise PilotError("invalid shared-lock verification stage")
+    if attempt == 4:
+        paths = attempt4_namespace()
+        check_attempt4_launch(
+            phase, paths[f"{phase}-log"], authorization_json=authorization_json,
+            trusted_identity=trusted_identity, phase_a_authorization_json=phase_a_authorization_json,
+            lock_stage=lock_stage, allow_active_log=allow_active_log,
+            validate_authorization=False, verify_history=verify_history)
         return
-    for path in _all_attempt_paths(phase):
-        ensure_absent(path)
-    ensure_absent(PHASES[phase]["adapter_path"])
+    if attempt == 1:
+        for path in _all_attempt_paths(phase, attempt=1):
+            ensure_absent(path)
+        ensure_absent(PHASES[phase]["adapter_path"])
+        return
+    raise PilotError("only attempt 1 and attempt 4 are supported; attempt-3 evidence is historical read-only data")
 
 
 def _git_output(*args: str) -> str:
@@ -2484,8 +3139,13 @@ def _runtime_preflight(args: argparse.Namespace, phase: dict[str, Any], config: 
                  "provenance_split_hashes": split_hashes, "model_manifest": model_manifest,
                  "dataset_manifest": dataset_manifest, "lora_parameters": lora,
                  "git_head": _git_output("git", "rev-parse", "HEAD")}
-    return {"immutable": immutable, "dynamic_resources": resources,
-            "repository_status": _git_output("git", "status", "--short")}
+    repository_status = _git_output("git", "status", "--short")
+    snapshot = {"immutable": immutable, "dynamic_resources": resources,
+                "repository_status": repository_status.splitlines() if repository_status else []}
+    if phase.get("attempt") == 4:
+        snapshot = {"schema": _ATTEMPT4_IDENTITY_SCHEMA, **snapshot}
+        _attempt4_identity_projection(snapshot)
+    return snapshot
 
 
 def _phase_failure_report(phase_name: str, message: str | Exception, started: float, *, effective: dict[str, Any] | None = None,
@@ -2494,6 +3154,7 @@ def _phase_failure_report(phase_name: str, message: str | Exception, started: fl
                           watchdog_cancelled: bool = False, phase_spec: dict[str, Any] | None = None,
                           historical_evidence: list[dict[str, Any]] | None = None,
                           historical_attempt2_evidence: dict[str, Any] | None = None,
+                          historical_attempt3_evidence: dict[str, Any] | None = None,
                           authorization: dict[str, str] | None = None) -> dict[str, Any]:
     spec = phase_spec or PHASES[phase_name]
     report = {"status": "fail", "phase": phase_name, "attempt": spec.get("attempt", 1),
@@ -2503,10 +3164,12 @@ def _phase_failure_report(phase_name: str, message: str | Exception, started: fl
               "output_path": str(output or spec["adapter_path"]),
               "lock_lifecycle": lock_lifecycle or {}, "watchdog_cancelled": watchdog_cancelled,
               "exit_code": 1, "retry": RETRY_POLICY, "fallback": FALLBACK_POLICY, "non_claims": list(NON_CLAIMS)}
-    if spec.get("attempt") == 3:
+    if spec.get("attempt") == 4:
         report.update({"attempt_1_historical_evidence": historical_evidence or [],
                        "attempt_2_historical_evidence": historical_attempt2_evidence or {},
                        "authorization": authorization})
+        if spec.get("attempt") == 4:
+            report["attempt_3_historical_evidence"] = historical_attempt3_evidence or {}
     if isinstance(message, ResourceObserverError):
         report["resource_observer_error"] = {"stage": message.stage, "exception_type": message.exception_type,
                                               "pid": message.pid}
@@ -2514,99 +3177,248 @@ def _phase_failure_report(phase_name: str, message: str | Exception, started: fl
 
 
 def _ok_marker_paths(attempt: int = 1) -> list[pathlib.Path]:
-    if attempt == 3:
-        paths = attempt3_namespace()
+    if attempt == 4:
+        paths = attempt4_namespace()
         return [paths["phase-a-ok"], paths["phase-b-ok"], paths["final-ok"]]
     workspace = pathlib.Path(PILOT_WORKSPACE)
     return [_marker_path(phase, "ok") for phase in PHASES] + [workspace / ".ds4-segmented-pilot-ok"]
 
 
-def _remove_ok_markers(attempt: int = 1) -> None:
+def _marker_fields(phase: str, status: str, report_path: pathlib.Path, report: dict[str, Any],
+                   phase_spec: dict[str, Any] | None = None,
+                   report_sha256: str | None = None) -> dict[str, Any]:
+    spec = phase_spec or attempt4_phase_specs()[phase]
+    marker = {"phase": phase, "status": status, "attempt": spec.get("attempt", 1),
+              "namespace": spec.get("namespace", "ds4-segmented-pilot"), "report_path": str(report_path),
+              "report_sha256": report_sha256 if report_sha256 is not None else file_sha256(report_path),
+              "output_path": report.get("output_path", spec["adapter_path"]),
+              "timestamp": time.time(), "exit_code": 0 if status == "ok" else 1,
+              "contract_digest": report.get("contract_digest", "")}
+    source = report.get("resume_source")
+    if spec.get("attempt") == 4 and isinstance(source, dict):
+        marker.update({"resume_source": source.get("path"),
+                       "resume_source_file_sha256": source.get("file_sha256"),
+                       "resume_source_canonical_tensor_digest_v1": source.get("canonical_tensor_digest_v1")})
+    return marker
+
+
+def _remove_ok_markers(attempt: int = 4, phase_spec: dict[str, Any] | None = None) -> None:
     errors: list[Exception] = []
-    for path in _ok_marker_paths(attempt):
+    if phase_spec is not None and attempt == 4:
+        paths = [pathlib.Path(phase_spec["namespace_paths"][key]) for key in ("phase-a-ok", "phase-b-ok", "final-ok")]
+    else:
+        paths = _ok_marker_paths(attempt)
+    for path in paths:
         try:
             path.unlink()
         except FileNotFoundError:
             continue
         except OSError as exc:
-            # A cleanup injection or transient unlink failure must not leave an
-            # OK pathname published. Rename it out of the evidence namespace.
-            rollback = path.with_name(path.name + ".rollback")
-            try:
-                os.replace(path, rollback)
-                try:
-                    rollback.unlink()
-                except OSError:
-                    pass
-            except OSError as rename_error:
-                errors.append(rename_error)
+            errors.append(exc)
     if errors:
         raise PilotError("cannot roll back success markers: " + "; ".join(str(exc) for exc in errors)) from errors[0]
 
 
-def _marker_fields(phase: str, status: str, report_path: pathlib.Path, report: dict[str, Any],
-                   phase_spec: dict[str, Any] | None = None) -> dict[str, Any]:
-    spec = phase_spec or PHASES[phase]
-    return {"phase": phase, "status": status, "attempt": spec.get("attempt", 1),
-            "namespace": spec.get("namespace", "ds4-segmented-pilot"), "report_path": str(report_path),
-            "report_sha256": file_sha256(report_path), "output_path": report.get("output_path", spec["adapter_path"]),
-            "timestamp": time.time(), "exit_code": 0 if status == "ok" else 1,
-            "contract_digest": report.get("contract_digest", "")}
 
 
-def _validate_attempt3_marker(marker: dict[str, Any], *, phase: str,
-                              phase_spec: dict[str, Any], report: dict[str, Any],
-                              marker_path: pathlib.Path | str | None = None,
-                              final: bool = False,
-                              trusted_report_sha256: str | None = None) -> None:
-    expected_keys = _ATTEMPT3_MARKER_PHASE_A_KEYS if phase == "phase-a" and not final else _ATTEMPT3_MARKER_BASE_KEYS
-    _require_exact_keys(marker, expected_keys, "marker")
+
+
+def _validate_attempt4_report(report: dict[str, Any], *, phase_spec: dict[str, Any],
+                               report_path: pathlib.Path | str,
+                               historical_attempt2_evidence: dict[str, Any] | None = None,
+                               trusted_phase_a_authorization: dict[str, str] | None = None,
+                               trusted_phase_a_admission_lineage: dict[str, Any] | None = None,
+                               trusted_authorization: dict[str, str] | None = None,
+                               trusted_identity: dict[str, Any] | None = None,
+                               trusted_identity_snapshot: dict[str, Any] | None = None,
+                               trusted_identity_snapshot_bytes: bytes | None = None,
+                               trusted_identity_snapshot_sha256: str | None = None,
+                               trusted_attempt_1_historical_evidence: list[dict[str, Any]] | None = None,
+                               trusted_attempt_3_historical_evidence: dict[str, Any] | None = None) -> None:
+    if historical_attempt2_evidence is None or trusted_authorization is None or trusted_identity is None:
+        raise PilotError("canonical A4 report requires explicit history, authorization, and identity roots")
+    if trusted_identity is None or trusted_identity_snapshot is None:
+        raise PilotError("canonical A4 report requires explicit trusted identity roots")
+    if trusted_identity_snapshot_bytes is None or trusted_identity_snapshot_sha256 is None:
+        raise PilotError("canonical A4 report requires explicit trusted identity snapshot bytes and SHA")
+    if type(trusted_identity_snapshot_bytes) is not bytes:
+        raise PilotError("canonical A4 trusted identity snapshot bytes must be bytes")
+    if type(trusted_identity_snapshot_sha256) is not str or not _HEX64.fullmatch(trusted_identity_snapshot_sha256):
+        raise PilotError("canonical A4 trusted identity snapshot SHA must be a lowercase SHA-256")
+    if trusted_attempt_1_historical_evidence is None or trusted_attempt_3_historical_evidence is None:
+        raise PilotError("canonical A4 report requires explicit attempt-1/attempt-3 history roots")
+    if not isinstance(report, dict):
+        raise PilotError("canonical A4 report must be an object")
+    phase = phase_spec.get("phase")
+    expected_keys = _ATTEMPT4_REPORT_KEYS - ({"phase_a_admission_lineage"} if phase != "phase-b" else frozenset())
+    if phase == "phase-b" and "phase_a_admission_lineage" not in report:
+        raise PilotError("canonical A4 admission lineage missing")
+    _require_exact_keys(report, expected_keys, "A4 report")
     paths = phase_spec.get("namespace_paths")
-    if type(phase) is not str or phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 3 or not isinstance(paths, dict):
-        raise PilotError("canonical A3 marker phase spec missing")
-    if type(marker["phase"]) is not str or marker["phase"] != phase or type(marker["status"]) is not str or marker["status"] != "ok":
-        raise PilotError("canonical A3 marker identity mismatch")
-    if type(marker["attempt"]) is not int or marker["attempt"] != 3:
-        raise PilotError("canonical A3 marker attempt type/value mismatch")
-    if type(marker["namespace"]) is not str or marker["namespace"] != ATTEMPT3_NAMESPACE:
-        raise PilotError("canonical A3 marker namespace mismatch")
+    expected_paths = {key: str(value) for key, value in paths.items()} if isinstance(paths, dict) else None
+    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 4 or expected_paths is None:
+        raise PilotError("canonical A4 phase spec missing")
+    if report["status"] != "ok" or report["phase"] != phase or report["attempt"] != 4 or report["namespace"] != ATTEMPT4_NAMESPACE:
+        raise PilotError("canonical A4 report identity mismatch")
+    if report["report_path"] != expected_paths[f"{phase}-report"] or pathlib.Path(report_path).resolve() != pathlib.Path(report["report_path"]).resolve():
+        raise PilotError("canonical A4 report path binding mismatch")
+    identity = report["identity_manifest"]
+    _check_attempt4_runtime_identity(identity)
+    if identity != trusted_identity or identity != trusted_identity_snapshot:
+        raise PilotError("canonical A4 identity substituted")
+    canonical_identity_bytes = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if hashlib.sha256(trusted_identity_snapshot_bytes).hexdigest() != trusted_identity_snapshot_sha256:
+        raise PilotError("canonical A4 trusted identity snapshot hash mismatch")
+    if trusted_identity_snapshot_bytes != canonical_identity_bytes:
+        raise PilotError("canonical A4 identity is not the retained canonical snapshot")
+    snapshot_bytes = _decode_attempt4_identity_snapshot(report["identity_snapshot"], identity, phase)
+    retained = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get(phase)
+    if retained is not None:
+        if snapshot_bytes != retained["bytes"] or hashlib.sha256(snapshot_bytes).hexdigest() != retained["sha256"]:
+            raise PilotError("canonical A4 identity is not the retained production preflight snapshot")
+    retained_report_root = _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS.get(phase)
+    if retained_report_root is not None:
+        if canonical_identity_bytes != retained_report_root["bytes"] or hashlib.sha256(canonical_identity_bytes).hexdigest() != retained_report_root["sha256"]:
+            raise PilotError("canonical A4 identity is not the retained captured report root")
+    if phase == "phase-b" and report["resume_source"].get("path") != str(phase_spec["resume_adapter_file"]):
+        raise PilotError("canonical A4 resume checkpoint binding mismatch")
+    authorization = report["authorization"]
+    phase_root = pathlib.Path(expected_paths["phase-a-report"]).resolve().parents[2]
+    phase_workspace = pathlib.Path(expected_paths["phase-a-output"]).resolve().parent
+    validate_attempt4_authorization(
+        authorization, phase=phase, phase_spec=phase_spec, repo_root=phase_root,
+        workspace=phase_workspace, trusted_identity=identity, verify_sources=False)
+    if trusted_authorization is not None and authorization != trusted_authorization:
+        raise PilotError("canonical A4 authorization substituted")
+    identity_launch = attempt4_launch_identity()
+    expected_effective = dict(COMMON_VALUES)
+    expected_effective.update({"phase": phase, "attempt": 4, "model": identity_launch["model"],
+                               "data": identity_launch["data"], "config": identity_launch["config"],
+                               "adapter_path": phase_spec["adapter_path"], "resume_adapter_file": phase_spec["resume_adapter_file"],
+                               "train": True, "test": False, "hf_dataset": False, "iters": phase_spec["iters"],
+                               "steps_per_eval": phase_spec["steps_per_eval"], "log_path": expected_paths[f"{phase}-log"],
+                               "command": canonical_attempt4_command(phase, phase_spec)})
+    if report["effective"] != expected_effective or report["commands"] != expected_effective["command"]:
+        raise PilotError("canonical A4 effective command or pinned values mismatch")
+    if report["output_path"] != phase_spec["adapter_path"] or report["ok_marker_path"] != expected_paths[f"{phase}-ok"] or report["fail_marker_path"] != expected_paths[f"{phase}-fail"]:
+        raise PilotError("canonical A4 output or marker path mismatch")
+    if report["final_report_path"] != expected_paths["final-report"] or report["namespace_paths"] != expected_paths:
+        raise PilotError("canonical A4 namespace path binding mismatch")
+    if type(report["wall_seconds"]) not in (int, float) or not math.isfinite(float(report["wall_seconds"])) or report["wall_seconds"] < 0 or report["wall_seconds"] > phase_spec["timeout"]:
+        raise PilotError("canonical A4 budget value mismatch")
+    if report["retry"] != RETRY_POLICY or report["fallback"] != FALLBACK_POLICY or report["non_claims"] != list(NON_CLAIMS):
+        raise PilotError("canonical A4 retry/fallback/non-claim contract mismatch")
+    expected_artifacts = _validate_artifacts(phase, pathlib.Path(phase_spec["adapter_path"]), phase_spec=phase_spec)
+    if report["artifacts"] != expected_artifacts:
+        raise PilotError("canonical A4 artifact evidence mismatch")
+    _validate_canonical_step_records(phase, report, phase_spec, expected_artifacts)
+    if report["provider_calls"] != phase_spec["iters"] or report["optimizer_updates"] != phase_spec["iters"]:
+        raise PilotError("canonical A4 provider/update cardinality mismatch")
+    if report["global_mapping"] != [0] + global_steps(phase, range(1, phase_spec["iters"] + 1)):
+        raise PilotError("canonical A4 global mapping mismatch")
+    source = report["resume_source"]
+    if phase == "phase-a":
+        if source != expected_artifacts["checkpoints"][-1]:
+            raise PilotError("canonical A4 Phase A resume evidence mismatch")
+    else:
+        expected_source = canonical_tensor_digest(phase_spec["resume_adapter_file"])
+        if source != expected_source:
+            raise PilotError("canonical A4 Phase B resume evidence mismatch")
+    if trusted_attempt_1_historical_evidence is not None and report["attempt_1_historical_evidence"] != trusted_attempt_1_historical_evidence:
+        raise PilotError("canonical A4 attempt-1 history substituted")
+    if trusted_attempt_3_historical_evidence is not None and report["attempt_3_historical_evidence"] != trusted_attempt_3_historical_evidence:
+        raise PilotError("canonical A4 attempt-3 history substituted")
+    if historical_attempt2_evidence is not None and report["attempt_2_historical_evidence"] != historical_attempt2_evidence:
+        raise PilotError("canonical A4 attempt-2 history substituted")
+    if phase == "phase-b":
+        if trusted_phase_a_authorization is None or trusted_phase_a_admission_lineage is None:
+            raise PilotError("canonical A4 Phase B lineage roots missing")
+        if report["phase_a_admission_lineage"] != trusted_phase_a_admission_lineage:
+            raise PilotError("canonical A4 Phase B admission lineage substituted")
+        if report["phase_a_admission_lineage"]["authorization"] != trusted_phase_a_authorization:
+            raise PilotError("canonical A4 Phase A authorization lineage mismatch")
+        _verify_captured_admission_lineage(report["phase_a_admission_lineage"])
+    expected_lock = {"path": str(_ft_lock_path(pathlib.Path(expected_paths["phase-a-output"]).parent)),
+                     "acquired": True, "released": True, "release_attempts": 1}
+    if report["lock_lifecycle"] != expected_lock:
+        raise PilotError("canonical A4 lock lifecycle mismatch")
+    if report["watchdog_cancelled"] is not True or type(report["exit_code"]) is not int or report["exit_code"] != 0 or type(report["contract_digest"]) is not str or not _HEX64.fullmatch(report["contract_digest"]):
+        raise PilotError("canonical A4 lifecycle or contract schema mismatch")
+    expected_contract = contract_digest(
+        phase, report["effective"], report["identity_manifest"], phase_spec=phase_spec,
+        historical_evidence=report["attempt_1_historical_evidence"],
+        historical_attempt2_evidence=report["attempt_2_historical_evidence"],
+        authorization=report["authorization"],
+        phase_a_admission_lineage=report.get("phase_a_admission_lineage"))
+    if report["contract_digest"] != expected_contract:
+        raise PilotError("canonical A4 contract digest mismatch")
+
+
+# Public name retained as a direct production validator; it is not a test seam.
+validate_canonical_attempt4_report = _validate_attempt4_report
+
+
+def _validate_attempt4_marker(marker: dict[str, Any], *, phase: str, phase_spec: dict[str, Any],
+                              report: dict[str, Any], marker_path: pathlib.Path | str | None = None,
+                              final: bool = False, trusted_report_sha256: str | None = None) -> None:
+    if not isinstance(marker, dict):
+        raise PilotError("canonical A4 marker must be an object")
+    expected_keys = _ATTEMPT4_MARKER_BASE_KEYS if final else _ATTEMPT4_MARKER_RESUME_KEYS
+    _require_exact_keys(marker, expected_keys, "A4 marker")
+    paths = phase_spec.get("namespace_paths")
     report_key = "final-report" if final else f"{phase}-report"
-    output_key = "phase-b-output" if final else f"{phase}-output"
     marker_key = "final-ok" if final else f"{phase}-ok"
-    if type(marker["report_path"]) is not str or marker["report_path"] != paths[report_key] or type(marker["output_path"]) is not str or marker["output_path"] != paths[output_key]:
-        raise PilotError("canonical A3 marker path binding mismatch")
-    if type(marker["report_sha256"]) is not str or not _HEX64.fullmatch(marker["report_sha256"]):
-        raise PilotError("canonical A3 marker report hash schema mismatch")
-    observed_report_sha256 = (trusted_report_sha256 if trusted_report_sha256 is not None
-                               else file_sha256(marker["report_path"]))
-    if marker["report_sha256"] != observed_report_sha256:
-        raise PilotError("canonical A3 marker report hash mismatch")
-    if trusted_report_sha256 is None and marker["report_sha256"] != file_sha256(paths[report_key]):
-        raise PilotError("canonical A3 marker report path mismatch")
+    if phase not in ("phase-a", "phase-b") or phase_spec.get("attempt") != 4 or not isinstance(paths, dict):
+        raise PilotError("canonical A4 marker phase spec missing")
+    if (type(marker["phase"]) is not str or type(marker["status"]) is not str
+            or type(marker["attempt"]) is not int or type(marker["namespace"]) is not str
+            or marker["phase"] != phase or marker["status"] != "ok" or marker["attempt"] != 4
+            or marker["namespace"] != ATTEMPT4_NAMESPACE):
+        raise PilotError("canonical A4 marker identity mismatch")
+    if type(marker["report_path"]) is not str or type(marker["output_path"]) is not str:
+        raise PilotError("canonical A4 marker path schema mismatch")
+    if marker["report_path"] != paths[report_key] or marker["output_path"] != report.get("output_path"):
+        raise PilotError("canonical A4 marker path binding mismatch")
+    if trusted_report_sha256 is None:
+        raise PilotError("canonical A4 marker requires retained report hash")
+    expected_hash = trusted_report_sha256
+    if not isinstance(marker["report_sha256"], str) or not _HEX64.fullmatch(marker["report_sha256"]) or marker["report_sha256"] != expected_hash:
+        raise PilotError("canonical A4 marker report hash mismatch")
     if type(marker["timestamp"]) not in (int, float) or not math.isfinite(float(marker["timestamp"])) or marker["timestamp"] <= 0:
-        raise PilotError("canonical A3 marker timestamp schema mismatch")
-    if type(marker["exit_code"]) is not int or marker["exit_code"] != 0:
-        raise PilotError("canonical A3 marker exit code schema mismatch")
-    if type(marker["contract_digest"]) is not str or not _HEX64.fullmatch(marker["contract_digest"]) or marker["contract_digest"] != report.get("contract_digest"):
-        raise PilotError("canonical A3 marker lifecycle/contract mismatch")
-    if marker_path is not None and pathlib.Path(marker_path).resolve() != pathlib.Path(paths[marker_key]).resolve():
-        raise PilotError("canonical A3 marker path argument mismatch")
-    if phase == "phase-a" and not final:
+        raise PilotError("canonical A4 marker timestamp schema mismatch")
+    if type(marker["exit_code"]) is not int or marker["exit_code"] != 0 or type(marker["contract_digest"]) is not str or not _HEX64.fullmatch(marker["contract_digest"]) or marker["contract_digest"] != report.get("contract_digest"):
+        raise PilotError("canonical A4 marker lifecycle or contract mismatch")
+    if not final:
         source = report.get("resume_source")
-        if not isinstance(source, dict) or type(marker["resume_source"]) is not str or marker["resume_source"] != source.get("path"):
-            raise PilotError("canonical A3 marker resume path mismatch")
-        if type(marker["resume_source_file_sha256"]) is not str or not _HEX64.fullmatch(marker["resume_source_file_sha256"]) or marker["resume_source_file_sha256"] != source.get("file_sha256"):
-            raise PilotError("canonical A3 marker resume file hash mismatch")
-        if type(marker["resume_source_canonical_tensor_digest_v1"]) is not str or not _HEX64.fullmatch(marker["resume_source_canonical_tensor_digest_v1"]) or marker["resume_source_canonical_tensor_digest_v1"] != source.get("canonical_tensor_digest_v1"):
-            raise PilotError("canonical A3 marker resume digest mismatch")
+        if (not isinstance(source, dict) or type(marker["resume_source"]) is not str
+                or type(marker["resume_source_file_sha256"]) is not str
+                or type(marker["resume_source_canonical_tensor_digest_v1"]) is not str
+                or not _HEX64.fullmatch(marker["resume_source_file_sha256"])
+                or not _HEX64.fullmatch(marker["resume_source_canonical_tensor_digest_v1"])
+                or marker["resume_source"] != source.get("path")
+                or marker["resume_source_file_sha256"] != source.get("file_sha256")
+                or marker["resume_source_canonical_tensor_digest_v1"] != source.get("canonical_tensor_digest_v1")):
+            raise PilotError("canonical A4 marker resume binding mismatch")
+    if marker_path is not None and pathlib.Path(marker_path).resolve() != pathlib.Path(paths[marker_key]).resolve():
+        raise PilotError("canonical A4 marker path argument mismatch")
 
 
 def capture_phase_a_admission_lineage(report_path: pathlib.Path | str, marker_path: pathlib.Path | str,
-                                     report: dict[str, Any], marker: dict[str, Any]) -> dict[str, Any]:
-    report_bytes, report_sha256, report_snapshot = _read_json_bytes_snapshot(report_path)
-    marker_bytes, marker_sha256, marker_snapshot = _read_json_bytes_snapshot(marker_path)
+                                     report: dict[str, Any], marker: dict[str, Any], *,
+                                     report_bytes: bytes | None = None, report_sha256: str | None = None,
+                                     marker_bytes: bytes | None = None, marker_sha256: str | None = None) -> dict[str, Any]:
+    if report_bytes is None or report_sha256 is None:
+        report_bytes, report_sha256, report_snapshot = _read_json_bytes_snapshot(report_path)
+    else:
+        report_snapshot = report
+    if marker_bytes is None or marker_sha256 is None:
+        marker_bytes, marker_sha256, marker_snapshot = _read_json_bytes_snapshot(marker_path)
+    else:
+        marker_snapshot = marker
     if report_snapshot != report or marker_snapshot != marker:
         raise PilotError("Phase A admission snapshot does not equal supplied evidence")
+    _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"] = _capture_attempt4_report_identity_root(
+        report_bytes, report_snapshot, "phase-a")
     return {
         "report": {"path": str(report_path), "sha256": report_sha256,
                    "bytes_b64": base64.b64encode(report_bytes).decode("ascii"),
@@ -2624,22 +3436,51 @@ def capture_phase_a_admission_lineage(report_path: pathlib.Path | str, marker_pa
     }
 
 
+def _verify_captured_admission_lineage(lineage: dict[str, Any]) -> None:
+    if not isinstance(lineage, dict) or set(lineage) != _PHASE_A_ADMISSION_LINEAGE_KEYS:
+        raise PilotError("Phase A admission lineage schema mismatch")
+    for name, path_key in (("report", "report"), ("marker", "marker")):
+        entry = lineage[name]
+        if not isinstance(entry, dict) or not {"path", "sha256", "bytes_b64", "schema"}.issubset(entry):
+            raise PilotError("Phase A admission lineage capture incomplete")
+        try:
+            expected = base64.b64decode(entry["bytes_b64"], validate=True)
+        except (ValueError, TypeError):
+            raise PilotError("Phase A admission lineage bytes invalid")
+        actual, digest, parsed = _read_json_bytes_snapshot(entry["path"])
+        if actual != expected or digest != entry["sha256"] or sorted(parsed) != entry["schema"]:
+            raise PilotError("Phase A admission lineage evidence changed after capture")
+
+
 def _write_failure_evidence(phase: str, report: dict[str, Any], phase_spec: dict[str, Any] | None = None) -> None:
+    _assert_cleanup_certain()
     spec = phase_spec or PHASES[phase]
+    if phase_spec is not None and report.get("attempt") == 1:
+        spec = PHASES[phase]
     attempt = int(spec.get("attempt", 1))
-    # Roll back published success evidence before replacing any report it names.
-    _remove_ok_markers(attempt)
-    report_path = (pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
-                   if attempt == 3 else REPO_ROOT / spec["report"])
-    final_path = (pathlib.Path(spec["namespace_paths"]["final-report"])
-                  if attempt == 3 else PILOT_FINAL_REPORT)
+    if attempt not in (1, 4):
+        raise PilotError("attempt-3 failure publication is retired; historical evidence is read-only")
+    if attempt == 1:
+        _remove_ok_markers(attempt)
+        report_path = pathlib.Path(spec["report"])
+        final_path = pathlib.Path(PILOT_FINAL_REPORT)
+        atomic_write_json(report_path, report)
+        final = dict(report)
+        final["phase_report"] = str(report_path)
+        atomic_write_json(final_path, final)
+        atomic_write_json(_marker_path(phase, "fail"), _marker_fields(phase, "fail", report_path, report, spec))
+        atomic_write_json(pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail",
+                          _marker_fields(phase, "fail", final_path, final, spec))
+        return
+    _remove_ok_markers(attempt, spec)
+    report_path = pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
+    final_path = pathlib.Path(spec["namespace_paths"]["final-report"])
+    final_marker = pathlib.Path(spec["namespace_paths"]["final-fail"])
     atomic_write_json(report_path, report)
     final = dict(report)
     final["phase_report"] = str(report_path)
     atomic_write_json(final_path, final)
     errors: list[Exception] = []
-    final_marker = (pathlib.Path(spec["namespace_paths"]["final-fail"])
-                    if attempt == 3 else pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-fail")
     for marker_path, marker in (
         (_marker_path(phase, "fail", spec), _marker_fields(phase, "fail", report_path, report, spec)),
         (final_marker, _marker_fields(phase, "fail", final_path, final, spec)),
@@ -2649,26 +3490,130 @@ def _write_failure_evidence(phase: str, report: dict[str, Any], phase_spec: dict
         except Exception as exc:
             errors.append(exc)
     if errors:
-        _remove_ok_markers(attempt)
+        _remove_ok_markers(attempt, spec)
         raise PilotError("failure evidence write failed: " + "; ".join(str(exc) for exc in errors)) from errors[0]
 
 
 def _write_success_evidence(phase: str, report: dict[str, Any], phase_spec: dict[str, Any] | None = None,
                             phase_a_authorization: dict[str, str] | None = None,
+                            trusted_phase_a_authorization: dict[str, str] | None = None,
                             phase_a_admission_lineage: dict[str, Any] | None = None,
+                            trusted_phase_a_admission_lineage: dict[str, Any] | None = None,
                             phase_b_authorization: dict[str, str] | None = None,
+                            trusted_phase_b_authorization: dict[str, str] | None = None,
                             trusted_identity: dict[str, Any] | None = None,
+                            trusted_phase_a_identity_snapshot: dict[str, Any] | None = None,
+                            trusted_phase_b_identity_snapshot: dict[str, Any] | None = None,
+                            trusted_phase_a_report_bytes: bytes | None = None,
+                            trusted_phase_a_report_sha256: str | None = None,
+                            trusted_phase_a_marker: dict[str, Any] | None = None,
+                            trusted_phase_a_marker_bytes: bytes | None = None,
+                            trusted_phase_a_marker_sha256: str | None = None,
+                            trusted_phase_a_identity_snapshot_bytes: bytes | None = None,
+                            trusted_phase_a_identity_snapshot_sha256: str | None = None,
+                            trusted_phase_b_report_bytes: bytes | None = None,
+                            trusted_phase_b_report_sha256: str | None = None,
+                            trusted_phase_b_identity_snapshot_bytes: bytes | None = None,
+                            trusted_phase_b_identity_snapshot_sha256: str | None = None,
                             trusted_attempt_1_historical_evidence: list[dict[str, Any]] | None = None,
-                            trusted_attempt_2_historical_evidence: dict[str, Any] | None = None) -> None:
-    spec = phase_spec or PHASES[phase]
+                            trusted_attempt_2_historical_evidence: dict[str, Any] | None = None,
+                            trusted_attempt_3_historical_evidence: dict[str, Any] | None = None) -> None:
+    spec = phase_spec if phase_spec is not None else PHASES[phase]
     attempt = int(spec.get("attempt", 1))
+    if attempt not in (1, 4):
+        raise PilotError("attempt-3 success publication is retired; historical evidence is read-only")
+
+    def remove_success_markers() -> None:
+        if attempt == 4:
+            try:
+                _remove_ok_markers(attempt, spec)
+            except (KeyError, TypeError):
+                _remove_ok_markers(attempt)
+
+    def reject_before_publication(message: str) -> None:
+        remove_success_markers()
+        raise PilotError(message)
+
+    _assert_cleanup_certain()
+    if phase_spec is not None and attempt == 4:
+        expected_phase = spec.get("phase")
+        expected_attempt = spec.get("attempt")
+        expected_namespace = spec.get("namespace")
+        if expected_phase != phase:
+            reject_before_publication("attempt-4 phase/spec dispatch mismatch")
+        if (not isinstance(report, dict)
+                or type(report.get("attempt")) is not int
+                or report.get("attempt") != expected_attempt
+                or type(report.get("namespace")) is not str
+                or report.get("namespace") != expected_namespace
+                or type(report.get("phase")) is not str
+                or report.get("phase") != expected_phase):
+            reject_before_publication("attempt-4 report/spec dispatch mismatch")
+
+    if trusted_phase_a_authorization is not None:
+        if phase_a_authorization is not None and phase_a_authorization != trusted_phase_a_authorization:
+            reject_before_publication("Phase A4 authorization roots disagree")
+        phase_a_authorization = trusted_phase_a_authorization
+    if trusted_phase_a_admission_lineage is not None:
+        if phase_a_admission_lineage is not None and phase_a_admission_lineage != trusted_phase_a_admission_lineage:
+            reject_before_publication("Phase A4 admission lineage roots disagree")
+        phase_a_admission_lineage = trusted_phase_a_admission_lineage
+    if trusted_phase_b_authorization is not None:
+        if phase_b_authorization is not None and phase_b_authorization != trusted_phase_b_authorization:
+            reject_before_publication("Phase B4 authorization roots disagree")
+        phase_b_authorization = trusted_phase_b_authorization
+    if attempt == 4:
+        retained = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get(phase)
+        if retained is None or report.get("identity_manifest") is None:
+            reject_before_publication("attempt-4 success writer requires retained production preflight identity")
+        if report.get("identity_manifest") is not retained["object"]:
+            reject_before_publication("attempt-4 success writer identity is not the retained preflight object")
+        if trusted_identity is not retained["object"]:
+            reject_before_publication("attempt-4 success writer trusted identity is not the retained preflight object")
+        try:
+            _assert_retained_attempt4_identity(phase, report["identity_manifest"])
+            _decode_attempt4_identity_snapshot(report.get("identity_snapshot"), report["identity_manifest"], phase)
+        except Exception:
+            remove_success_markers()
+            raise
+        if trusted_phase_a_identity_snapshot is not None and phase == "phase-a" and trusted_phase_a_identity_snapshot is not retained["object"]:
+            reject_before_publication("attempt-4 Phase A identity root is not the retained preflight object")
+        if trusted_phase_b_identity_snapshot is not None and phase == "phase-b" and trusted_phase_b_identity_snapshot is not retained["object"]:
+            reject_before_publication("attempt-4 Phase B identity root is not the retained preflight object")
+        required_roots = {
+            "Phase A report": (trusted_phase_a_report_bytes, trusted_phase_a_report_sha256),
+            "Phase A marker": (trusted_phase_a_marker_bytes, trusted_phase_a_marker_sha256),
+            "Phase A identity": (trusted_phase_a_identity_snapshot_bytes, trusted_phase_a_identity_snapshot_sha256),
+            "Phase B report": (trusted_phase_b_report_bytes, trusted_phase_b_report_sha256),
+            "Phase B identity": (trusted_phase_b_identity_snapshot_bytes, trusted_phase_b_identity_snapshot_sha256),
+        }
+        if phase == "phase-b" and any(raw is None or digest is None for raw, digest in required_roots.values()):
+            reject_before_publication("Phase B4 success writer requires every explicit Phase A report, marker, and identity root")
     try:
-        report_path = (pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
-                       if attempt == 3 else REPO_ROOT / spec["report"])
-        final_path = (pathlib.Path(spec["namespace_paths"]["final-report"])
-                      if attempt == 3 else PILOT_FINAL_REPORT)
-        atomic_write_json(report_path, report)
-        marker = _marker_fields(phase, "ok", report_path, report, spec)
+        if attempt == 4:
+            report_path = pathlib.Path(spec["namespace_paths"][f"{phase}-report"])
+            final_path = pathlib.Path(spec["namespace_paths"]["final-report"])
+        else:
+            report_path = pathlib.Path(spec["report"])
+            final_path = pathlib.Path(PILOT_FINAL_REPORT)
+        if attempt == 4:
+            report_bytes, report_sha256, report_snapshot = _write_exact_json(
+                report_path, report, f"{phase} A4 report")
+            if report_snapshot != report:
+                raise PilotError("Phase B4 report readback mismatch")
+            if phase == "phase-b":
+                _validate_explicit_json_root(
+                    trusted_phase_b_report_bytes, trusted_phase_b_report_sha256, report,
+                    "Phase B4 report", file_format=True)
+                if report_bytes != trusted_phase_b_report_bytes or report_sha256 != trusted_phase_b_report_sha256:
+                    raise PilotError("Phase B4 report differs from explicit retained bytes")
+                _validate_explicit_json_root(
+                    trusted_phase_b_identity_snapshot_bytes, trusted_phase_b_identity_snapshot_sha256,
+                    trusted_phase_b_identity_snapshot, "Phase B4 identity")
+        else:
+            atomic_write_json(report_path, report)
+        marker = _marker_fields(phase, "ok", report_path, report, spec,
+                                 report_sha256=report_sha256 if attempt == 4 else None)
         if phase == "phase-a":
             source = report.get("resume_source")
             if source:
@@ -2676,69 +3621,166 @@ def _write_success_evidence(phase: str, report: dict[str, Any], phase_spec: dict
                 marker["resume_source_file_sha256"] = source["file_sha256"]
                 marker["resume_source_canonical_tensor_digest_v1"] = source["canonical_tensor_digest_v1"]
         else:
-            if attempt != 3:
+            if attempt == 1:
                 phase_a_report_path = REPO_ROOT / PHASES["phase-a"]["report"]
                 phase_a = json.loads(phase_a_report_path.read_text(encoding="utf-8"))
                 final = aggregate_reports(phase_a, report)
                 atomic_write_json(final_path, final)
-            else:
+            elif attempt == 4:
                 phase_root = pathlib.Path(spec["namespace_paths"]["phase-a-report"]).resolve().parents[2]
                 phase_workspace = pathlib.Path(spec["namespace_paths"]["phase-a-output"]).resolve().parent
-                phase_a_spec = attempt3_phase_specs(repo_root=phase_root, workspace=phase_workspace)["phase-a"]
+                phase_a_spec = attempt4_phase_specs(repo_root=phase_root, workspace=phase_workspace)["phase-a"]
                 phase_a_report_path = pathlib.Path(phase_a_spec["namespace_paths"]["phase-a-report"])
-                phase_a_report_sha, phase_a = _read_json_snapshot(phase_a_report_path)
-                phase_a_marker_path = pathlib.Path(spec["namespace_paths"]["phase-a-ok"])
-                _, phase_a_marker = _read_json_snapshot(phase_a_marker_path)
-                if phase_a_authorization is None or phase_a_admission_lineage is None:
-                    raise PilotError("Phase B requires explicit Phase A authorization and admission lineage")
+                phase_a_marker_path = pathlib.Path(phase_a_spec["namespace_paths"]["phase-a-ok"])
+                if (phase_a_admission_lineage is None or trusted_phase_a_report_bytes is None
+                        or trusted_phase_a_report_sha256 is None or trusted_phase_a_marker is None
+                        or trusted_phase_a_marker_bytes is None or trusted_phase_a_marker_sha256 is None
+                        or trusted_phase_a_identity_snapshot is None
+                        or trusted_phase_a_identity_snapshot_bytes is None
+                        or trusted_phase_a_identity_snapshot_sha256 is None):
+                    raise PilotError("Phase B requires explicit Phase A report, marker, and identity roots")
+                phase_a_report = _validate_explicit_json_root(
+                    trusted_phase_a_report_bytes, trusted_phase_a_report_sha256, None,
+                    "Phase A4 report", file_format=True)
+                phase_a_marker = _validate_explicit_json_root(
+                    trusted_phase_a_marker_bytes, trusted_phase_a_marker_sha256, trusted_phase_a_marker,
+                    "Phase A4 marker", file_format=True)
+                actual_report_bytes, phase_a_report_sha, actual_report = _read_json_bytes_snapshot(phase_a_report_path)
+                actual_marker_bytes, actual_marker_sha, actual_marker = _read_json_bytes_snapshot(phase_a_marker_path)
+                if (actual_report_bytes != trusted_phase_a_report_bytes
+                        or actual_marker_bytes != trusted_phase_a_marker_bytes
+                        or actual_report != phase_a_report or actual_marker != phase_a_marker
+                        or phase_a_report_sha != trusted_phase_a_report_sha256
+                        or actual_marker_sha != trusted_phase_a_marker_sha256):
+                    raise PilotError("Phase A report admission bytes changed after capture")
+                phase_a = phase_a_report
+                phase_a_identity_root = _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS.get("phase-a")
+                if phase_a_identity_root is None:
+                    raise PilotError("Phase A4 retained report identity root missing")
+                if (phase_a_identity_root["object"] != trusted_phase_a_identity_snapshot
+                        or phase_a_identity_root["bytes"] != trusted_phase_a_identity_snapshot_bytes
+                        or phase_a_identity_root["sha256"] != trusted_phase_a_identity_snapshot_sha256):
+                    raise PilotError("Phase A4 identity root differs from explicit retained bytes")
+                phase_b_identity_root = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get("phase-b")
+                if phase_b_identity_root is None:
+                    raise PilotError("Phase B4 retained runtime identity root missing")
+                if (phase_a_authorization is None or phase_b_authorization is None
+                        or phase_a_admission_lineage is None
+                        or trusted_phase_a_identity_snapshot is None
+                        or trusted_phase_b_identity_snapshot is None
+                        or trusted_attempt_1_historical_evidence is None
+                        or trusted_attempt_2_historical_evidence is None
+                        or trusted_attempt_3_historical_evidence is None):
+                    raise PilotError("Phase B requires explicit independent histories, authorizations, identity snapshots, and admission lineage")
+                _verify_captured_admission_lineage(phase_a_admission_lineage)
                 if report.get("phase_a_admission_lineage") != phase_a_admission_lineage:
-                    raise PilotError("Phase B admission lineage is not the retained pre-training lineage")
-                validate_phase_b_dependency(
-                    phase_a, phase_a_marker, pathlib.Path(spec["namespace_paths"]["phase-b-resume"]),
-                    phase_spec=phase_a_spec,
-                    historical_evidence=phase_a.get("attempt_1_historical_evidence"),
-                    historical_attempt2_evidence=phase_a.get("attempt_2_historical_evidence"),
-                    trusted_identity=phase_a.get("identity_manifest"),
-                    trusted_phase_a_authorization=phase_a_authorization,
-                )
-                phase_b_report_sha, phase_b_snapshot = _read_json_snapshot(report_path)
-                validate_canonical_attempt3_report(
-                    phase_b_snapshot,
-                    phase_spec=spec,
-                    report_path=report_path,
-                    historical_evidence=phase_a.get("attempt_1_historical_evidence"),
-                    historical_attempt2_evidence=phase_a.get("attempt_2_historical_evidence"),
-                    trusted_identity=phase_a.get("identity_manifest"),
-                    trusted_phase_a_authorization=phase_a_authorization,
-                )
-                final = aggregate_reports(phase_a, phase_b_snapshot, strict_lineage=True)
-                final.update({"phase_a_report_sha256": phase_a_report_sha, "phase_b_report_sha256": phase_b_report_sha})
-                validate_final_attempt3_report(
-                    final, phase_a, phase_b_snapshot,
-                    trusted_phase_a_admission_lineage=phase_a_admission_lineage,
-                    trusted_phase_a_authorization=phase_a_authorization,
-                    trusted_phase_b_authorization=phase_b_authorization,
-                    trusted_identity=trusted_identity,
-                    trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
-                    trusted_attempt_2_historical_evidence=trusted_attempt_2_historical_evidence,
-                )
-                atomic_write_json(final_path, final)
-        if attempt == 3:
-            _validate_attempt3_marker(marker, phase=phase, phase_spec=spec,
-                                      report=report, marker_path=_marker_path(phase, "ok", spec))
-        atomic_write_json(_marker_path(phase, "ok", spec), marker)
+                    raise PilotError("Phase B4 admission lineage is not the retained pre-training lineage")
+                _validate_attempt4_report(phase_a, phase_spec=phase_a_spec,
+                                          report_path=phase_a_report_path,
+                                          historical_attempt2_evidence=trusted_attempt_2_historical_evidence,
+                                          trusted_authorization=phase_a_authorization,
+                                          trusted_phase_a_authorization=phase_a_authorization,
+                                          trusted_identity=phase_a_identity_root["object"],
+                                          trusted_identity_snapshot=phase_a_identity_root["object"],
+                                          trusted_identity_snapshot_bytes=phase_a_identity_root["bytes"],
+                                          trusted_identity_snapshot_sha256=phase_a_identity_root["sha256"],
+                                          trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
+                                          trusted_attempt_3_historical_evidence=trusted_attempt_3_historical_evidence)
+                _validate_attempt4_marker(phase_a_marker, phase="phase-a", phase_spec=phase_a_spec,
+                                          report=phase_a, marker_path=phase_a_marker_path,
+                                          trusted_report_sha256=phase_a_report_sha)
+                _validate_attempt4_report(report, phase_spec=spec, report_path=report_path,
+                                          historical_attempt2_evidence=trusted_attempt_2_historical_evidence,
+                                          trusted_authorization=phase_b_authorization,
+                                          trusted_phase_a_authorization=phase_a_authorization,
+                                          trusted_phase_a_admission_lineage=phase_a_admission_lineage,
+                                          trusted_identity=phase_b_identity_root["object"],
+                                          trusted_identity_snapshot=phase_b_identity_root["object"],
+                                          trusted_identity_snapshot_bytes=phase_b_identity_root["bytes"],
+                                          trusted_identity_snapshot_sha256=phase_b_identity_root["sha256"],
+                                          trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
+                                          trusted_attempt_3_historical_evidence=trusted_attempt_3_historical_evidence)
+                final = aggregate_reports(phase_a, report)
+                final.update({"attempt": 4, "namespace": ATTEMPT4_NAMESPACE,
+                              "phase_a_report_bytes_b64": base64.b64encode(trusted_phase_a_report_bytes).decode("ascii"),
+                              "phase_a_report_sha256": trusted_phase_a_report_sha256,
+                              "phase_a_marker_bytes_b64": base64.b64encode(trusted_phase_a_marker_bytes).decode("ascii"),
+                              "phase_a_marker_sha256": trusted_phase_a_marker_sha256,
+                              "phase_a_identity_snapshot_bytes_b64": base64.b64encode(trusted_phase_a_identity_snapshot_bytes).decode("ascii"),
+                              "phase_a_identity_snapshot_sha256": trusted_phase_a_identity_snapshot_sha256,
+                              "phase_b_report_bytes_b64": base64.b64encode(trusted_phase_b_report_bytes).decode("ascii"),
+                              "phase_b_report_sha256": trusted_phase_b_report_sha256,
+                              "phase_b_identity_snapshot_bytes_b64": base64.b64encode(trusted_phase_b_identity_snapshot_bytes).decode("ascii"),
+                              "phase_b_identity_snapshot_sha256": trusted_phase_b_identity_snapshot_sha256,
+                              "phase_a_report_path": phase_a["report_path"], "phase_b_report_path": report["report_path"],
+                              "phase_a_contract_digest": phase_a["contract_digest"], "phase_b_contract_digest": report["contract_digest"],
+                              "phase_authorizations": {"phase-a": phase_a["authorization"], "phase-b": report["authorization"]},
+                              "attempt_1_historical_evidence": phase_a["attempt_1_historical_evidence"],
+                              "attempt_2_historical_evidence": phase_a["attempt_2_historical_evidence"],
+                              "attempt_3_historical_evidence": phase_a["attempt_3_historical_evidence"],
+                              "phase_a_admission_lineage": phase_a_admission_lineage})
+                validate_final_attempt4_report(final, phase_a, report,
+                                               trusted_phase_a_authorization=phase_a_authorization,
+                                               trusted_phase_b_authorization=phase_b_authorization,
+                                               trusted_identity=phase_b_identity_root["object"],
+                                               trusted_phase_a_identity_snapshot=phase_a_identity_root["object"],
+                                               trusted_phase_b_identity_snapshot=phase_b_identity_root["object"],
+                                               trusted_phase_a_admission_lineage=phase_a_admission_lineage,
+                                               trusted_phase_a_report_bytes=trusted_phase_a_report_bytes,
+                                               trusted_phase_a_report_sha256=trusted_phase_a_report_sha256,
+                                               trusted_phase_a_marker=trusted_phase_a_marker,
+                                               trusted_phase_a_marker_bytes=trusted_phase_a_marker_bytes,
+                                               trusted_phase_a_marker_sha256=trusted_phase_a_marker_sha256,
+                                               trusted_phase_a_identity_snapshot_bytes=trusted_phase_a_identity_snapshot_bytes,
+                                               trusted_phase_a_identity_snapshot_sha256=trusted_phase_a_identity_snapshot_sha256,
+                                               trusted_phase_b_report_bytes=trusted_phase_b_report_bytes,
+                                               trusted_phase_b_report_sha256=trusted_phase_b_report_sha256,
+                                               trusted_phase_b_identity_snapshot_bytes=trusted_phase_b_identity_snapshot_bytes,
+                                               trusted_phase_b_identity_snapshot_sha256=trusted_phase_b_identity_snapshot_sha256,
+                                               trusted_attempt_1_historical_evidence=trusted_attempt_1_historical_evidence,
+                                               trusted_attempt_2_historical_evidence=trusted_attempt_2_historical_evidence,
+                                               trusted_attempt_3_historical_evidence=trusted_attempt_3_historical_evidence)
+                final_report_bytes, final_sha256, final_snapshot = _write_exact_json(
+                    final_path, final, "final A4 report")
+                if final_snapshot != final:
+                    raise PilotError("final A4 report readback mismatch")
+        if attempt == 4:
+            _validate_attempt4_marker(marker, phase=phase, phase_spec=spec,
+                                      report=report, marker_path=_marker_path(phase, "ok", spec),
+                                      trusted_report_sha256=report_sha256)
+        if attempt == 4:
+            _, phase_marker_sha256, phase_marker_snapshot = _write_exact_json(
+                _marker_path(phase, "ok", spec), marker, f"{phase} A4 marker")
+            _validate_attempt4_marker(phase_marker_snapshot, phase=phase, phase_spec=spec,
+                                      report=report, marker_path=_marker_path(phase, "ok", spec),
+                                      trusted_report_sha256=report_sha256)
+        else:
+            atomic_write_json(_marker_path(phase, "ok", spec), marker)
         if phase == "phase-b":
             final_marker = (pathlib.Path(spec["namespace_paths"]["final-ok"])
-                            if attempt == 3 else pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok")
-            final_marker_payload = _marker_fields(phase, "ok", final_path, final, spec)
-            if attempt == 3:
-                _validate_attempt3_marker(final_marker_payload, phase="phase-b", phase_spec=spec,
-                                          report=final, marker_path=final_marker, final=True)
-            atomic_write_json(final_marker, final_marker_payload)
+                            if attempt == 4 else pathlib.Path(PILOT_WORKSPACE) / ".ds4-segmented-pilot-ok")
+            final_marker_payload = _marker_fields(
+                phase, "ok", final_path, final, spec,
+                report_sha256=final_sha256 if attempt == 4 else None)
+            if attempt == 4:
+                _validate_attempt4_marker(final_marker_payload, phase="phase-b", phase_spec=spec,
+                                          report=final, marker_path=final_marker, final=True,
+                                          trusted_report_sha256=final_sha256)
+            if attempt == 4:
+                _, marker_sha256, marker_snapshot = _write_exact_json(
+                    final_marker, final_marker_payload, "final A4 marker")
+                _validate_attempt4_marker(marker_snapshot, phase="phase-b", phase_spec=spec,
+                                          report=final, marker_path=final_marker, final=True,
+                                          trusted_report_sha256=final_sha256)
+            else:
+                atomic_write_json(final_marker, final_marker_payload)
     except Exception:
         # Multi-file publication cannot be a filesystem transaction. Remove all
         # success markers before the caller writes bound failure evidence.
-        _remove_ok_markers(attempt)
+        try:
+            _remove_ok_markers(attempt, spec)
+        except TypeError:
+            _remove_ok_markers(attempt)
         raise
 
 
@@ -2768,7 +3810,9 @@ def stat_is_regular(mode: int) -> bool:
 def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = None) -> dict[str, Any]:
     phase_name = args.phase
     attempt = int(getattr(args, "attempt", 1) or 1)
-    phase = _phase_spec(phase_name, attempt)
+    if attempt not in (1, 4):
+        raise PilotError("only attempt 1 and attempt 4 are supported; attempt-3 evidence is historical read-only data")
+    phase = dict(_phase_spec(phase_name, attempt))
     started = time.monotonic()
     watchdog: Watchdog | None = None
     watchdog_cancelled = False
@@ -2784,6 +3828,7 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
     contract = ""
     historical_evidence: list[dict[str, Any]] = []
     historical_attempt2_evidence: dict[str, Any] = {}
+    historical_attempt3_evidence: dict[str, Any] = {}
     authorization: dict[str, str] | None = None
     phase_a_authorization: dict[str, str] | None = None
     phase_a_admission_lineage: dict[str, Any] | None = None
@@ -2794,17 +3839,12 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
         # Occupied evidence is a terminal one-attempt record. Check it before
         # any watchdog, config, or identity work can fail and overwrite it.
         try:
-            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 3,
+            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 4,
                                  authorization_json=getattr(args, "authorization_json", None),
-                                 phase_a_authorization_json=getattr(args, "phase_a_authorization_json", None))
-            if attempt == 3:
-                authorization = _authorization_json(args.authorization_json) if getattr(args, "authorization_json", None) else None
-                phase_a_authorization = (_authorization_json(args.phase_a_authorization_json)
-                                         if getattr(args, "phase_a_authorization_json", None) else None)
-                historical_evidence = verify_attempt1_historical_evidence()
-                historical_attempt2_evidence = verify_attempt2_historical_evidence()
-                if getattr(args, "log_fd", None) is not None:
-                    _attest_log_fd(args.log_path, int(args.log_fd))
+                                 phase_a_authorization_json=getattr(args, "phase_a_authorization_json", None),
+                                 lock_stage=_LockStage.PRE_LOCK, verify_history=attempt != 4)
+            if attempt == 4 and getattr(args, "log_fd", None) is not None:
+                _attest_log_fd(args.log_path, int(args.log_fd))
         except Exception:
             attempt_gate_rejected = True
             raise
@@ -2819,49 +3859,98 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
         lock_acquired = True
         lock_lifecycle["acquired"] = True
         try:
-            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 3,
+            _check_attempt_gates(phase_name, attempt, allow_active_log=attempt == 4,
                                  authorization_json=getattr(args, "authorization_json", None),
-                                 phase_a_authorization_json=getattr(args, "phase_a_authorization_json", None))
+                                 phase_a_authorization_json=getattr(args, "phase_a_authorization_json", None),
+                                 lock_stage=_LockStage.POST_LOCK, verify_history=False)
         except Exception:
             attempt_gate_rejected = True
             raise
-        if attempt == 3 and getattr(args, "log_fd", None) is not None:
+        if attempt == 4 and getattr(args, "log_fd", None) is not None:
             _attest_log_fd(args.log_path, int(args.log_fd))
+        if preflight is not None and attempt == 4:
+            raise PilotError("caller-injected runtime preflight is not trusted")
+        # B4 admission retains independent historical roots and parses both
+        # external authorizations before capturing Phase A evidence. Fresh
+        # runtime identity capture and strict validation follow those buffers.
+        if attempt == 4:
+            authorization = _attempt4_authorization_json(getattr(args, "authorization_json", None))
+            if phase_name == "phase-b":
+                phase_a_authorization = _attempt4_authorization_json(
+                    getattr(args, "phase_a_authorization_json", None))
+                if phase_a_authorization == authorization:
+                    raise PilotError("Phase A4 and Phase B4 authorizations must be distinct")
+            historical_evidence = verify_attempt1_historical_evidence()
+            historical_attempt2_evidence = verify_attempt2_historical_evidence(lock_stage=_LockStage.POST_LOCK)
+            historical_attempt3_evidence = verify_attempt3_historical_evidence(lock_stage=_LockStage.POST_LOCK)
         if phase_name == "phase-b":
-            phase_a_spec = attempt3_phase_specs()["phase-a"] if attempt == 3 else PHASES["phase-a"]
-            phase_a_report_path = pathlib.Path(phase_a_spec["namespace_paths"]["phase-a-report"] if attempt == 3 else phase_a_spec["report"])
+            phase_a_spec = attempt4_phase_specs()["phase-a"] if attempt == 4 else PHASES["phase-a"]
+            phase_a_report_path = pathlib.Path(
+                phase_a_spec["namespace_paths"]["phase-a-report"] if attempt == 4 else phase_a_spec["report"])
             if attempt == 1:
                 phase_a_report_path = REPO_ROOT / phase_a_report_path
-            if not phase_a_report_path.is_file():
-                raise PilotError("Phase A report missing")
-            _, phase_a_report = _read_json_snapshot(phase_a_report_path)
             marker_path = _marker_path("phase-a", "ok", phase_a_spec)
-            if not marker_path.is_file():
-                raise PilotError("Phase A OK marker missing")
-            _, phase_a_marker = _read_json_snapshot(marker_path)
-            if attempt == 3:
-                validate_phase_b_dependency(phase_a_report, phase_a_marker, phase["resume_adapter_file"],
-                                            phase_spec=phase_a_spec,
-                                            historical_attempt2_evidence=historical_attempt2_evidence,
-                                            trusted_phase_a_authorization=phase_a_authorization)
+            if not phase_a_report_path.is_file() or not marker_path.is_file():
+                raise PilotError("Phase A report or OK marker missing")
+            phase_a_report_bytes, phase_a_report_sha256, phase_a_report = _read_json_bytes_snapshot(phase_a_report_path)
+            phase_a_marker_bytes, phase_a_marker_sha256, phase_a_marker = _read_json_bytes_snapshot(marker_path)
+            if attempt == 4:
+                _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"] = _capture_attempt4_report_identity_root(
+                    phase_a_report_bytes, phase_a_report, "phase-a")
+        identity = _runtime_preflight(args, phase, config) if attempt == 4 else (preflight or _runtime_preflight)(args, phase, config)
+        if attempt == 4:
+            retained_identity = _check_attempt4_runtime_identity(identity)
+            retained_identity["phase"] = phase_name
+            _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS[phase_name] = retained_identity
+            authorization = validate_attempt4_authorization(
+                authorization, phase=phase_name, phase_spec=phase,
+                trusted_identity=identity)
+            if phase_name == "phase-b":
+                phase_a_authorization = validate_attempt4_authorization(
+                    phase_a_authorization, phase="phase-a",
+                    phase_spec=attempt4_phase_specs()["phase-a"], trusted_identity=identity)
+        if phase_name == "phase-b" and phase_a_report is not None:
+            if attempt == 4:
+                _validate_attempt4_report(phase_a_report, phase_spec=phase_a_spec,
+                                          report_path=phase_a_report_path,
+                                          historical_attempt2_evidence=historical_attempt2_evidence,
+                                          trusted_authorization=phase_a_authorization,
+                                          trusted_phase_a_authorization=phase_a_authorization,
+                                          trusted_identity=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["object"],
+                                          trusted_identity_snapshot=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["object"],
+                                          trusted_identity_snapshot_bytes=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["bytes"],
+                                          trusted_identity_snapshot_sha256=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["sha256"],
+                                          trusted_attempt_1_historical_evidence=historical_evidence,
+                                          trusted_attempt_3_historical_evidence=historical_attempt3_evidence)
+                _validate_attempt4_marker(phase_a_marker, phase="phase-a", phase_spec=phase_a_spec,
+                                          report=phase_a_report, marker_path=marker_path,
+                                          trusted_report_sha256=phase_a_report_sha256)
                 phase_a_admission_lineage = capture_phase_a_admission_lineage(
-                    phase_a_report_path, marker_path, phase_a_report, phase_a_marker)
+                    phase_a_report_path, marker_path, phase_a_report, phase_a_marker,
+                    report_bytes=phase_a_report_bytes, report_sha256=phase_a_report_sha256,
+                    marker_bytes=phase_a_marker_bytes, marker_sha256=phase_a_marker_sha256)
+                validate_phase_b_dependency(
+                    phase_a_report, phase_a_marker, phase["resume_adapter_file"],
+                    phase_spec=phase_a_spec,
+                    historical_attempt2_evidence=historical_attempt2_evidence,
+                    trusted_identity=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["object"],
+                    trusted_authorization=phase_a_authorization,
+                    trusted_phase_a_authorization=phase_a_authorization,
+                    trusted_identity_snapshot=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["object"],
+                    trusted_identity_snapshot_bytes=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["bytes"],
+                    trusted_identity_snapshot_sha256=_ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS["phase-a"]["sha256"],
+                    phase_a_report_bytes=phase_a_report_bytes,
+                    phase_a_report_sha256=phase_a_report_sha256,
+                    phase_a_marker_bytes=phase_a_marker_bytes,
+                    phase_a_marker_sha256=phase_a_marker_sha256,
+                    trusted_attempt_1_historical_evidence=historical_evidence,
+                    trusted_attempt_3_historical_evidence=historical_attempt3_evidence)
             else:
                 validate_phase_b_dependency(phase_a_report, phase_a_marker, phase["resume_adapter_file"])
-        identity = (preflight or _runtime_preflight)(args, phase, config)
-        if attempt == 3:
-            _check_attempt_gates(phase_name, attempt, allow_active_log=True,
-                                 authorization_json=getattr(args, "authorization_json", None),
-                                 phase_a_authorization_json=getattr(args, "phase_a_authorization_json", None),
-                                 trusted_identity=identity)
-        if phase_name == "phase-b" and phase_a_report is not None:
+        if phase_name == "phase-b" and phase_a_report is not None and attempt == 1:
             compare_immutable_identity(phase_a_report.get("identity_manifest", {}), identity)
-            if attempt == 3:
-                validate_phase_b_dependency(phase_a_report, phase_a_marker, phase["resume_adapter_file"],
-                                            phase_spec=phase_a_spec, historical_evidence=historical_evidence,
-                                            historical_attempt2_evidence=historical_attempt2_evidence,
-                                            trusted_identity=identity,
-                                            trusted_phase_a_authorization=phase_a_authorization)
+        if attempt == 4:
+            _assert_retained_attempt4_identity(phase_name, identity)
         contract = contract_digest(phase_name, effective, identity, phase_spec=phase,
                                     historical_evidence=historical_evidence,
                                     historical_attempt2_evidence=historical_attempt2_evidence,
@@ -2875,7 +3964,7 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
         callback = _PilotTrainingCallback(phase_name)
         _execute_training(args, phase, runtime_api, output, provider, callback, config=config)
         artifacts = (_validate_artifacts(phase_name, output, phase_spec=phase)
-                     if attempt == 3 else _validate_artifacts(phase_name, output))
+                     if attempt == 4 else _validate_artifacts(phase_name, output))
         validate_step_evidence(phase_name, provider.records, phase["iters"])
         callback_steps = [item["local_step"] for item in callback.records]
         if callback_steps != list(range(1, phase["iters"] + 1)):
@@ -2897,16 +3986,22 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                   "artifacts": artifacts, "output_path": str(output), "commands": effective.get("command", []),
                   "wall_seconds": time.monotonic() - started, "retry": RETRY_POLICY, "fallback": FALLBACK_POLICY,
                   "non_claims": list(NON_CLAIMS), "global_mapping": [0] + global_steps(phase_name, callback_steps)}
-        if attempt == 3:
+        if attempt == 4:
             paths = phase["namespace_paths"]
             report.update({"attempt_1_historical_evidence": historical_evidence,
                            "attempt_2_historical_evidence": historical_attempt2_evidence,
                            "authorization": authorization,
+                           "identity_snapshot": {"phase": phase_name,
+                                                 "sha256": _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS[phase_name]["sha256"],
+                                                 "bytes_b64": base64.b64encode(_ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS[phase_name]["bytes"]).decode("ascii")},
                            **({"phase_a_admission_lineage": phase_a_admission_lineage}
                               if phase_name == "phase-b" else {}),
-                           "report_path": str(phase["report"]), "log_path": paths[f"{phase_name}-log"],
+                           "report_path": paths[f"{phase_name}-report"],
+                           "log_path": paths[f"{phase_name}-log"],
                            "ok_marker_path": paths[f"{phase_name}-ok"], "fail_marker_path": paths[f"{phase_name}-fail"],
                            "final_report_path": paths["final-report"], "namespace_paths": dict(paths)})
+            if attempt == 4:
+                report["attempt_3_historical_evidence"] = historical_attempt3_evidence
         if phase_name == "phase-a":
             report["resume_source"] = artifacts["checkpoints"][-1]
         else:
@@ -2936,14 +4031,6 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
             except Exception as exc:
                 release_error = PilotError(f"lock release failed: {exc}")
                 error = release_error if error is None else PilotError(f"{error}; {release_error}")
-                if partial_lock_owned:
-                    try:
-                        quarantine = _quarantine_ft_lock()
-                        lock_lifecycle["quarantined"] = True
-                        if quarantine is not None:
-                            lock_lifecycle["quarantine_path"] = str(quarantine)
-                    except Exception as quarantine_error:
-                        error = PilotError(f"{error}; partial lock quarantine failed: {quarantine_error}")
     lock_lifecycle["release_attempts"] = lock_release_attempts
     if error is not None:
         failed = _phase_failure_report(phase_name, error or "unknown failure", started, effective=effective, identity=identity,
@@ -2951,13 +4038,14 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                                        watchdog_cancelled=watchdog_cancelled, phase_spec=phase,
                                        historical_evidence=historical_evidence,
                                        historical_attempt2_evidence=historical_attempt2_evidence,
+                                       historical_attempt3_evidence=historical_attempt3_evidence,
                                        authorization=authorization)
         if attempt_gate_rejected:
             # Existing one-attempt evidence is itself the terminal record. Never
             # delete or overwrite it with a second invocation's failure report.
             return failed
         try:
-            if attempt == 3:
+            if attempt == 4:
                 _write_failure_evidence(phase_name, failed, phase_spec=phase)
             else:
                 _write_failure_evidence(phase_name, failed)
@@ -2969,22 +4057,44 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
     report["watchdog_cancelled"] = watchdog_cancelled
     report["exit_code"] = 0
     try:
-        if attempt == 3:
-            validate_canonical_attempt3_report(report, phase_spec=phase,
-                                               report_path=phase["report"],
-                                               historical_evidence=historical_evidence,
-                                               historical_attempt2_evidence=historical_attempt2_evidence,
-                                               trusted_identity=identity,
-                                               trusted_authorization=authorization,
-                                               trusted_phase_a_authorization=phase_a_authorization,
-                                               trusted_phase_a_admission_lineage=phase_a_admission_lineage)
+        if attempt == 4:
+            _validate_attempt4_report(report, phase_spec=phase,
+                                      report_path=phase["report"],
+                                      historical_attempt2_evidence=historical_attempt2_evidence,
+                                      trusted_authorization=authorization,
+                                      trusted_phase_a_authorization=phase_a_authorization,
+                                      trusted_phase_a_admission_lineage=phase_a_admission_lineage,
+                                      trusted_identity=identity,
+                                      trusted_identity_snapshot=identity,
+                                      trusted_identity_snapshot_bytes=_ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS[phase_name]["bytes"],
+                                      trusted_identity_snapshot_sha256=_ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS[phase_name]["sha256"],
+                                      trusted_attempt_1_historical_evidence=historical_evidence,
+                                      trusted_attempt_3_historical_evidence=historical_attempt3_evidence)
+        phase_a_root = _ATTEMPT4_RETAINED_REPORT_IDENTITY_ROOTS.get("phase-a") if phase_name == "phase-b" else None
+        phase_b_root = _ATTEMPT4_RETAINED_RUNTIME_SNAPSHOTS.get(phase_name) if attempt == 4 else None
+        phase_b_report_bytes = (json.dumps(report, sort_keys=True, indent=2).encode("utf-8") + b"\n") if attempt == 4 else None
         _write_success_evidence(phase_name, report, phase_spec=phase,
                                 phase_a_authorization=phase_a_authorization,
                                 phase_a_admission_lineage=phase_a_admission_lineage,
                                 phase_b_authorization=authorization,
                                 trusted_identity=identity,
+                                trusted_phase_a_identity_snapshot=(phase_a_root["object"] if phase_a_root else identity),
+                                trusted_phase_b_identity_snapshot=identity,
+                                trusted_phase_a_report_bytes=(phase_a_report_bytes if phase_name == "phase-b" else None),
+                                trusted_phase_a_report_sha256=(phase_a_report_sha256 if phase_name == "phase-b" else None),
+                                trusted_phase_a_marker=(phase_a_marker if phase_name == "phase-b" else None),
+                                trusted_phase_a_marker_bytes=(phase_a_marker_bytes if phase_name == "phase-b" else None),
+                                trusted_phase_a_marker_sha256=(phase_a_marker_sha256 if phase_name == "phase-b" else None),
+                                trusted_phase_a_identity_snapshot_bytes=(phase_a_root["bytes"] if phase_a_root else None),
+                                trusted_phase_a_identity_snapshot_sha256=(phase_a_root["sha256"] if phase_a_root else None),
+                                trusted_phase_b_report_bytes=phase_b_report_bytes,
+                                trusted_phase_b_report_sha256=(hashlib.sha256(phase_b_report_bytes).hexdigest()
+                                                               if phase_b_report_bytes is not None else None),
+                                trusted_phase_b_identity_snapshot_bytes=(phase_b_root["bytes"] if phase_b_root else None),
+                                trusted_phase_b_identity_snapshot_sha256=(phase_b_root["sha256"] if phase_b_root else None),
                                 trusted_attempt_1_historical_evidence=historical_evidence,
-                                trusted_attempt_2_historical_evidence=historical_attempt2_evidence)
+                                trusted_attempt_2_historical_evidence=historical_attempt2_evidence,
+                                trusted_attempt_3_historical_evidence=historical_attempt3_evidence)
     except Exception as exc:
         failed = _phase_failure_report(phase_name, f"report/marker write failed: {exc}", started, effective=effective,
                                        identity=identity, contract=contract, output=output,
@@ -2992,9 +4102,10 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
                                        phase_spec=phase,
                                        historical_evidence=historical_evidence,
                                        historical_attempt2_evidence=historical_attempt2_evidence,
+                                       historical_attempt3_evidence=historical_attempt3_evidence,
                                        authorization=authorization)
         try:
-            if attempt == 3:
+            if attempt == 4:
                 _write_failure_evidence(phase_name, failed, phase_spec=phase)
             else:
                 _write_failure_evidence(phase_name, failed)
@@ -3004,41 +4115,45 @@ def run_phase(args: argparse.Namespace, *, api: Any = None, preflight: Any = Non
     return report
 
 
-def _prepare_attempt3_launch_args(args: argparse.Namespace, phase_spec: dict[str, Any]) -> argparse.Namespace:
-    identity = attempt3_launch_identity()
+def _prepare_attempt4_launch_args(args: argparse.Namespace, phase_spec: dict[str, Any]) -> argparse.Namespace:
+    identity = attempt4_launch_identity()
     pinned = dict(COMMON_VALUES)
-    pinned.update({"attempt": 3, "model": identity["model"], "data": identity["data"], "config": identity["config"],
+    pinned.update({"attempt": 4, "model": identity["model"], "data": identity["data"], "config": identity["config"],
                    "adapter_path": phase_spec["adapter_path"], "resume_adapter_file": phase_spec["resume_adapter_file"],
                    "train": True, "test": False, "hf_dataset": False, "iters": phase_spec["iters"],
                    "steps_per_eval": phase_spec["steps_per_eval"], "log_path": phase_spec["namespace_paths"][f"{args.phase}-log"]})
     for key, expected in pinned.items():
         if getattr(args, key, None) is None:
             setattr(args, key, expected)
-    args._command_argv = tuple(canonical_attempt3_command(args.phase, phase_spec))
+    args._command_argv = tuple(canonical_attempt4_command(args.phase, phase_spec))
     return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.launch_check_only:
-        if args.attempt != 3 or not args.log_path:
-            print("launch-check-only requires --attempt 3 and --log-path", file=sys.stderr)
+        if args.attempt not in (4,) or not args.log_path:
+            print("launch-check-only requires fixed --attempt 4 and --log-path", file=sys.stderr)
             return 1
         try:
-            phase_spec = attempt3_phase_specs()[args.phase]
-            args = _prepare_attempt3_launch_args(args, phase_spec)
+            phase_spec = attempt4_phase_specs()[args.phase]
+            args = _prepare_attempt4_launch_args(args, phase_spec)
             config = _read_config(args.config)
             validate_pins(args, phase_spec, config)
             trusted_identity = _runtime_preflight(args, phase_spec, config)
-            print(json.dumps(check_attempt3_launch(args.phase, args.log_path,
-                                                   trusted_identity=trusted_identity,
-                                                   authorization_json=args.authorization_json), sort_keys=True))
+            print(json.dumps(check_attempt4_launch(
+                args.phase, args.log_path, trusted_identity=trusted_identity,
+                authorization_json=args.authorization_json,
+                phase_a_authorization_json=args.phase_a_authorization_json), sort_keys=True))
         except Exception as exc:
             print(f"pilot launch check failed closed: {exc}", file=sys.stderr)
             return 1
         return 0
-    if args.attempt == 3 and not args.log_fd:
-        print("attempt 3 requires --log-fd from the exclusive catalog wrapper", file=sys.stderr)
+    if args.attempt != 4:
+        print("only fixed --attempt 4 is runnable; attempt-3 evidence is historical read-only data", file=sys.stderr)
+        return 1
+    if args.attempt == 4 and not args.log_fd:
+        print("attempt 4 requires --log-fd from the exclusive catalog wrapper", file=sys.stderr)
         return 1
     report = run_phase(args)
     if report.get("status") != "ok":
