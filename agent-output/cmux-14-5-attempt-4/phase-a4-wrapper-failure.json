@@ -1,0 +1,48 @@
+{
+  "attempt": 4,
+  "authorization": {
+    "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-4/phase-a-authorization.json",
+    "sha256": "6ac22cca3e8a795658f03436bfd9d14a9ba70dc75ceb05c488a1f538afbe54ea",
+    "size": 943
+  },
+  "b4_started": false,
+  "cause": "outer double-quoted bash -lc expanded inner shell variables before assignments",
+  "console": {
+    "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-4/phase-a4-wrapper-failure.txt",
+    "sha256": "0c119fe6b2c23924f7d1df8585b4d56e27d013174e36ced0b0ac425fdc4caf77",
+    "size": 58
+  },
+  "error": "bash: line 35: : command not found",
+  "exit_code": 127,
+  "launch_check_completed": false,
+  "lock_absent_after_exit": true,
+  "namespace": "ds4-segmented-pilot-attempt-4",
+  "namespace_absence": {
+    "final-fail": true,
+    "final-ok": true,
+    "final-report": true,
+    "phase-a-fail": true,
+    "phase-a-log": true,
+    "phase-a-ok": true,
+    "phase-a-output": true,
+    "phase-a-report": true,
+    "phase-b-fail": true,
+    "phase-b-log": true,
+    "phase-b-ok": true,
+    "phase-b-output": true,
+    "phase-b-report": true
+  },
+  "optimizer_updates": 0,
+  "phase": "phase-a",
+  "provider_calls": 0,
+  "retry_performed": false,
+  "revision": "07fe6c8e13651892e05014b40e78210f0d306462",
+  "status": "fail",
+  "story": "14.5e",
+  "training_calls": 0,
+  "wrapper": {
+    "path": "/Users/spotted/projects/ds4-finetuning/agent-output/cmux-14-5-attempt-4/run-phase-a4.sh",
+    "sha256": "2d9d4e50827eeae759fc6843b9e75a57dd6ffe3d4bada1261dab520352a2e69d",
+    "size": 5828
+  }
+}

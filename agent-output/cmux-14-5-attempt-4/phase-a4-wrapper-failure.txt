@@ -1,0 +1,2 @@
+bash: line 35: : command not found
+PHASE_A4_FAILED rc=127
