@@ -42,6 +42,7 @@
 
 #include "ds4.h"
 #include "ds4_distributed.h"
+#include "ds4_mtp_sparse_route.h"
 #include "ds4_tp.h"
 
 /* Wave-2 multi-GPU types are needed in every build because the engine
@@ -26765,11 +26766,15 @@ static bool metal_graph_encode_layer_attention_batch(
     const bool tp_attn_full_raw = zero_prefix &&
         (ratio == 0 || (n_tokens < ratio && n_tokens <= g->raw_cap));
     const uint32_t tp_attn_n_comp = ratio != 0 ? n_tokens / ratio : 0;
+    const ds4_mtp_batch_attention_route tp_attn_route =
+        ds4_mtp_batch_attention_route_for(ratio,
+                                           tp_attn_n_comp,
+                                           DS4_N_INDEXER_TOP_K);
     const bool tp_attn_static_mixed = zero_prefix && ratio != 0 &&
         tp_attn_n_comp != 0 &&
-        !(ratio == 4 && tp_attn_n_comp > DS4_N_INDEXER_TOP_K);
-    const bool tp_attn_indexed = zero_prefix && ratio == 4 &&
-        tp_attn_n_comp > DS4_N_INDEXER_TOP_K;
+        tp_attn_route != DS4_MTP_BATCH_ATTN_INDEXED_CSA;
+    const bool tp_attn_indexed = zero_prefix &&
+        tp_attn_route == DS4_MTP_BATCH_ATTN_INDEXED_CSA;
     const bool tp_row_split_attn =
         g->tp_world == 2 &&
         g->tp_batch_rows != n_tokens &&
@@ -27831,7 +27836,14 @@ static bool metal_graph_encode_layer_attention_batch(
         }
         if (ratio == 4) DS4_METAL_PROFILE_ATTN_STAGE("indexer_setup");
 
-        if (ok && !zero_prefix && n_tokens <= g->raw_cap) {
+        const ds4_mtp_verify_batch_plan batch_plan =
+            ds4_mtp_verify_batch_plan_for(ratio,
+                                          n_comp,
+                                          DS4_N_INDEXER_TOP_K,
+                                          pos0,
+                                          n_tokens,
+                                          g->raw_cap);
+        if (ok && batch_plan.use_batch_path) {
             const uint32_t n_raw = metal_graph_raw_span_for_batch(g, pos0, n_tokens);
             /* See the raw-only branch above: batched mixed attention also
              * consumes a logical raw window, linearized out of the ring. */
@@ -27848,7 +27860,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                      pos0,
                                                      n_tokens,
                                                      DS4_N_HEAD_DIM) != 0;
-            if (ok && ratio == 4 && n_comp > DS4_N_INDEXER_TOP_K) {
+            if (ok && batch_plan.batch_indexer_scores) {
                 const float index_scale = 1.0f / sqrtf((float)(DS4_N_INDEXER_HEAD_DIM * DS4_N_INDEXER_HEAD));
                 if (index_stage_profile) {
                     ok = metal_graph_indexer_stage_profile_boundary(NULL,
@@ -27884,7 +27896,7 @@ static bool metal_graph_encode_layer_attention_batch(
                                                   il,
                                                   pos0);
                 }
-                if (ok) {
+                if (ok && batch_plan.topk_selection) {
                     ok = ds4_gpu_indexer_topk_tensor(metal_graph_comp_selected(g),
                                                        metal_graph_indexer_scores(g),
                                                        n_comp,
@@ -27906,13 +27918,17 @@ static bool metal_graph_encode_layer_attention_batch(
                                                           pos0);
                     }
                 }
-                if (ok) {
+                if (ok && batch_plan.indexed_mixed_attention) {
                     use_indexed_comp = true;
                 }
-                use_comp_mask = 1;
+                if (batch_plan.indexed_mixed_attention) {
+                    use_comp_mask = 1;
+                }
             }
             if (ok) {
-                if (use_indexed_comp) {
+                if (batch_plan.indexed_mixed_attention &&
+                    batch_plan.route == DS4_MTP_BATCH_ATTN_INDEXED_CSA &&
+                    use_indexed_comp) {
                     ok = ds4_gpu_attention_indexed_mixed_batch_heads_tensor(metal_graph_batch_heads(g),
                                                                               model->map,
                                                                               model->size,
@@ -27941,7 +27957,8 @@ static bool metal_graph_encode_layer_attention_batch(
                                                                         n_comp,
                                                                         &index_stage_t0);
                     }
-                } else {
+                } else if (batch_plan.static_mixed_attention &&
+                           batch_plan.route == DS4_MTP_BATCH_ATTN_STATIC_MIXED) {
                     ok = ds4_gpu_attention_decode_mixed_batch_heads_tensor(metal_graph_batch_heads(g),
                                                                              model->map,
                                                                              model->size,
@@ -27967,7 +27984,11 @@ static bool metal_graph_encode_layer_attention_batch(
             if (ok) batch_attention_done = true;
         }
 
-        const bool topk_prefill_needed = ratio == 4 && n_comp > DS4_N_INDEXER_TOP_K;
+        const bool topk_prefill_needed =
+            ds4_mtp_batch_attention_route_for(ratio,
+                                              n_comp,
+                                              DS4_N_INDEXER_TOP_K) ==
+            DS4_MTP_BATCH_ATTN_INDEXED_CSA;
         if (ok && zero_prefix && topk_prefill_needed && n_comp != 0) {
             const float index_scale = 1.0f / sqrtf((float)(DS4_N_INDEXER_HEAD_DIM * DS4_N_INDEXER_HEAD));
             double index_stage_t0 = 0.0;
@@ -28181,7 +28202,10 @@ static bool metal_graph_encode_layer_attention_batch(
                 uint32_t n_selected = 0;
                 ds4_gpu_tensor *comp_mask = NULL;
 
-                if (ratio == 4 && cur_comp > DS4_N_INDEXER_TOP_K) {
+                if (ds4_mtp_batch_attention_route_for(ratio,
+                                                       cur_comp,
+                                                       DS4_N_INDEXER_TOP_K) ==
+                    DS4_MTP_BATCH_ATTN_INDEXED_CSA) {
                     const float index_scale = 1.0f / sqrtf((float)(DS4_N_INDEXER_HEAD_DIM * DS4_N_INDEXER_HEAD));
                     ds4_gpu_tensor *indexer_q_view = metal_graph_tensor_row_view(
                             metal_graph_batch_indexer_q(g), t, (uint64_t)DS4_N_INDEXER_HEAD * DS4_N_INDEXER_HEAD_DIM);

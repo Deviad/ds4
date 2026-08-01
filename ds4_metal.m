@@ -21,6 +21,7 @@
 
 #include "ds4.h"
 #include "ds4_gpu.h"
+#include "ds4_mtp_sparse_route.h"
 
 /*
  * Objective-C Metal glue for the C engine.
@@ -25660,6 +25661,12 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
             ds4_gpu_hot_pipeline(g_dsv4_indexed_attention_heads8_pipeline,
                                    "kernel_dsv4_indexed_mixed_attention_heads8");
         if (!sort_pipeline || !attn_pipeline) return 0;
+        const ds4_mtp_indexed_attention_command_plan command_plan =
+            ds4_mtp_indexed_attention_command_plan_for(n_tokens, g_quality_mode);
+        const bool sort_topk = command_plan.events[0] == DS4_MTP_INDEXED_ATTN_SORT_TOPK;
+        const bool attend_sorted_topk =
+            command_plan.events[command_plan.n_events - 1u] ==
+            DS4_MTP_INDEXED_ATTN_ATTEND_SORTED_TOPK;
         if ((NSUInteger)top_k > sort_pipeline.maxTotalThreadsPerThreadgroup) {
             fprintf(stderr, "ds4: Metal indexed attention top-k exceeds sort threadgroup limit\n");
             return 0;
@@ -25669,8 +25676,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
          * them in score order, avoiding a chronological sort dispatch.
          * --quality restores the sorted order for stricter reproducibility.
          */
-        const bool skip_decode_sort = !g_quality_mode && decode_one_token;
-        if (!skip_decode_sort &&
+        if (sort_topk &&
             !ds4_gpu_ensure_scratch_buffer(&g_indexed_topk_buffer,
                                              &g_indexed_topk_bytes,
                                              (NSUInteger)topk_bytes,
@@ -25716,7 +25722,7 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
         if (!cb) return 0;
 
         id<MTLComputeCommandEncoder> enc = nil;
-        if (!skip_decode_sort) {
+        if (sort_topk) {
             enc = ds4_gpu_compute_encoder(cb);
             [enc setComputePipelineState:sort_pipeline];
             [enc setBytes:&sort_args length:sizeof(sort_args) atIndex:0];
@@ -25734,8 +25740,8 @@ int ds4_gpu_attention_indexed_mixed_batch_heads_tensor(
         [enc setBuffer:qbuf offset:ds4_gpu_tensor_offset(q) atIndex:1];
         [enc setBuffer:rawbuf offset:ds4_gpu_tensor_offset(raw_kv) atIndex:2];
         [enc setBuffer:compbuf offset:ds4_gpu_tensor_offset(comp_kv) atIndex:3];
-        [enc setBuffer:skip_decode_sort ? topkbuf : g_indexed_topk_buffer
-              offset:skip_decode_sort ? ds4_gpu_tensor_offset(topk) : 0
+        [enc setBuffer:attend_sorted_topk ? g_indexed_topk_buffer : topkbuf
+              offset:attend_sorted_topk ? 0 : ds4_gpu_tensor_offset(topk)
              atIndex:4];
         [enc setBuffer:sinks_buf offset:(NSUInteger)sinks_inner atIndex:5];
         [enc setBuffer:headsbuf offset:ds4_gpu_tensor_offset(heads) atIndex:6];
