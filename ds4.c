@@ -13497,12 +13497,17 @@ static uint32_t metal_graph_decode_indexer_sparse_threshold(const ds4_gpu_graph 
     if (parsed > 0) return cached;
 
     /* Keep dense attention longer than the legacy 512-row window by default.
-     * Around the 2K frontier the sparse path's score/top-k setup dominates
-     * the smaller attention scan, while larger contexts benefit from sparse
-     * indexed attention.  This threshold changes only the implementation used
-     * to consume the compressed rows; it must not lower the 512-row indexer
-     * selection defined by DS4_N_INDEXER_TOP_K. */
-    return 1024u;
+     * The sparse path's score/top-k setup costs a context-flat ~3.1 ms/token
+     * (0.93 score + 1.14 top-k + ~1.06 q/RoPE/QAT/proj prep), which only pays
+     * for itself once the attention scan it shortens is large enough.  Measured
+     * on the mixed-quant Flash model, dense wins by 4.5-5.8 t/s (~21%) from
+     * ~4.4k to ~16.5k tokens, so the crossover sits past 16k rather than at the
+     * 4k implied by a 1024-row threshold.  Above 4096 rows the knob saturates
+     * anyway: n_comp exceeds every legal value and the sparse path is forced.
+     * This threshold changes only the implementation used to consume the
+     * compressed rows; it must not lower the 512-row indexer selection defined
+     * by DS4_N_INDEXER_TOP_K. */
+    return 4096u;
 }
 
 /* =========================================================================
