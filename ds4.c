@@ -17595,6 +17595,14 @@ static bool metal_graph_indexer_stage_profile_boundary(
         uint32_t    n_tokens,
         uint32_t    n_comp,
         double     *stage_t0) {
+    /* The opening boundary (stage == NULL) closes the compressor work that ran
+     * before the indexer; leaving it unlabelled keeps that segment out of the
+     * score attribution, since an unmarked buffer reports nothing. */
+    if (stage != NULL && ds4_gpu_stage_timing_active()) {
+        char label[56];
+        snprintf(label, sizeof(label), "idx.%s.L%u", stage, il);
+        ds4_gpu_stage_mark(label);
+    }
     if (ds4_gpu_end_commands() == 0) return false;
     const double now = now_sec();
     if (stage != NULL) {
