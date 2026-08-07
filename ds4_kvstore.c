@@ -35,10 +35,24 @@
 /* Tokenizers may merge text across the prompt boundary. Trimming a small tail
  * still improves the cheap token-prefix path, while text-prefix lookup handles
  * cases where canonical prompt tokenization spells the same bytes differently.
- * The 2048 alignment also matches the backend prefill chunk schedule, which
- * keeps compressor row finalization identical to a cold full prompt. */
+ *
+ * Alignment to the prefill chunk schedule was previously also applied, on the
+ * expectation that compressor row finalization needed a chunk-compatible
+ * boundary to match a cold full prompt.  Measurement does not support that:
+ * across 36 checkpoints restored without alignment -- spanning 8k-30k tokens,
+ * six residues modulo the 4096-token prefill chunk, all four residues modulo
+ * the ratio-4 compressor group, all four sampled residues modulo the 128-row
+ * SWA window, both sides of the sparse-indexer activation boundary, chained
+ * continued checkpoints, and eviction in both survived and evicted states --
+ * every restored checkpoint reproduced the cold output byte for byte.
+ *
+ * Alignment is not free: rounding down discards up to a full step of computed
+ * prefix, which the next warm request must recompute.  On an 18k prompt that
+ * was 1620 replayed tokens, 3.9 s of a 7.3 s warm path.  Keep the trim, which
+ * guards the tokenizer boundary, and leave alignment opt-in via
+ * --kv-cache-boundary-align-tokens. */
 #define KV_CACHE_DEFAULT_BOUNDARY_TRIM_TOKENS 32
-#define KV_CACHE_DEFAULT_BOUNDARY_ALIGN_TOKENS 2048
+#define KV_CACHE_DEFAULT_BOUNDARY_ALIGN_TOKENS 0
 #define KV_CACHE_DEFAULT_CONTINUED_INTERVAL_TOKENS 10000
 /* Disk-hit counts are evidence that a checkpoint was useful, but only while
  * the workload still resembles the one that produced those hits. */
