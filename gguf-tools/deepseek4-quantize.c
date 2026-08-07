@@ -175,6 +175,11 @@ static uint16_t load_u16_le(const uint8_t *p) {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
+static uint32_t load_u32_le(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 static int64_t load_i64_le(const uint8_t *p) {
     uint64_t v = 0;
     for (int i = 0; i < 8; i++) v |= (uint64_t)p[i] << (8 * i);
@@ -708,6 +713,72 @@ static float *dequant_fp8_weight(const st_value *w, const st_value *scale, int64
     return out;
 }
 
+static float *dequant_mlx_affine(const st_value *w, const st_value *scale,
+                                  const st_value *bias, int64_t *n_out) {
+    if (strcmp(w->dtype, "U32") != 0 || strcmp(scale->dtype, "BF16") != 0 ||
+        strcmp(bias->dtype, "BF16") != 0 || w->n_dims != 2 || scale->n_dims != 2 ||
+        bias->n_dims != 2 || w->shape[0] != scale->shape[0] ||
+        w->shape[0] != bias->shape[0] || scale->shape[1] != bias->shape[1]) {
+        die("bad MLX affine tensor/scale/bias layout");
+    }
+    const int64_t rows = w->shape[0];
+    const int64_t packed_cols = w->shape[1];
+    const int64_t cols = packed_cols * 8;
+    const int64_t groups = scale->shape[1];
+    if (groups <= 0 || cols % groups != 0 ||
+        w->nbytes != (size_t)rows * (size_t)packed_cols * sizeof(uint32_t) ||
+        scale->nbytes != (size_t)rows * (size_t)groups * sizeof(uint16_t) ||
+        bias->nbytes != (size_t)rows * (size_t)groups * sizeof(uint16_t)) {
+        die("bad MLX affine dimensions or byte sizes");
+    }
+    const int64_t group_size = cols / groups;
+    float *out = xmalloc((size_t)rows * (size_t)cols * sizeof(float));
+    for (int64_t r = 0; r < rows; r++) {
+        for (int64_t c = 0; c < cols; c++) {
+            const uint32_t packed = load_u32_le(w->data + ((size_t)r * (size_t)packed_cols + (size_t)(c / 8)) * 4);
+            const uint32_t q = (packed >> (4 * (c % 8))) & 0x0fu;
+            const int64_t g = c / group_size;
+            const float s = bf16_to_f32_bits(load_u16_le(scale->data + ((size_t)r * (size_t)groups + (size_t)g) * 2));
+            const float b = bf16_to_f32_bits(load_u16_le(bias->data + ((size_t)r * (size_t)groups + (size_t)g) * 2));
+            out[(size_t)r * (size_t)cols + (size_t)c] = s * (float)q + b;
+        }
+    }
+    if (n_out) *n_out = rows * cols;
+    return out;
+}
+
+static float *dequant_mxfp4_weight(const st_value *w, const st_value *scale, int64_t *n_out) {
+    static const float fp4_table[16] = {
+        0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
+        0.0f, -0.5f, -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f,
+    };
+    if ((strcmp(w->dtype, "U8") != 0 && strcmp(w->dtype, "I8") != 0) ||
+        strcmp(scale->dtype, "BF16") != 0 || w->n_dims != 2 || scale->n_dims != 2) {
+        die("bad MLX MXFP4 tensor/scale layout");
+    }
+    const int64_t rows = w->shape[0];
+    const int64_t packed_cols = w->shape[1];
+    const int64_t cols = packed_cols * 2;
+    const int64_t blocks = scale->shape[1];
+    if (blocks <= 0 || cols != blocks * 32 ||
+        w->nbytes != (size_t)rows * (size_t)packed_cols ||
+        scale->nbytes != (size_t)rows * (size_t)blocks * sizeof(uint16_t)) {
+        die("bad MLX MXFP4 dimensions or byte sizes");
+    }
+    float *out = xmalloc((size_t)rows * (size_t)cols * sizeof(float));
+    for (int64_t r = 0; r < rows; r++) {
+        for (int64_t c = 0; c < cols; c++) {
+            const uint8_t packed = w->data[(size_t)r * (size_t)packed_cols + (size_t)(c / 2)];
+            const uint8_t q = (packed >> (4 * (c % 2))) & 0x0fu;
+            const int64_t block = c / 32;
+            const float s = bf16_to_f32_bits(load_u16_le(scale->data + ((size_t)r * (size_t)blocks + (size_t)block) * 2));
+            out[(size_t)r * (size_t)cols + (size_t)c] = fp4_table[q] * s;
+        }
+    }
+    if (n_out) *n_out = rows * cols;
+    return out;
+}
+
 static float *dequant_fp4_weight(const st_value *w, const st_value *scale, int64_t *n_out) {
     static const float fp4_table[16] = {
         0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
@@ -870,10 +941,12 @@ static void imatrix_free(imatrix_store *im) {
  * GGUF tensor mapping and quantization policy
  */
 
+typedef enum { EXP_SCOPE_LAYER, EXP_SCOPE_MTP } expert_scope;
 typedef enum { EXP_NONE, EXP_W1, EXP_W2, EXP_W3 } expert_part;
 
 typedef struct {
     bool is_expert;
+    expert_scope scope;
     int layer;
     expert_part part;
 } expert_tensor;
@@ -888,6 +961,18 @@ static expert_tensor parse_expert_tensor(const char *name) {
     {
         if (strcmp(kind, "gate") == 0 || strcmp(kind, "down") == 0 || strcmp(kind, "up") == 0) {
             e.is_expert = true;
+            e.scope = EXP_SCOPE_LAYER;
+            e.layer = layer;
+            e.part = strcmp(kind, "gate") == 0 ? EXP_W1 : strcmp(kind, "down") == 0 ? EXP_W2 : EXP_W3;
+        }
+    }
+    if (!e.is_expert &&
+        sscanf(name, "mtp.%d.ffn_%15[^_]_exps.weight%n", &layer, kind, &rest) == 2
+        && rest == (int)strlen(name))
+    {
+        if (strcmp(kind, "gate") == 0 || strcmp(kind, "down") == 0 || strcmp(kind, "up") == 0) {
+            e.is_expert = true;
+            e.scope = EXP_SCOPE_MTP;
             e.layer = layer;
             e.part = strcmp(kind, "gate") == 0 ? EXP_W1 : strcmp(kind, "down") == 0 ? EXP_W2 : EXP_W3;
         }
@@ -953,6 +1038,71 @@ static const name_map layer_map[] = {
     { "exp_probs_b.bias",                 "ffn.gate.bias" },
     { "ffn_gate_tid2eid.weight",          "ffn.gate.tid2eid" },
 };
+
+static char *hf_name_for_fused_regular(const char *gguf_name) {
+    const name_map fused_top[] = {
+        { "token_embd.weight", "model.embed_tokens.weight" },
+        { "output_norm.weight", "model.norm.weight" },
+        { "output.weight", "lm_head.weight" },
+        { "output_hc_base.weight", "model.hc_head.base" },
+        { "output_hc_fn.weight", "model.hc_head.fn" },
+        { "output_hc_scale.weight", "model.hc_head.scale" },
+    };
+    for (size_t i = 0; i < sizeof(fused_top) / sizeof(fused_top[0]); i++) {
+        if (strcmp(gguf_name, fused_top[i].gguf) == 0) return xstrdup(fused_top[i].hf);
+    }
+    int layer = -1;
+    if (sscanf(gguf_name, "blk.%d.", &layer) != 1) {
+        fprintf(stderr, "error: cannot map GGUF tensor to fused HF tensor: %s\n", gguf_name);
+        exit(1);
+    }
+    const char *rest = strchr(gguf_name + 4, '.');
+    if (!rest) die("bad fused layer tensor name");
+    rest++;
+    static const name_map fused_layer[] = {
+        { "hc_attn_base.weight", "attn_hc.base" },
+        { "hc_attn_fn.weight", "attn_hc.fn" },
+        { "hc_attn_scale.weight", "attn_hc.scale" },
+        { "hc_ffn_base.weight", "ffn_hc.base" },
+        { "hc_ffn_fn.weight", "ffn_hc.fn" },
+        { "hc_ffn_scale.weight", "ffn_hc.scale" },
+        { "attn_sinks.weight", "self_attn.sinks" },
+        { "attn_q_a.weight", "self_attn.q_a_proj.weight" },
+        { "attn_q_b.weight", "self_attn.q_b_proj.weight" },
+        { "attn_q_a_norm.weight", "self_attn.q_norm.weight" },
+        { "attn_kv.weight", "self_attn.kv_proj.weight" },
+        { "attn_kv_a_norm.weight", "self_attn.kv_norm.weight" },
+        { "attn_output_a.weight", "self_attn.o_a_proj.weight" },
+        { "attn_output_b.weight", "self_attn.o_b_proj.weight" },
+        { "attn_compressor_ape.weight", "self_attn.compressor.ape" },
+        { "attn_compressor_kv.weight", "self_attn.compressor.wkv.weight" },
+        { "attn_compressor_gate.weight", "self_attn.compressor.wgate.weight" },
+        { "attn_compressor_norm.weight", "self_attn.compressor.norm.weight" },
+        { "indexer.attn_q_b.weight", "self_attn.indexer.wq_b.weight" },
+        { "indexer.proj.weight", "self_attn.indexer.weights_proj.weight" },
+        { "indexer_compressor_ape.weight", "self_attn.indexer.compressor.ape" },
+        { "indexer_compressor_kv.weight", "self_attn.indexer.compressor.wkv.weight" },
+        { "indexer_compressor_gate.weight", "self_attn.indexer.compressor.wgate.weight" },
+        { "indexer_compressor_norm.weight", "self_attn.indexer.compressor.norm.weight" },
+        { "attn_norm.weight", "input_layernorm.weight" },
+        { "ffn_norm.weight", "post_attention_layernorm.weight" },
+        { "ffn_gate_shexp.weight", "mlp.shared_experts.gate_proj.weight" },
+        { "ffn_up_shexp.weight", "mlp.shared_experts.up_proj.weight" },
+        { "ffn_down_shexp.weight", "mlp.shared_experts.down_proj.weight" },
+        { "ffn_gate_inp.weight", "mlp.gate_weight" },
+        { "exp_probs_b.bias", "mlp.e_score_correction_bias" },
+        { "ffn_gate_tid2eid.weight", "mlp.tid2eid" },
+    };
+    for (size_t i = 0; i < sizeof(fused_layer) / sizeof(fused_layer[0]); i++) {
+        if (strcmp(rest, fused_layer[i].gguf) == 0) {
+            char buf[512];
+            snprintf(buf, sizeof(buf), "model.layers.%d.%s", layer, fused_layer[i].hf);
+            return xstrdup(buf);
+        }
+    }
+    fprintf(stderr, "error: cannot map GGUF tensor to fused HF tensor: %s\n", gguf_name);
+    exit(1);
+}
 
 static char *hf_name_for_regular(const char *gguf_name) {
     for (size_t i = 0; i < sizeof(top_map) / sizeof(top_map[0]); i++) {
@@ -1131,8 +1281,14 @@ static byte_buf f32_to_type(const float *src, int64_t n, ds4q_type type, int64_t
 }
 
 static byte_buf i64_to_i32(const st_value *src) {
-    if (strcmp(src->dtype, "I64") != 0) die("expected I64 source for I32 tensor");
     const int64_t n = value_nelements(src);
+    if (strcmp(src->dtype, "I32") == 0) {
+        if (src->nbytes != (size_t)n * sizeof(int32_t)) die("bad I32 byte size");
+        byte_buf out = { .size = src->nbytes, .data = xmalloc(src->nbytes) };
+        memcpy(out.data, src->data, src->nbytes);
+        return out;
+    }
+    if (strcmp(src->dtype, "I64") != 0) die("expected I64 or I32 source for I32 tensor");
     if (src->nbytes != (size_t)n * sizeof(int64_t)) die("bad I64 byte size");
     byte_buf out = { .size = (size_t)n * sizeof(int32_t), .data = xmalloc((size_t)n * sizeof(int32_t)) };
     int32_t *dst = (int32_t *)out.data;
@@ -1164,16 +1320,37 @@ static void check_reversed_shape(const char *gguf_name, const st_info *info, con
     }
 }
 
-static byte_buf generate_regular(st_db *db, const char *gguf_name, const tensor_meta *tmpl,
-                                 ds4q_type target, const imatrix_store *imatrix) {
-    char *hf_name = hf_name_for_regular(gguf_name);
+static void check_reversed_shape_exact(const char *gguf_name, const st_info *info, const tensor_meta *tmpl) {
+    if (info->n_dims == 2 && info->shape[0] == 1 && tmpl->n_dims == 1 && tmpl->ne[0] == info->shape[1]) return;
+    if (info->n_dims != tmpl->n_dims) {
+        fprintf(stderr, "error: rank mismatch for %s\n", gguf_name);
+        exit(1);
+    }
+    for (int i = 0; i < tmpl->n_dims; i++) {
+        if (tmpl->ne[i] != info->shape[tmpl->n_dims - 1 - i]) {
+            fprintf(stderr, "error: shape mismatch for %s\n", gguf_name);
+            exit(1);
+        }
+    }
+}
+
+static byte_buf generate_regular_hf(st_db *db, const char *gguf_name, const char *hf_name,
+                                     const tensor_meta *tmpl, ds4q_type target,
+                                     const imatrix_store *imatrix) {
     tensor_entry *te = db_tensor(db, hf_name, NULL);
-    check_reversed_shape(gguf_name, &te->info, tmpl);
+    if (strcmp(te->info.dtype, "U32") == 0) {
+        if (te->info.n_dims != 2 || tmpl->n_dims != 2 ||
+            tmpl->ne[1] != te->info.shape[0] || tmpl->ne[0] != te->info.shape[1] * 8) {
+            die("MLX affine source shape mismatch");
+        }
+    } else {
+        if (str_starts(gguf_name, "mtp.")) check_reversed_shape_exact(gguf_name, &te->info, tmpl);
+        else check_reversed_shape(gguf_name, &te->info, tmpl);
+    }
     if (target == DS4Q_TYPE_I32) {
         st_value sv = db_read(db, hf_name);
         byte_buf b = i64_to_i32(&sv);
         st_value_free(&sv);
-        free(hf_name);
         return b;
     }
     if (!is_quantizable_target(target)) die("unsupported regular target type");
@@ -1190,6 +1367,22 @@ static byte_buf generate_regular(st_db *db, const char *gguf_name, const tensor_
         st_value_free(&w);
         st_value_free(&s);
         free(scale_name);
+    } else if (strcmp(te->info.dtype, "U32") == 0) {
+        char *scale_name = xstrdup(hf_name);
+        char *bias_name = xstrdup(hf_name);
+        if (!str_ends(scale_name, ".weight")) die("U32 affine tensor without .weight suffix");
+        strcpy(scale_name + strlen(scale_name) - strlen(".weight"), ".scales");
+        strcpy(bias_name + strlen(bias_name) - strlen(".weight"), ".biases");
+        if (!db_has(db, scale_name) || !db_has(db, bias_name)) die("missing MLX affine scales/biases");
+        st_value w = db_read(db, hf_name);
+        st_value s = db_read(db, scale_name);
+        st_value b = db_read(db, bias_name);
+        f32 = dequant_mlx_affine(&w, &s, &b, &n);
+        st_value_free(&w);
+        st_value_free(&s);
+        st_value_free(&b);
+        free(scale_name);
+        free(bias_name);
     } else {
         st_value w = db_read(db, hf_name);
         f32 = tensor_to_f32(&w, &n);
@@ -1199,6 +1392,17 @@ static byte_buf generate_regular(st_db *db, const char *gguf_name, const tensor_
     const float *imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
     byte_buf b = f32_to_type(f32, n, target, tmpl->ne[0], imat);
     free(f32);
+    return b;
+}
+
+static byte_buf generate_regular(st_db *db, const char *gguf_name, const tensor_meta *tmpl,
+                                 ds4q_type target, const imatrix_store *imatrix) {
+    char *hf_name = hf_name_for_regular(gguf_name);
+    if (!db_has(db, hf_name)) {
+        free(hf_name);
+        hf_name = hf_name_for_fused_regular(gguf_name);
+    }
+    byte_buf b = generate_regular_hf(db, gguf_name, hf_name, tmpl, target, imatrix);
     free(hf_name);
     return b;
 }
@@ -1216,23 +1420,66 @@ typedef struct {
     int64_t nrows;
     size_t per_expert;
     byte_buf *out;
+    st_value packed_w;
+    st_value packed_s;
     int next;
     int done;
     pthread_mutex_t lock;
 } expert_job;
 
 static void generate_one_expert(expert_job *j, int xid) {
-    char prefix[256];
-    snprintf(prefix, sizeof(prefix), "layers.%d.ffn.experts.%d.%s", j->expert.layer, xid, j->wid);
+    const char *scope = j->expert.scope == EXP_SCOPE_MTP ? "model.mtp" : "model.layers";
     char weight_name[320];
     char scale_name[320];
-    snprintf(weight_name, sizeof(weight_name), "%s.weight", prefix);
-    snprintf(scale_name, sizeof(scale_name), "%s.scale", prefix);
-    st_value w = db_read(j->db, weight_name);
-    st_value s = db_read(j->db, scale_name);
-    if (w.n_dims != 2 || w.shape[0] != j->nrows || w.shape[1] * 2 != j->ncols) die("expert shape mismatch");
+    const char *part = j->wid;
+    if (j->expert.scope == EXP_SCOPE_MTP) {
+        snprintf(weight_name, sizeof(weight_name), "%s.%d.ffn.experts.%s_weight", scope, j->expert.layer, part);
+        snprintf(scale_name, sizeof(scale_name), "%s.%d.ffn.experts.%s_scale", scope, j->expert.layer, part);
+    } else {
+        snprintf(weight_name, sizeof(weight_name), "%s.%d.mlp.experts.%s_weight", scope, j->expert.layer, part);
+        snprintf(scale_name, sizeof(scale_name), "%s.%d.mlp.experts.%s_scale", scope, j->expert.layer, part);
+    }
     int64_t n = 0;
-    float *f32 = dequant_fp4_weight(&w, &s, &n);
+    float *f32 = NULL;
+    st_value w = {0};
+    if (j->packed_w.data) {
+        if (j->packed_w.n_dims != 3 || j->packed_w.shape[0] != j->n_experts ||
+            j->packed_w.shape[1] != j->nrows || j->packed_w.shape[2] * 2 != j->ncols ||
+            j->packed_s.n_dims != 3 || j->packed_s.shape[0] != j->n_experts ||
+            j->packed_s.shape[1] != j->nrows) die("packed expert shape mismatch");
+        const st_value *s = &j->packed_s;
+        w = j->packed_w;
+        st_value one_w = w;
+        st_value one_s = *s;
+        one_w.n_dims = 2;
+        one_w.shape[0] = w.shape[1];
+        one_w.shape[1] = w.shape[2];
+        one_w.data = w.data + (size_t)xid * (size_t)w.shape[1] * (size_t)w.shape[2];
+        one_w.nbytes = (size_t)w.shape[1] * (size_t)w.shape[2];
+        one_s.n_dims = 2;
+        one_s.shape[0] = s->shape[1];
+        one_s.shape[1] = s->shape[2];
+        one_s.data = s->data + (size_t)xid * (size_t)s->shape[1] * (size_t)s->shape[2] * 2;
+        one_s.nbytes = (size_t)s->shape[1] * (size_t)s->shape[2] * 2;
+        f32 = dequant_mxfp4_weight(&one_w, &one_s, &n);
+        memset(&w, 0, sizeof(w));
+    } else {
+        char prefix[256];
+        if (j->expert.scope == EXP_SCOPE_MTP) {
+            snprintf(prefix, sizeof(prefix), "mtp.%d.ffn.experts.%d.%s", j->expert.layer, xid, part);
+        } else {
+            snprintf(prefix, sizeof(prefix), "layers.%d.ffn.experts.%d.%s", j->expert.layer, xid, part);
+        }
+        snprintf(weight_name, sizeof(weight_name), "%s.weight", prefix);
+        snprintf(scale_name, sizeof(scale_name), "%s.scale", prefix);
+        st_value_free(&w);
+        w = db_read(j->db, weight_name);
+        st_value s = db_read(j->db, scale_name);
+        if (w.n_dims != 2 || w.shape[0] != j->nrows || w.shape[1] * 2 != j->ncols) die("expert shape mismatch");
+        if (strcmp(w.dtype, "U8") == 0 || strcmp(w.dtype, "I8") == 0) f32 = dequant_mxfp4_weight(&w, &s, &n);
+        else f32 = tensor_to_f32(&w, &n);
+        st_value_free(&s);
+    }
     const char *names[3] = { j->gguf_name, weight_name, NULL };
     const float *imat = imatrix_find(j->imatrix, names, 2, j->ncols, xid, j->n_experts);
     byte_buf q = f32_to_type(f32, n, j->target, j->ncols, imat);
@@ -1241,7 +1488,6 @@ static void generate_one_expert(expert_job *j, int xid) {
     free(q.data);
     free(f32);
     st_value_free(&w);
-    st_value_free(&s);
 }
 
 static void *expert_worker(void *arg) {
@@ -1278,19 +1524,37 @@ static byte_buf generate_expert(st_db *db, const char *gguf_name, const tensor_m
     int worker_count = n_threads > 0 ? n_threads : 8;
     if (worker_count < 1) worker_count = 1;
     if (worker_count > n_experts) worker_count = n_experts;
-    fprintf(stderr, "generate_expert_tensor: layer %d %s using %d worker%s\n",
+    fprintf(stderr, "generate_expert_tensor: %s %d %s using %d worker%s\n",
+            e.scope == EXP_SCOPE_MTP ? "stage" : "layer",
             e.layer, wid, worker_count, worker_count == 1 ? "" : "s");
     expert_job job = {
         .db = db, .gguf_name = gguf_name, .tmpl = tmpl, .target = target,
         .n_experts = n_experts, .imatrix = imatrix, .expert = e, .wid = wid,
         .ncols = ncols, .nrows = nrows, .per_expert = per_expert, .out = &out,
     };
+    char aggregate_weight[320];
+    char aggregate_scale[320];
+    const char *scope = e.scope == EXP_SCOPE_MTP ? "model.mtp" : "model.layers";
+    if (e.scope == EXP_SCOPE_MTP) {
+        snprintf(aggregate_weight, sizeof(aggregate_weight), "%s.%d.ffn.experts.%s_weight", scope, e.layer, wid);
+        snprintf(aggregate_scale, sizeof(aggregate_scale), "%s.%d.ffn.experts.%s_scale", scope, e.layer, wid);
+    } else {
+        snprintf(aggregate_weight, sizeof(aggregate_weight), "%s.%d.mlp.experts.%s_weight", scope, e.layer, wid);
+        snprintf(aggregate_scale, sizeof(aggregate_scale), "%s.%d.mlp.experts.%s_scale", scope, e.layer, wid);
+    }
+    if (db_has(db, aggregate_weight)) {
+        if (!db_has(db, aggregate_scale)) die("missing packed expert scale tensor");
+        job.packed_w = db_read(db, aggregate_weight);
+        job.packed_s = db_read(db, aggregate_scale);
+    }
     pthread_mutex_init(&job.lock, NULL);
     pthread_t *threads = xcalloc((size_t)worker_count, sizeof(threads[0]));
     for (int i = 1; i < worker_count; i++) pthread_create(&threads[i], NULL, expert_worker, &job);
     expert_worker(&job);
     for (int i = 1; i < worker_count; i++) pthread_join(threads[i], NULL);
     pthread_mutex_destroy(&job.lock);
+    st_value_free(&job.packed_w);
+    st_value_free(&job.packed_s);
     free(threads);
     return out;
 }
@@ -1431,6 +1695,33 @@ static size_t extra_imatrix_kv_size(const imatrix_store *im) {
 static uint64_t extra_imatrix_kv_count(const imatrix_store *im) {
     if (!imatrix_enabled(im)) return 0;
     return 2 + (im->dataset ? 1 : 0) + (im->chunks > 0 ? 1 : 0);
+}
+
+static size_t embedded_kv_size(void) {
+    return gguf_string_size("dspark.block_size") + 4 + 4 +
+           gguf_string_size("dspark.markov_rank") + 4 + 4 +
+           gguf_string_size("dspark.noise_token_id") + 4 + 4 +
+           gguf_string_size("dspark.target_layer_ids") + 4 + 4 + 8 + 3 * 4 +
+           gguf_string_size("dspark.stage_count") + 4 + 4 +
+           gguf_string_size("deepseek4.mtp_layer_count") + 4 + 4;
+}
+
+static void write_gguf_kv_u32_array3(FILE *fp, const char *key,
+                                      uint32_t a, uint32_t b, uint32_t c) {
+    write_gguf_string(fp, key);
+    write_u32(fp, GGUF_TYPE_ARRAY);
+    write_u32(fp, GGUF_TYPE_UINT32);
+    write_u64(fp, 3);
+    write_u32(fp, a); write_u32(fp, b); write_u32(fp, c);
+}
+
+static void write_embedded_kvs(FILE *fp, int stages) {
+    write_gguf_string(fp, "dspark.block_size"); write_u32(fp, GGUF_TYPE_UINT32); write_u32(fp, 5);
+    write_gguf_string(fp, "dspark.markov_rank"); write_u32(fp, GGUF_TYPE_UINT32); write_u32(fp, 256);
+    write_gguf_string(fp, "dspark.noise_token_id"); write_u32(fp, GGUF_TYPE_UINT32); write_u32(fp, 128799);
+    write_gguf_kv_u32_array3(fp, "dspark.target_layer_ids", 40, 41, 42);
+    write_gguf_string(fp, "dspark.stage_count"); write_u32(fp, GGUF_TYPE_UINT32); write_u32(fp, (uint32_t)stages);
+    write_gguf_string(fp, "deepseek4.mtp_layer_count"); write_u32(fp, GGUF_TYPE_UINT32); write_u32(fp, (uint32_t)stages);
 }
 
 static void write_imatrix_kvs(FILE *fp, const imatrix_store *im) {
@@ -1574,6 +1865,234 @@ static uint64_t fnv1a64_bytes(const uint8_t *data, size_t n) {
     return h;
 }
 
+typedef struct {
+    tensor_meta *tensors;
+    char **hf_names;
+    int *expert_counts;
+    int n_tensors;
+    int cap_tensors;
+    int stages;
+    uint64_t n_kv_extra;
+    size_t meta_size;
+    size_t data_offset;
+    size_t tensor_bytes;
+    size_t alignment;
+} embedded_context;
+
+typedef enum {
+    EMBED_SKIP = 0,
+    EMBED_EMIT,
+    EMBED_EXPERT,
+    EMBED_ALIAS,
+} embedded_action;
+
+static bool parse_embedded_mtp_name(const char *name, int *stage, const char **rest) {
+    if (!str_starts(name, "model.mtp.")) return false;
+    char *end = NULL;
+    long n = strtol(name + strlen("model.mtp."), &end, 10);
+    if (end == name + strlen("model.mtp.") || !end || *end != '.' || n < 0 || n > INT_MAX) return false;
+    if (stage) *stage = (int)n;
+    if (rest) *rest = end + 1;
+    return true;
+}
+
+static const char *embedded_mtp_suffix(const char *rest, embedded_action *action) {
+    static const name_map direct[] = {
+        { "attn.kv_norm.weight", "attn_kv_a_norm.weight" },
+        { "attn.q_norm.weight", "attn_q_a_norm.weight" },
+        { "attn.sinks", "attn_sinks.weight" },
+        { "attn.wkv.weight", "attn_kv.weight" },
+        { "attn.wo_a.weight", "attn_output_a.weight" },
+        { "attn.wo_b.weight", "attn_output_b.weight" },
+        { "attn.wq_a.weight", "attn_q_a.weight" },
+        { "attn.wq_b.weight", "attn_q_b.weight" },
+        { "attn_norm.weight", "attn_norm.weight" },
+        { "ffn.e_score_correction_bias", "exp_probs_b.bias" },
+        { "ffn.gate_weight", "ffn_gate_inp.weight" },
+        { "ffn.shared_experts.down_proj.weight", "ffn_down_shexp.weight" },
+        { "ffn.shared_experts.gate_proj.weight", "ffn_gate_shexp.weight" },
+        { "ffn.shared_experts.up_proj.weight", "ffn_up_shexp.weight" },
+        { "ffn_norm.weight", "ffn_norm.weight" },
+        { "hc_attn.base", "hc_attn_base.weight" },
+        { "hc_attn.fn", "hc_attn_fn.weight" },
+        { "hc_attn.scale", "hc_attn_scale.weight" },
+        { "hc_ffn.base", "hc_ffn_base.weight" },
+        { "hc_ffn.fn", "hc_ffn_fn.weight" },
+        { "hc_ffn.scale", "hc_ffn_scale.weight" },
+        { "main_norm.weight", "main_norm.weight" },
+        { "main_proj.weight", "main_proj.weight" },
+        { "norm.weight", "norm.weight" },
+        { "markov_head.markov_w1.weight", "markov_head.markov_w1.weight" },
+        { "markov_head.markov_w2.weight", "markov_head.markov_w2.weight" },
+        { "confidence_head.proj.weight", "confidence_head.proj.weight" },
+        { "confidence_head.proj.bias", "confidence_head.proj.bias" },
+        { "hc_head.base", "hc_head_base.weight" },
+        { "hc_head.fn", "hc_head_fn.weight" },
+        { "hc_head.scale", "hc_head_scale.weight" },
+    };
+    for (size_t i = 0; i < sizeof(direct) / sizeof(direct[0]); i++) {
+        if (strcmp(rest, direct[i].gguf) == 0) {
+            *action = EMBED_EMIT;
+            return direct[i].hf;
+        }
+    }
+    if (strcmp(rest, "embed.weight") == 0 || strcmp(rest, "embed.scales") == 0 ||
+        strcmp(rest, "embed.biases") == 0 || strcmp(rest, "head.weight") == 0 ||
+        strcmp(rest, "head.scales") == 0 || strcmp(rest, "head.biases") == 0) {
+        *action = EMBED_ALIAS;
+        return NULL;
+    }
+    if (str_starts(rest, "ffn.experts.w1_weight")) { *action = EMBED_EXPERT; return "ffn_gate_exps.weight"; }
+    if (str_starts(rest, "ffn.experts.w2_weight")) { *action = EMBED_EXPERT; return "ffn_down_exps.weight"; }
+    if (str_starts(rest, "ffn.experts.w3_weight")) { *action = EMBED_EXPERT; return "ffn_up_exps.weight"; }
+    if (str_starts(rest, "ffn.experts.w1_scale") || str_starts(rest, "ffn.experts.w2_scale") ||
+        str_starts(rest, "ffn.experts.w3_scale")) { *action = EMBED_SKIP; return NULL; }
+    *action = EMBED_SKIP;
+    return NULL;
+}
+
+static ds4q_type embedded_default_type(const char *name, const tensor_meta *t, const quant_policy *p) {
+    /* Name overrides outrank the routed-expert defaults, matching policy_type().
+     * --routed-w* is shared with the main blocks, so an mtp.* prefix override is
+     * the only way to retype the drafter's experts without moving blk.* too. */
+    for (int i = 0; i < p->n_overrides; i++) {
+        if (strcmp(name, p->overrides[i].prefix) == 0 || str_starts(name, p->overrides[i].prefix)) return p->overrides[i].type;
+    }
+    expert_tensor e = parse_expert_tensor(name);
+    if (e.is_expert) {
+        if (e.part == EXP_W1 && p->routed_w1 != DS4Q_TYPE_COUNT) return p->routed_w1;
+        if (e.part == EXP_W2 && p->routed_w2 != DS4Q_TYPE_COUNT) return p->routed_w2;
+        if (e.part == EXP_W3 && p->routed_w3 != DS4Q_TYPE_COUNT) return p->routed_w3;
+        return e.part == EXP_W2 ? DS4Q_TYPE_Q2_K : DS4Q_TYPE_IQ2_XXS;
+    }
+    if (strstr(name, "_fn.weight")) return DS4Q_TYPE_F16;
+    if (strstr(name, "base.weight") || strstr(name, "scale.weight") ||
+        strstr(name, "norm.weight") || strstr(name, "sinks.weight") ||
+        strstr(name, "bias")) return DS4Q_TYPE_F32;
+    if (is_attention_projection(name) && p->attention_proj != DS4Q_TYPE_COUNT) return p->attention_proj;
+    if (is_attention_tensor(name) && p->attention != DS4Q_TYPE_COUNT) return p->attention;
+    if (is_shared_expert(name) && p->shared != DS4Q_TYPE_COUNT) return p->shared;
+    if (p->dense != DS4Q_TYPE_COUNT) return p->dense;
+    if (t->n_dims > 1 && t->ne[0] % ds4q_block_size(DS4Q_TYPE_Q8_0) == 0) return DS4Q_TYPE_Q8_0;
+    return DS4Q_TYPE_F16;
+}
+
+static void embedded_add(embedded_context *ctx, const char *name, const char *hf,
+                         const tensor_meta *meta, int experts) {
+    for (int i = 0; i < ctx->n_tensors; i++) {
+        if (strcmp(ctx->tensors[i].name, name) == 0) die("duplicate embedded GGUF tensor name");
+    }
+    if (ctx->n_tensors == ctx->cap_tensors) {
+        ctx->cap_tensors = ctx->cap_tensors ? ctx->cap_tensors * 2 : 1536;
+        ctx->tensors = xrealloc(ctx->tensors, (size_t)ctx->cap_tensors * sizeof(ctx->tensors[0]));
+        ctx->hf_names = xrealloc(ctx->hf_names, (size_t)ctx->cap_tensors * sizeof(ctx->hf_names[0]));
+        ctx->expert_counts = xrealloc(ctx->expert_counts, (size_t)ctx->cap_tensors * sizeof(ctx->expert_counts[0]));
+    }
+    ctx->tensors[ctx->n_tensors] = *meta;
+    ctx->tensors[ctx->n_tensors].name = xstrdup(name);
+    ctx->hf_names[ctx->n_tensors] = xstrdup(hf);
+    ctx->expert_counts[ctx->n_tensors] = experts;
+    ctx->n_tensors++;
+}
+
+static void embedded_source_meta(st_db *db, const char *hf, const char *name,
+                                 const quant_policy *policy, int experts,
+                                 tensor_meta *out) {
+    tensor_entry *te = db_tensor(db, hf, NULL);
+    memset(out, 0, sizeof(*out));
+    out->name = (char *)name;
+    if (strcmp(te->info.dtype, "U8") == 0 && te->info.n_dims == 3) {
+        if (te->info.shape[0] != experts) die("embedded expert count mismatch");
+        out->n_dims = 3;
+        out->ne[0] = te->info.shape[2] * 2;
+        out->ne[1] = te->info.shape[1];
+        out->ne[2] = te->info.shape[0];
+    } else if (strcmp(te->info.dtype, "U32") == 0 && te->info.n_dims == 2) {
+        out->n_dims = 2;
+        out->ne[0] = te->info.shape[1] * 8;
+        out->ne[1] = te->info.shape[0];
+    } else {
+        out->n_dims = te->info.n_dims;
+        for (int i = 0; i < te->info.n_dims; i++) out->ne[i] = te->info.shape[te->info.n_dims - 1 - i];
+    }
+    out->type = embedded_default_type(name, out, policy);
+    if (out->type != DS4Q_TYPE_I32 && !is_quantizable_target(out->type)) die("unsupported embedded tensor type");
+    if (ds4q_can_quantize(out->type) && out->ne[0] % ds4q_block_size(out->type) != 0) {
+        fprintf(stderr, "error: embedded tensor %s ne[0] not divisible by quant block\n", name);
+        exit(1);
+    }
+    out->size = tensor_nbytes(out->type, out->ne, out->n_dims);
+}
+
+static embedded_context build_embedded_context(st_db *db, const gguf_file *tmpl,
+                                               const quant_policy *policy, int experts,
+                                               int stages, const imatrix_store *im) {
+    embedded_context ctx = {0};
+    ctx.alignment = tmpl->alignment;
+    ctx.stages = stages;
+    for (uint64_t i = 0; i < tmpl->n_tensors; i++) {
+        tensor_meta copy = tmpl->tensors[i];
+        embedded_add(&ctx, copy.name, "", &copy, 0);
+    }
+    uint32_t stage_counts[8] = {0};
+    for (int i = 0; i < db->n_weights; i++) {
+        int stage = -1;
+        const char *rest = NULL;
+        if (!parse_embedded_mtp_name(db->weights[i].name, &stage, &rest)) continue;
+        if (stage < 0 || stage >= stages || stage >= 8) die("embedded MTP stage outside requested range");
+        embedded_action action = EMBED_SKIP;
+        const char *suffix = embedded_mtp_suffix(rest, &action);
+        if (action == EMBED_ALIAS) continue;
+        if (action == EMBED_SKIP) {
+            if (strstr(rest, ".scales") || strstr(rest, ".biases") ||
+                strstr(rest, "_scale") || strstr(rest, "_bias")) continue;
+            fprintf(stderr, "error: unknown embedded MTP tensor: %s\n", db->weights[i].name);
+            exit(1);
+        }
+        char gguf_name[512];
+        snprintf(gguf_name, sizeof(gguf_name), "mtp.%d.%s", stage, suffix);
+        if (action == EMBED_EXPERT && !str_ends(db->weights[i].name, "_weight")) continue;
+        tensor_meta meta;
+        embedded_source_meta(db, db->weights[i].name, gguf_name, policy, experts, &meta);
+        embedded_add(&ctx, gguf_name, db->weights[i].name, &meta, action == EMBED_EXPERT ? experts : 0);
+        stage_counts[stage]++;
+    }
+    for (int stage = 0; stage < stages; stage++) {
+        if (stage_counts[stage] < 24) {
+            fprintf(stderr, "error: embedded MTP stage %d incomplete: %u tensors\n", stage, stage_counts[stage]);
+            exit(1);
+        }
+    }
+    ctx.n_kv_extra = 6;
+    size_t tensor_info = 0;
+    size_t off = 0;
+    for (int i = 0; i < ctx.n_tensors; i++) {
+        tensor_meta *t = &ctx.tensors[i];
+        t->new_offset = off;
+        off += ds4q_pad(t->size, ctx.alignment);
+        tensor_info += gguf_string_size(t->name) + 4 + (size_t)t->n_dims * 8 + 4 + 8;
+    }
+    ctx.tensor_bytes = off;
+    ctx.meta_size = 4 + 4 + 8 + 8 + tmpl->kv_raw_len + extra_imatrix_kv_size(im) +
+                    gguf_string_size("dspark.block_size") + 4 + 4 +
+                    gguf_string_size("dspark.markov_rank") + 4 + 4 +
+                    gguf_string_size("dspark.noise_token_id") + 4 + 4 +
+                    gguf_string_size("dspark.target_layer_ids") + 4 + 4 + 8 + 3 * 4 +
+                    gguf_string_size("dspark.stage_count") + 4 + 4 +
+                    gguf_string_size("deepseek4.mtp_layer_count") + 4 + 4 + tensor_info;
+    ctx.data_offset = ds4q_pad(ctx.meta_size, ctx.alignment);
+    return ctx;
+}
+
+static void free_embedded_context(embedded_context *ctx) {
+    for (int i = 0; i < ctx->n_tensors; i++) {
+        free(ctx->tensors[i].name);
+        free(ctx->hf_names[i]);
+    }
+    free(ctx->tensors); free(ctx->hf_names); free(ctx->expert_counts);
+    memset(ctx, 0, sizeof(*ctx));
+}
+
 static output_context build_output_context(const gguf_file *tmpl, const quant_policy *policy, const imatrix_store *im) {
     output_context out = {0};
     out.n_tensors = tmpl->n_tensors;
@@ -1655,6 +2174,69 @@ static void write_full_gguf(st_db *db, const gguf_file *tmpl, const output_conte
     fclose(fp);
 }
 
+static byte_buf generate_embedded_tensor(st_db *db, const embedded_context *ctx, int index,
+                                         int threads, const imatrix_store *im) {
+    const tensor_meta *t = &ctx->tensors[index];
+    if (index < (int)0) die("bad embedded tensor index");
+    if (ctx->expert_counts[index] > 0) {
+        return generate_expert(db, t->name, t, t->type, ctx->expert_counts[index], threads, im);
+    }
+    return generate_regular_hf(db, t->name, ctx->hf_names[index], t, t->type, im);
+}
+
+static void write_embedded_gguf(st_db *db, const gguf_file *tmpl, const embedded_context *ctx,
+                                const char *out_path, int threads, const imatrix_store *im) {
+    FILE *fp = fopen(out_path, "wb");
+    if (!fp) die_errno("open output", out_path);
+    if (fwrite("GGUF", 1, 4, fp) != 4) die("write GGUF magic failed");
+    write_u32(fp, tmpl->version);
+    write_u64(fp, (uint64_t)ctx->n_tensors);
+    write_u64(fp, tmpl->n_kv + ctx->n_kv_extra + extra_imatrix_kv_count(im));
+    if (fwrite(tmpl->kv_raw, 1, tmpl->kv_raw_len, fp) != tmpl->kv_raw_len) die("write GGUF KV failed");
+    write_embedded_kvs(fp, ctx->stages);
+    write_imatrix_kvs(fp, im);
+    for (int i = 0; i < ctx->n_tensors; i++) {
+        const tensor_meta *t = &ctx->tensors[i];
+        write_gguf_string(fp, t->name);
+        write_u32(fp, (uint32_t)t->n_dims);
+        for (int j = 0; j < t->n_dims; j++) write_u64(fp, (uint64_t)t->ne[j]);
+        write_u32(fp, (uint32_t)t->type);
+        write_u64(fp, t->new_offset);
+    }
+    long pos = ftell(fp);
+    if (pos < 0 || (size_t)pos > ctx->data_offset) die("embedded GGUF metadata larger than planned");
+    write_padding(fp, ctx->data_offset - (size_t)pos);
+    for (int i = 0; i < ctx->n_tensors; i++) {
+        const tensor_meta *t = &ctx->tensors[i];
+        fprintf(stderr, "[%4d/%4d] %s -> %s\n", i + 1, ctx->n_tensors, t->name, ds4q_type_name(t->type));
+        byte_buf data;
+        if (ctx->expert_counts[i] > 0) {
+            data = generate_embedded_tensor(db, ctx, i, threads, im);
+        } else if (ctx->hf_names[i][0]) {
+            data = generate_embedded_tensor(db, ctx, i, threads, im);
+        } else {
+            data = read_gguf_tensor_data(tmpl, tmpl->path, t->name);
+        }
+        if (data.size != t->size) {
+            fprintf(stderr, "error: embedded size mismatch for %s: got %zu expected %zu\n", t->name, data.size, t->size);
+            exit(1);
+        }
+        if (fwrite(data.data, 1, data.size, fp) != data.size) die_errno("write tensor", out_path);
+        write_padding(fp, ds4q_pad(data.size, ctx->alignment) - data.size);
+        free(data.data);
+    }
+    if (fclose(fp) != 0) die_errno("close output", out_path);
+}
+
+static void print_embedded_plan(const embedded_context *ctx) {
+    size_t experts = 0;
+    for (int i = 0; i < ctx->n_tensors; i++) if (ctx->expert_counts[i] > 0) experts++;
+    printf("embedded_mtp: stages=%d tensors=%d routed_tensors=%zu\n", ctx->stages, ctx->n_tensors, experts);
+    printf("meta_bytes: %zu\n", ctx->data_offset);
+    printf("tensor_bytes_padded: %zu\n", ctx->tensor_bytes);
+    printf("approx_file_bytes: %zu\n", ctx->data_offset + ctx->tensor_bytes);
+}
+
 static void print_plan(const gguf_file *tmpl, const output_context *out_ctx) {
     size_t tensor_bytes = 0;
     size_t changed = 0;
@@ -1691,6 +2273,8 @@ typedef struct {
     bool dry_run;
     bool overwrite;
     bool imatrix_strict;
+    bool embed_mtp;
+    int mtp_stages;
 } params;
 
 static void usage(const char *argv0) {
@@ -1704,6 +2288,8 @@ static void usage(const char *argv0) {
     printf("  --compare-tensor NAME  regenerate one tensor, byte-compare, and exit\n");
     printf("  --overwrite            replace --out if it already exists\n");
     printf("  --dry-run              print output plan without reading HF tensor data\n");
+    printf("  --embed-mtp            merge model.mtp.* tensors into main template output\n");
+    printf("  --mtp-stages N         embedded MTP stage count, default 3\n");
     printf("  --imatrix FILE         legacy .dat imatrix from ds4 --imatrix-out\n");
     printf("  --imatrix-strict       fail if a quantized tensor has no matching imatrix vector\n");
     printf("  --experts TYPE         set routed w1/w2/w3 expert tensors to TYPE\n");
@@ -1744,6 +2330,7 @@ static params parse_args(int argc, char **argv) {
     p.policy.embedding = p.policy.output = p.policy.dense = DS4Q_TYPE_COUNT;
     p.n_experts = 0;
     p.n_threads = 8;
+    p.mtp_stages = 3;
 
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
@@ -1764,6 +2351,11 @@ static params parse_args(int argc, char **argv) {
             p.overwrite = true;
         } else if (strcmp(arg, "--dry-run") == 0) {
             p.dry_run = true;
+        } else if (strcmp(arg, "--embed-mtp") == 0) {
+            p.embed_mtp = true;
+        } else if (strcmp(arg, "--mtp-stages") == 0) {
+            p.mtp_stages = atoi(need_value(argc, argv, &i, arg));
+            if (p.mtp_stages < 1 || p.mtp_stages > 8) die("--mtp-stages must be 1..8");
         } else if (strcmp(arg, "--imatrix") == 0) {
             p.imatrix_file = need_value(argc, argv, &i, arg);
         } else if (strcmp(arg, "--imatrix-strict") == 0) {
@@ -1881,6 +2473,35 @@ int main(int argc, char **argv) {
     } else {
         fprintf(stderr, "using %d routed experts from --n-experts\n", p.n_experts);
     }
+
+    if (p.embed_mtp) {
+        st_db db;
+        db_open(&db, p.hf_dir);
+        embedded_context ctx = build_embedded_context(&db, &tmpl, &p.policy, p.n_experts, p.mtp_stages, &imatrix);
+        print_embedded_plan(&ctx);
+        if (p.compare_tensor) {
+            int found = -1;
+            for (int i = 0; i < ctx.n_tensors; i++) {
+                if (strcmp(ctx.tensors[i].name, p.compare_tensor) == 0) { found = i; break; }
+            }
+            if (found < 0) die("embedded compare tensor not found");
+            byte_buf data = generate_embedded_tensor(&db, &ctx, found, p.n_threads, &imatrix);
+            printf("tensor: %s\nbytes: %zu\nfnv1a64: %016" PRIx64 "\n",
+                   p.compare_tensor, data.size, fnv1a64_bytes(data.data, data.size));
+            free(data.data);
+        } else if (!p.dry_run) {
+            write_embedded_gguf(&db, &tmpl, &ctx, p.out_gguf, p.n_threads, &imatrix);
+            fprintf(stderr, "wrote %s\n", p.out_gguf);
+        }
+        free_embedded_context(&ctx);
+        db_close(&db);
+        imatrix_free(&imatrix);
+        free_gguf_file(&tmpl);
+        for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
+        free(p.policy.overrides);
+        return 0;
+    }
+
     output_context out_ctx = build_output_context(&tmpl, &p.policy, &imatrix);
     print_plan(&tmpl, &out_ctx);
     if (p.dry_run) return 0;

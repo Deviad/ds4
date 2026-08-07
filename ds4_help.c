@@ -173,7 +173,7 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
             opt(fp, c, "--mtp FILE", "Optional MTP support GGUF used for draft-token probes.");
         }
         if (tool == DS4_HELP_DS4 || tool == DS4_HELP_AGENT || tool == DS4_HELP_SERVER) {
-            opt(fp, c, "--mtp-draft N", "Maximum autoregressive MTP draft tokens. Default: 1");
+            opt(fp, c, "--mtp-draft N", "Maximum autoregressive MTP draft tokens. Default: 1 (2 on embedded three-stage MTP models)");
             opt(fp, c, "--mtp-margin F", "Verifier confidence margin for fast MTP acceptance. Default: 3");
         }
         opt(fp, c, "--quality", "Prefer exact kernels where faster approximate paths exist.");

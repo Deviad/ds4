@@ -3061,7 +3061,38 @@ typedef struct {
     ds4_layer_weights layer[DS4_MAX_LAYER];
 } ds4_weights;
 
+#define DS4_MTP_STAGE_COUNT 3u
+#define DS4_MTP_BLOCK_SIZE 5u
+/*
+ * Default draft depth for embedded MTP.  Measured on the mixed-quant Flash
+ * model the batched verify pass costs ~1.6x one decode step while drafting is
+ * nearly free, so deeper drafts lose more on verification than they win on
+ * acceptance; draft 2 with the default margin 3 is the break-even optimum.
+ */
+#define DS4_MTP_DEFAULT_DRAFT 2
+
 typedef struct {
+    ds4_tensor *main_proj;
+    ds4_tensor *main_norm;
+    ds4_tensor *norm;
+    ds4_tensor *markov_w1;
+    ds4_tensor *markov_w2;
+    ds4_tensor *confidence_weight;
+    ds4_tensor *confidence_bias;
+    ds4_tensor *hc_head_base;
+    ds4_tensor *hc_head_fn;
+    ds4_tensor *hc_head_scale;
+    ds4_tensor *embed_alias;
+    ds4_tensor *head_alias;
+    ds4_layer_weights block;
+} ds4_mtp_stage_weights;
+
+typedef struct {
+    bool embedded;
+    uint32_t n_stages;
+    ds4_mtp_stage_weights stage[DS4_MTP_STAGE_COUNT];
+
+    /* Legacy one-stage sidecar contract. */
     ds4_tensor *e_proj;
     ds4_tensor *h_proj;
     ds4_tensor *enorm;
@@ -3119,6 +3150,28 @@ static ds4_tensor *required_tensor(const ds4_model *m, const char *name) {
     return t;
 }
 
+static ds4_tensor *required_unique_tensor(const ds4_model *m, const char *name) {
+    ds4_tensor *found = NULL;
+    uint32_t count = 0;
+    for (uint64_t i = 0; i < m->n_tensors; i++) {
+        ds4_tensor *t = &m->tensors[i];
+        if (t->name.len == strlen(name) && memcmp(t->name.ptr, name, t->name.len) == 0) {
+            found = t;
+            count++;
+        }
+    }
+    if (count == 0) {
+        fprintf(stderr, "ds4: required tensor is missing: %s\n", name);
+        exit(1);
+    }
+    if (count != 1) {
+        fprintf(stderr, "ds4: duplicate tensor name in MTP contract: %s (%u entries)\n",
+                name, count);
+        exit(1);
+    }
+    return found;
+}
+
 static ds4_tensor *tensor_by_namef(const ds4_model *m, const char *fmt, uint32_t layer) {
     char name[128];
     int n = snprintf(name, sizeof(name), fmt, layer);
@@ -3131,6 +3184,13 @@ static ds4_tensor *required_tensorf(const ds4_model *m, const char *fmt, uint32_
     int n = snprintf(name, sizeof(name), fmt, layer);
     if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
     return required_tensor(m, name);
+}
+
+static ds4_tensor *required_unique_tensorf(const ds4_model *m, const char *fmt, uint32_t layer) {
+    char name[128];
+    int n = snprintf(name, sizeof(name), fmt, layer);
+    if (n < 0 || (size_t)n >= sizeof(name)) ds4_die("tensor name is too long");
+    return required_unique_tensor(m, name);
 }
 
 static void tensor_expect_layout(
@@ -3683,6 +3743,109 @@ static void mtp_weights_validate_layout(const ds4_mtp_weights *w) {
     tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
     tensor_expect_layout(l->ffn_up_shexp,   DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
     tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0);
+}
+
+static bool tensor_type_is_mtp_dense(uint32_t type) {
+    return type == DS4_TENSOR_F16 || type == DS4_TENSOR_F32 ||
+           type == DS4_TENSOR_Q8_0 || type == DS4_TENSOR_Q2_K;
+}
+
+static void tensor_expect_mtp_dense(const ds4_tensor *t,
+                                    uint32_t ndim,
+                                    uint64_t d0,
+                                    uint64_t d1,
+                                    uint64_t d2) {
+    if (!t) ds4_die("internal error: missing embedded MTP dense tensor");
+    if (!tensor_type_is_mtp_dense(t->type)) {
+        fprintf(stderr, "ds4: embedded MTP tensor %.*s has unsupported type %s\n",
+                (int)t->name.len, t->name.ptr, tensor_type_name(t->type));
+        exit(1);
+    }
+    tensor_expect_layout(t, t->type, ndim, d0, d1, d2);
+}
+
+static void tensor_expect_mtp_routed(const ds4_tensor *t,
+                                     uint32_t ndim,
+                                     uint64_t d0,
+                                     uint64_t d1,
+                                     uint64_t d2) {
+    if (!t) ds4_die("internal error: missing embedded MTP routed tensor");
+    if (t->type != DS4_TENSOR_IQ2_XXS && t->type != DS4_TENSOR_Q2_K &&
+        t->type != DS4_TENSOR_Q4_K) {
+        fprintf(stderr, "ds4: embedded MTP routed tensor %.*s has unsupported type %s\n",
+                (int)t->name.len, t->name.ptr, tensor_type_name(t->type));
+        exit(1);
+    }
+    tensor_expect_layout(t, t->type, ndim, d0, d1, d2);
+}
+
+static void mtp_stage_validate_layout(const ds4_mtp_stage_weights *stage,
+                                      uint32_t stage_idx) {
+    const uint64_t hc_dim = (uint64_t)DS4_N_EMBD * DS4_N_HC;
+    const uint64_t hc_mix_dim = 2u * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
+    const uint64_t q_dim = (uint64_t)DS4_N_HEAD * DS4_N_HEAD_DIM;
+    const uint64_t out_low_dim = (uint64_t)DS4_N_OUT_GROUP * DS4_N_LORA_O;
+    const ds4_layer_weights *l = &stage->block;
+
+    tensor_expect_layout(l->hc_attn_fn, DS4_TENSOR_F16, 2, hc_dim, hc_mix_dim, 0);
+    tensor_expect_layout(l->hc_attn_scale, DS4_TENSOR_F32, 1, 3, 0, 0);
+    tensor_expect_layout(l->hc_attn_base, DS4_TENSOR_F32, 1, hc_mix_dim, 0, 0);
+    tensor_expect_layout(l->attn_norm, DS4_TENSOR_F32, 1, DS4_N_EMBD, 0, 0);
+    tensor_expect_mtp_dense(l->attn_q_a, 2, DS4_N_EMBD, DS4_N_LORA_Q, 0);
+    tensor_expect_layout(l->attn_q_a_norm, DS4_TENSOR_F32, 1, DS4_N_LORA_Q, 0, 0);
+    tensor_expect_mtp_dense(l->attn_q_b, 2, DS4_N_LORA_Q, q_dim, 0);
+    tensor_expect_mtp_dense(l->attn_kv, 2, DS4_N_EMBD, DS4_N_HEAD_DIM, 0);
+    tensor_expect_layout(l->attn_kv_a_norm, DS4_TENSOR_F32, 1, DS4_N_HEAD_DIM, 0, 0);
+    tensor_expect_layout(l->attn_sinks, DS4_TENSOR_F32, 1, DS4_N_HEAD, 0, 0);
+    tensor_expect_mtp_dense(l->attn_output_a, 2,
+                            DS4_N_HEAD_DIM * (DS4_N_HEAD / DS4_N_OUT_GROUP),
+                            out_low_dim, 0);
+    tensor_expect_mtp_dense(l->attn_output_b, 2, out_low_dim, DS4_N_EMBD, 0);
+    tensor_expect_layout(l->hc_ffn_fn, DS4_TENSOR_F16, 2, hc_dim, hc_mix_dim, 0);
+    tensor_expect_layout(l->hc_ffn_scale, DS4_TENSOR_F32, 1, 3, 0, 0);
+    tensor_expect_layout(l->hc_ffn_base, DS4_TENSOR_F32, 1, hc_mix_dim, 0, 0);
+    tensor_expect_layout(l->ffn_norm, DS4_TENSOR_F32, 1, DS4_N_EMBD, 0, 0);
+    tensor_expect_mtp_dense(l->ffn_gate_inp, 2, DS4_N_EMBD, DS4_N_EXPERT, 0);
+    tensor_expect_layout(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0);
+    tensor_expect_mtp_routed(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
+    tensor_expect_mtp_routed(l->ffn_up_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
+    tensor_expect_mtp_routed(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT);
+    tensor_expect_layout(l->ffn_gate_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
+    tensor_expect_layout(l->ffn_up_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_EMBD, DS4_N_FF_EXP, 0);
+    tensor_expect_layout(l->ffn_down_shexp, DS4_TENSOR_Q8_0, 2, DS4_N_FF_EXP, DS4_N_EMBD, 0);
+    if (l->ffn_gate_exps->type != l->ffn_up_exps->type) {
+        ds4_die("embedded MTP routed gate/up experts use different quant types");
+    }
+
+    if (stage_idx == 0) {
+        tensor_expect_layout(stage->main_norm, DS4_TENSOR_F32, 1, DS4_N_EMBD, 0, 0);
+        tensor_expect_mtp_dense(stage->main_proj, 2, 3ull * DS4_N_EMBD, DS4_N_EMBD, 0);
+    }
+    if (stage_idx == DS4_MTP_STAGE_COUNT - 1u) {
+        const uint64_t rank = stage->markov_w1->dim[0];
+        tensor_expect_layout(stage->norm, DS4_TENSOR_F32, 1, DS4_N_EMBD, 0, 0);
+        tensor_expect_layout(stage->markov_w1, DS4_TENSOR_Q8_0, 2, rank, DS4_N_VOCAB, 0);
+        tensor_expect_layout(stage->markov_w2, DS4_TENSOR_Q8_0, 2, rank, DS4_N_VOCAB, 0);
+        tensor_expect_mtp_dense(stage->confidence_weight, 2, DS4_N_EMBD + rank, 1, 0);
+        tensor_expect_layout(stage->confidence_bias, DS4_TENSOR_F32, 1, 1, 0, 0);
+        tensor_expect_layout(stage->hc_head_base, DS4_TENSOR_F32, 1, DS4_N_HC, 0, 0);
+        tensor_expect_layout(stage->hc_head_fn, DS4_TENSOR_F16, 2, hc_dim, DS4_N_HC, 0);
+        tensor_expect_layout(stage->hc_head_scale, DS4_TENSOR_F32, 1, 1, 0, 0);
+    }
+}
+
+static bool model_has_embedded_mtp_tensors(const ds4_model *m) {
+    if (!m) return false;
+    for (uint64_t i = 0; i < m->n_tensors; i++) {
+        const ds4_str name = m->tensors[i].name;
+        if (name.len >= 6 &&
+            memcmp(name.ptr, "mtp.", 4) == 0 &&
+            name.ptr[5] == '.' &&
+            (name.ptr[4] == '1' || name.ptr[4] == '2')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool ds4_shape_matches_metadata(
@@ -4433,8 +4596,44 @@ static DS4_MAYBE_UNUSED bool weights_model_map_output_spans(
     return model_map_span_vec_finish(spans);
 }
 
-static void mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m) {
+static void mtp_bind_block(ds4_layer_weights *l,
+                           const ds4_model *m,
+                           uint32_t stage,
+                           bool unique) {
+#define MTP_TENSOR(field_, suffix_) \
+    l->field_ = unique ? required_unique_tensorf(m, "mtp.%u." suffix_, stage) : \
+                         required_tensorf(m, "mtp.%u." suffix_, stage)
+    MTP_TENSOR(hc_attn_fn, "hc_attn_fn.weight");
+    MTP_TENSOR(hc_attn_scale, "hc_attn_scale.weight");
+    MTP_TENSOR(hc_attn_base, "hc_attn_base.weight");
+    MTP_TENSOR(attn_norm, "attn_norm.weight");
+    MTP_TENSOR(attn_q_a, "attn_q_a.weight");
+    MTP_TENSOR(attn_q_a_norm, "attn_q_a_norm.weight");
+    MTP_TENSOR(attn_q_b, "attn_q_b.weight");
+    MTP_TENSOR(attn_kv, "attn_kv.weight");
+    MTP_TENSOR(attn_kv_a_norm, "attn_kv_a_norm.weight");
+    MTP_TENSOR(attn_sinks, "attn_sinks.weight");
+    MTP_TENSOR(attn_output_a, "attn_output_a.weight");
+    MTP_TENSOR(attn_output_b, "attn_output_b.weight");
+    MTP_TENSOR(hc_ffn_fn, "hc_ffn_fn.weight");
+    MTP_TENSOR(hc_ffn_scale, "hc_ffn_scale.weight");
+    MTP_TENSOR(hc_ffn_base, "hc_ffn_base.weight");
+    MTP_TENSOR(ffn_norm, "ffn_norm.weight");
+    MTP_TENSOR(ffn_gate_inp, "ffn_gate_inp.weight");
+    MTP_TENSOR(ffn_exp_probs_b, "exp_probs_b.bias");
+    MTP_TENSOR(ffn_gate_exps, "ffn_gate_exps.weight");
+    MTP_TENSOR(ffn_up_exps, "ffn_up_exps.weight");
+    MTP_TENSOR(ffn_down_exps, "ffn_down_exps.weight");
+    MTP_TENSOR(ffn_gate_shexp, "ffn_gate_shexp.weight");
+    MTP_TENSOR(ffn_up_shexp, "ffn_up_shexp.weight");
+    MTP_TENSOR(ffn_down_shexp, "ffn_down_shexp.weight");
+#undef MTP_TENSOR
+}
+
+static void mtp_weights_bind_legacy(ds4_mtp_weights *w, const ds4_model *m) {
     memset(w, 0, sizeof(*w));
+    w->embedded = false;
+    w->n_stages = 1;
 
     w->hc_head_base  = required_tensor(m, "mtp.0.hc_head_base.weight");
     w->hc_head_fn    = required_tensor(m, "mtp.0.hc_head_fn.weight");
@@ -4444,34 +4643,65 @@ static void mtp_weights_bind(ds4_mtp_weights *w, const ds4_model *m) {
     w->enorm         = required_tensor(m, "mtp.0.enorm.weight");
     w->hnorm         = required_tensor(m, "mtp.0.hnorm.weight");
     w->norm          = required_tensor(m, "mtp.0.norm.weight");
-
-    ds4_layer_weights *l = &w->block;
-    l->hc_attn_fn      = required_tensor(m, "mtp.0.hc_attn_fn.weight");
-    l->hc_attn_scale   = required_tensor(m, "mtp.0.hc_attn_scale.weight");
-    l->hc_attn_base    = required_tensor(m, "mtp.0.hc_attn_base.weight");
-    l->attn_norm       = required_tensor(m, "mtp.0.attn_norm.weight");
-    l->attn_q_a        = required_tensor(m, "mtp.0.attn_q_a.weight");
-    l->attn_q_a_norm   = required_tensor(m, "mtp.0.attn_q_a_norm.weight");
-    l->attn_q_b        = required_tensor(m, "mtp.0.attn_q_b.weight");
-    l->attn_kv         = required_tensor(m, "mtp.0.attn_kv.weight");
-    l->attn_kv_a_norm  = required_tensor(m, "mtp.0.attn_kv_a_norm.weight");
-    l->attn_sinks      = required_tensor(m, "mtp.0.attn_sinks.weight");
-    l->attn_output_a   = required_tensor(m, "mtp.0.attn_output_a.weight");
-    l->attn_output_b   = required_tensor(m, "mtp.0.attn_output_b.weight");
-    l->hc_ffn_fn       = required_tensor(m, "mtp.0.hc_ffn_fn.weight");
-    l->hc_ffn_scale    = required_tensor(m, "mtp.0.hc_ffn_scale.weight");
-    l->hc_ffn_base     = required_tensor(m, "mtp.0.hc_ffn_base.weight");
-    l->ffn_norm        = required_tensor(m, "mtp.0.ffn_norm.weight");
-    l->ffn_gate_inp    = required_tensor(m, "mtp.0.ffn_gate_inp.weight");
-    l->ffn_exp_probs_b = required_tensor(m, "mtp.0.exp_probs_b.bias");
-    l->ffn_gate_exps   = required_tensor(m, "mtp.0.ffn_gate_exps.weight");
-    l->ffn_up_exps     = required_tensor(m, "mtp.0.ffn_up_exps.weight");
-    l->ffn_down_exps   = required_tensor(m, "mtp.0.ffn_down_exps.weight");
-    l->ffn_gate_shexp  = required_tensor(m, "mtp.0.ffn_gate_shexp.weight");
-    l->ffn_up_shexp    = required_tensor(m, "mtp.0.ffn_up_shexp.weight");
-    l->ffn_down_shexp  = required_tensor(m, "mtp.0.ffn_down_shexp.weight");
-
+    mtp_bind_block(&w->block, m, 0, false);
     mtp_weights_validate_layout(w);
+}
+
+static void mtp_weights_bind_embedded(ds4_mtp_weights *w,
+                                      const ds4_model *m,
+                                      const ds4_weights *base) {
+    static const uint32_t expected_counts[DS4_MTP_STAGE_COUNT] = { 26u, 24u, 32u };
+    uint32_t counts[DS4_MTP_STAGE_COUNT] = {0, 0, 0};
+
+    memset(w, 0, sizeof(*w));
+    w->embedded = true;
+    w->n_stages = DS4_MTP_STAGE_COUNT;
+    for (uint64_t i = 0; i < m->n_tensors; i++) {
+        const ds4_str name = m->tensors[i].name;
+        if (name.len < 6 || memcmp(name.ptr, "mtp.", 4) != 0 ||
+            name.ptr[5] != '.') {
+            if (name.len >= 4 && memcmp(name.ptr, "mtp.", 4) == 0) {
+                ds4_die("embedded MTP tensor name has an invalid stage prefix");
+            }
+            continue;
+        }
+        const char stage_ch = name.ptr[4];
+        if (stage_ch < '0' || stage_ch >= '0' + (char)DS4_MTP_STAGE_COUNT) {
+            ds4_die("embedded MTP tensor stage is outside stages 0-2");
+        }
+        counts[(uint32_t)(stage_ch - '0')]++;
+    }
+    for (uint32_t stage = 0; stage < DS4_MTP_STAGE_COUNT; stage++) {
+        if (counts[stage] != expected_counts[stage]) {
+            fprintf(stderr,
+                    "ds4: embedded MTP stage %u has %u tensors, expected %u\n",
+                    stage, counts[stage], expected_counts[stage]);
+            exit(1);
+        }
+
+        ds4_mtp_stage_weights *out = &w->stage[stage];
+        mtp_bind_block(&out->block, m, stage, true);
+        if (stage == 0) {
+            out->main_proj = required_unique_tensorf(m, "mtp.%u.main_proj.weight", stage);
+            out->main_norm = required_unique_tensorf(m, "mtp.%u.main_norm.weight", stage);
+        }
+        if (stage == DS4_MTP_STAGE_COUNT - 1u) {
+            out->norm = required_unique_tensorf(m, "mtp.%u.norm.weight", stage);
+            out->markov_w1 = required_unique_tensorf(m, "mtp.%u.markov_head.markov_w1.weight", stage);
+            out->markov_w2 = required_unique_tensorf(m, "mtp.%u.markov_head.markov_w2.weight", stage);
+            out->confidence_weight = required_unique_tensorf(m, "mtp.%u.confidence_head.proj.weight", stage);
+            out->confidence_bias = required_unique_tensorf(m, "mtp.%u.confidence_head.proj.bias", stage);
+            out->hc_head_base = required_unique_tensorf(m, "mtp.%u.hc_head_base.weight", stage);
+            out->hc_head_fn = required_unique_tensorf(m, "mtp.%u.hc_head_fn.weight", stage);
+            out->hc_head_scale = required_unique_tensorf(m, "mtp.%u.hc_head_scale.weight", stage);
+            if (!base || !base->token_embd || !base->output) {
+                ds4_die("embedded MTP requires main token embedding and output aliases");
+            }
+            out->embed_alias = base->token_embd;
+            out->head_alias = base->output;
+        }
+        mtp_stage_validate_layout(out, stage);
+    }
 }
 
 static void weights_free(ds4_weights *w) {
@@ -10419,8 +10649,12 @@ typedef struct {
     ds4_gpu_tensor *mtp_input_hc;
     ds4_gpu_tensor *mtp_state_hc;
     ds4_gpu_tensor *mtp_next_hc;
+    ds4_gpu_tensor *mtp_main_hidden;
+    ds4_gpu_tensor *mtp_mean_weights;
     ds4_gpu_tensor *mtp_raw_cache;
+    ds4_gpu_tensor *mtp_stage_raw_cache[DS4_MTP_STAGE_COUNT];
     uint32_t mtp_n_raw;
+    uint32_t mtp_stage_exec_count[DS4_MTP_STAGE_COUNT];
     uint32_t prefill_cap;
     uint32_t raw_window;
 
@@ -10577,6 +10811,11 @@ static void metal_graph_free(ds4_gpu_graph *g) {
     ds4_gpu_tensor_free(g->prefill_tokens);
     ds4_gpu_tensor_free(g->logits);
     ds4_gpu_tensor_free(g->mtp_raw_cache);
+    for (uint32_t stage = 0; stage < DS4_MTP_STAGE_COUNT; stage++) {
+        ds4_gpu_tensor_free(g->mtp_stage_raw_cache[stage]);
+    }
+    ds4_gpu_tensor_free(g->mtp_mean_weights);
+    ds4_gpu_tensor_free(g->mtp_main_hidden);
     ds4_gpu_tensor_free(g->mtp_next_hc);
     ds4_gpu_tensor_free(g->mtp_state_hc);
     ds4_gpu_tensor_free(g->mtp_input_hc);
@@ -11163,11 +11402,40 @@ static bool metal_graph_alloc_raw_cap(
         g->mtp_input_hc = ds4_gpu_tensor_alloc(hc_dim * sizeof(float));
         g->mtp_state_hc = ds4_gpu_tensor_alloc(hc_dim * sizeof(float));
         g->mtp_next_hc = ds4_gpu_tensor_alloc(hc_dim * sizeof(float));
+        g->mtp_main_hidden = ds4_gpu_tensor_alloc(3ull * DS4_N_EMBD * sizeof(float));
+        g->mtp_mean_weights = ds4_gpu_tensor_alloc((uint64_t)DS4_N_HC * sizeof(float));
         g->mtp_raw_cache = metal_graph_alloc_kv_cache_tensor(
                 managed_kv_cache,
                 (uint64_t)raw_cap * DS4_N_HEAD_DIM * sizeof(float));
+        for (uint32_t stage = 0; stage < DS4_MTP_STAGE_COUNT; stage++) {
+            g->mtp_stage_raw_cache[stage] = metal_graph_alloc_kv_cache_tensor(
+                    managed_kv_cache,
+                    (uint64_t)raw_cap * DS4_N_HEAD_DIM * sizeof(float));
+        }
+        if (g->mtp_mean_weights) {
+            float mean = 1.0f / (float)DS4_N_HC;
+            if (ds4_gpu_tensor_write(g->mtp_mean_weights,
+                                     0,
+                                     &mean,
+                                     sizeof(mean)) == 0) {
+                ds4_gpu_tensor_free(g->mtp_mean_weights);
+                g->mtp_mean_weights = NULL;
+            } else {
+                float *means = xmalloc((size_t)DS4_N_HC * sizeof(means[0]));
+                for (uint32_t i = 0; i < DS4_N_HC; i++) means[i] = mean;
+                if (ds4_gpu_tensor_write(g->mtp_mean_weights,
+                                         0,
+                                         means,
+                                         (uint64_t)DS4_N_HC * sizeof(means[0])) == 0) {
+                    ds4_gpu_tensor_free(g->mtp_mean_weights);
+                    g->mtp_mean_weights = NULL;
+                }
+                free(means);
+            }
+        }
         g->spec_logits = ds4_gpu_tensor_alloc((uint64_t)16 * DS4_N_VOCAB * sizeof(float));
         g->mtp_n_raw = 0;
+        memset(g->mtp_stage_exec_count, 0, sizeof(g->mtp_stage_exec_count));
     }
 
     g->prefill_tokens = ds4_gpu_tensor_alloc(pc * sizeof(int32_t));
@@ -11264,7 +11532,10 @@ static bool metal_graph_alloc_raw_cap(
                      (g->mtp_embed && g->mtp_enorm && g->mtp_eproj &&
                       g->mtp_eproj_hc && g->mtp_hnorm_hc && g->mtp_hproj_hc &&
                       g->mtp_input_hc && g->mtp_state_hc && g->mtp_next_hc &&
-                      g->mtp_raw_cache && g->spec_logits)) &&
+                      g->mtp_main_hidden && g->mtp_mean_weights &&
+                      g->mtp_raw_cache && g->spec_logits &&
+                      g->mtp_stage_raw_cache[0] && g->mtp_stage_raw_cache[1] &&
+                      g->mtp_stage_raw_cache[2])) &&
                     g->prefill_tokens &&
                     g->batch_cur_hc && g->batch_next_hc && g->batch_flat_hc &&
                     g->batch_hc_mix && g->batch_hc_split &&
@@ -14839,7 +15110,7 @@ static bool metal_graph_profile_router_selection(
     return true;
 }
 
-static bool metal_graph_encode_decode_layer(
+static bool metal_graph_encode_decode_layer_impl(
         ds4_gpu_graph  *g,
         const ds4_model        *model,
         const ds4_layer_weights *layer,
@@ -14849,7 +15120,8 @@ static bool metal_graph_encode_decode_layer(
         uint32_t                raw_cap,
         uint32_t                raw_row,
         uint32_t                n_raw,
-        int                     token) {
+        int                     token,
+        bool                    mtp_stage) {
     const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
     const uint64_t mix_hc = 2ull * DS4_N_HC + (uint64_t)DS4_N_HC * DS4_N_HC;
     const uint64_t q_rank = layer->attn_q_a->dim[1];
@@ -14863,9 +15135,9 @@ static bool metal_graph_encode_decode_layer(
     const uint64_t expert_mid_dim = layer->ffn_gate_exps->dim[1];
     const uint64_t down_in_dim = layer->ffn_down_exps->dim[0];
     const uint64_t routed_out_dim = layer->ffn_down_exps->dim[1];
-    const bool compressed = ds4_layer_compress_ratio(il) != 0;
-    const float freq_base = layer_rope_freq_base(il);
-    const float freq_scale = layer_rope_freq_scale(il);
+    const bool compressed = !mtp_stage && ds4_layer_compress_ratio(il) != 0;
+    const float freq_base = mtp_stage ? DS4_ROPE_FREQ_BASE : layer_rope_freq_base(il);
+    const float freq_scale = mtp_stage ? 1.0f : layer_rope_freq_scale(il);
     const float ext_factor = compressed && DS4_ROPE_SCALE_FACTOR > 1.0f ? 1.0f : 0.0f;
     float attn_factor = 1.0f;
     if (ext_factor != 0.0f && freq_scale > 0.0f) {
@@ -16067,6 +16339,38 @@ static bool metal_graph_encode_decode_layer(
     return ok;
 }
 
+static bool metal_graph_encode_decode_layer(
+        ds4_gpu_graph  *g,
+        const ds4_model        *model,
+        const ds4_layer_weights *layer,
+        uint32_t                il,
+        uint32_t                pos,
+        ds4_gpu_tensor       *raw_cache,
+        uint32_t                raw_cap,
+        uint32_t                raw_row,
+        uint32_t                n_raw,
+        int                     token) {
+    return metal_graph_encode_decode_layer_impl(g, model, layer, il, pos,
+                                                raw_cache, raw_cap, raw_row,
+                                                n_raw, token, false);
+}
+
+static bool metal_graph_encode_decode_layer_mtp(
+        ds4_gpu_graph  *g,
+        const ds4_model        *model,
+        const ds4_layer_weights *layer,
+        uint32_t                stage,
+        uint32_t                pos,
+        ds4_gpu_tensor       *raw_cache,
+        uint32_t                raw_cap,
+        uint32_t                raw_row,
+        uint32_t                n_raw,
+        int                     token) {
+    return metal_graph_encode_decode_layer_impl(g, model, layer, stage, pos,
+                                                raw_cache, raw_cap, raw_row,
+                                                n_raw, token, true);
+}
+
 /* Encode the final HC collapse, output norm, and vocab projection on Metal. */
 static bool metal_graph_encode_output_head(
         ds4_gpu_graph *g,
@@ -16277,16 +16581,22 @@ static bool metal_graph_encode_output_head_mtp(
         const ds4_model       *mtp_model,
         const ds4_mtp_weights *mtp,
         uint64_t               vocab_dim) {
+    const ds4_mtp_stage_weights *final = mtp->embedded ?
+        &mtp->stage[DS4_MTP_STAGE_COUNT - 1u] : NULL;
+    const ds4_tensor *hc_head_fn = final ? final->hc_head_fn : mtp->hc_head_fn;
+    const ds4_tensor *hc_head_scale = final ? final->hc_head_scale : mtp->hc_head_scale;
+    const ds4_tensor *hc_head_base = final ? final->hc_head_base : mtp->hc_head_base;
+    const ds4_tensor *norm = final ? final->norm : mtp->norm;
     const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
     bool ok = ds4_gpu_rms_norm_plain_tensor(g->flat_hc, g->cur_hc, (uint32_t)hc_dim, DS4_RMS_EPS) != 0;
-    if (ok) ok = metal_graph_matmul_plain_tensor(g->output_pre, mtp_model, mtp->hc_head_fn,
+    if (ok) ok = metal_graph_matmul_plain_tensor(g->output_pre, mtp_model, hc_head_fn,
                                                  hc_dim, DS4_N_HC, g->flat_hc, 1);
     if (ok) ok = ds4_gpu_output_hc_weights_tensor(g->output_weights,
                                                     g->output_pre,
                                                     mtp_model->map,
                                                     mtp_model->size,
-                                                    mtp->hc_head_scale->abs_offset,
-                                                    mtp->hc_head_base->abs_offset,
+                                                    hc_head_scale->abs_offset,
+                                                    hc_head_base->abs_offset,
                                                     DS4_N_HC,
                                                     DS4_HC_EPS) != 0;
     if (ok) ok = ds4_gpu_hc_weighted_sum_tensor(g->output_embd,
@@ -16298,7 +16608,7 @@ static bool metal_graph_encode_output_head_mtp(
                                                   g->output_embd,
                                                   mtp_model->map,
                                                   mtp_model->size,
-                                                  mtp->norm->abs_offset,
+                                                  norm->abs_offset,
                                                   DS4_N_EMBD,
                                                   DS4_RMS_EPS) != 0;
     if (ok) ok = ds4_gpu_matmul_q8_0_tensor(g->logits,
@@ -16941,6 +17251,57 @@ static uint32_t metal_graph_token_split_after_layers(void) {
     return split_after_layers;
 }
 
+static bool metal_graph_capture_mtp_source_batch(ds4_gpu_graph *g,
+                                                   uint32_t il,
+                                                   uint32_t row) {
+    if (!g || !g->mtp_main_hidden || !g->mtp_mean_weights || il < 40u || il > 42u) {
+        return true;
+    }
+    const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
+    const uint64_t embd_bytes = (uint64_t)DS4_N_EMBD * sizeof(float);
+    ds4_gpu_tensor *src = ds4_gpu_tensor_view(
+        g->batch_cur_hc,
+        (uint64_t)row * hc_dim * sizeof(float),
+        hc_dim * sizeof(float));
+    ds4_gpu_tensor *dst = ds4_gpu_tensor_view(
+        g->mtp_main_hidden,
+        (uint64_t)(il - 40u) * embd_bytes,
+        embd_bytes);
+    if (!src || !dst) {
+        ds4_gpu_tensor_free(src);
+        ds4_gpu_tensor_free(dst);
+        return false;
+    }
+    const bool ok = ds4_gpu_hc_weighted_sum_tensor(dst,
+                                                    src,
+                                                    g->mtp_mean_weights,
+                                                    DS4_N_EMBD,
+                                                    DS4_N_HC) != 0;
+    ds4_gpu_tensor_free(src);
+    ds4_gpu_tensor_free(dst);
+    return ok;
+}
+
+static bool metal_graph_capture_mtp_source(ds4_gpu_graph *g,
+                                             uint32_t il) {
+    if (!g || !g->mtp_main_hidden || !g->mtp_mean_weights || il < 40u || il > 42u) {
+        return true;
+    }
+    const uint64_t embd_bytes = (uint64_t)DS4_N_EMBD * sizeof(float);
+    ds4_gpu_tensor *dst = ds4_gpu_tensor_view(
+        g->mtp_main_hidden,
+        (uint64_t)(il - 40u) * embd_bytes,
+        embd_bytes);
+    if (!dst) return false;
+    const bool ok = ds4_gpu_hc_weighted_sum_tensor(dst,
+                                                    g->cur_hc,
+                                                    g->mtp_mean_weights,
+                                                    DS4_N_EMBD,
+                                                    DS4_N_HC) != 0;
+    ds4_gpu_tensor_free(dst);
+    return ok;
+}
+
 /* Encode a full single-token decode step on Metal.  This is the generation
  * hot path: update caches, run all layers, then produce logits. */
 static bool metal_graph_encode_token_raw_swa(
@@ -16990,6 +17351,7 @@ static bool metal_graph_encode_token_raw_swa(
         ds4_gpu_tensor *tmp = g->cur_hc;
         g->cur_hc = g->after_ffn_hc;
         g->after_ffn_hc = tmp;
+        if (ok) ok = metal_graph_capture_mtp_source(g, il);
         if (ok && allow_split_flush && split_after_layers != 0 && il + 1u == split_after_layers) {
             ok = ds4_gpu_flush_commands() != 0;
         }
@@ -17277,6 +17639,11 @@ static bool metal_graph_layer_stage_profile_boundary(
         uint32_t    pos0,
         uint32_t    n_tokens,
         double     *stage_t0) {
+    if (ds4_gpu_stage_timing_active()) {
+        char label[56];
+        snprintf(label, sizeof(label), "%s.%s.L%u", part, stage, il);
+        ds4_gpu_stage_mark(label);
+    }
     if (ds4_gpu_end_commands() == 0) return false;
     const double now = now_sec();
     fprintf(stderr,
@@ -17297,6 +17664,11 @@ static bool metal_graph_q_stage_profile_boundary(
         uint32_t    pos0,
         uint32_t    n_tokens,
         double     *stage_t0) {
+    if (ds4_gpu_stage_timing_active()) {
+        char label[56];
+        snprintf(label, sizeof(label), "q.%s.L%u", stage, il);
+        ds4_gpu_stage_mark(label);
+    }
     if (ds4_gpu_end_commands() == 0) return false;
     const double now = now_sec();
     fprintf(stderr,
@@ -19921,6 +20293,37 @@ static bool metal_graph_eval_token_raw_swa_top(
     return ok;
 }
 
+typedef struct {
+    uint16_t d;
+    int8_t qs[32];
+} ds4_mtp_block_q8_0;
+
+DS4_STATIC_ASSERT(ds4_mtp_block_q8_0_size, sizeof(ds4_mtp_block_q8_0) == 34);
+
+static bool mtp_markov_embed_q8(float *out,
+                                const ds4_model *model,
+                                const ds4_tensor *weight,
+                                int token) {
+    if (!out || !model || !weight || weight->type != DS4_TENSOR_Q8_0 ||
+        weight->ndim != 2 || token < 0 || (uint64_t)token >= weight->dim[1] ||
+        weight->dim[0] % 32u != 0) {
+        return false;
+    }
+    const uint64_t rank = weight->dim[0];
+    const uint64_t row_bytes = (rank / 32u) * sizeof(ds4_mtp_block_q8_0);
+    const uint8_t *row = (const uint8_t *)tensor_data(model, weight) +
+                         (uint64_t)token * row_bytes;
+    for (uint64_t block = 0; block < rank / 32u; block++) {
+        const ds4_mtp_block_q8_0 *q =
+            (const ds4_mtp_block_q8_0 *)(row + block * sizeof(*q));
+        const float scale = f16_to_f32(q->d);
+        for (uint32_t i = 0; i < 32u; i++) {
+            out[block * 32u + i] = scale * (float)q->qs[i];
+        }
+    }
+    return true;
+}
+
 static bool metal_graph_eval_mtp_draft_from_hc(
         ds4_gpu_graph       *g,
         const ds4_model       *base_model,
@@ -19933,7 +20336,12 @@ static bool metal_graph_eval_mtp_draft_from_hc(
         uint32_t               pos,
         float                 *logits,
         int                   *top_id) {
-    if (!mtp || !mtp->block.attn_q_a || !g->mtp_raw_cache || !prev_hc || !out_hc) return false;
+    if (!mtp || !g || !out_hc ||
+        (!mtp->embedded && (!mtp->block.attn_q_a || !g->mtp_raw_cache || !prev_hc)) ||
+        (mtp->embedded && (!g->mtp_main_hidden || !g->mtp_stage_raw_cache[0] ||
+                           !g->mtp_stage_raw_cache[1] || !g->mtp_stage_raw_cache[2]))) {
+        return false;
+    }
 
     const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
     const uint32_t raw_row = pos % g->raw_cap;
@@ -19943,75 +20351,154 @@ static bool metal_graph_eval_mtp_draft_from_hc(
 
     ds4_gpu_tensor *saved_cur = g->cur_hc;
     ds4_gpu_tensor *saved_after = g->after_ffn_hc;
-    bool ok = ds4_gpu_begin_commands() != 0;
-    if (ok) ok = ds4_gpu_embed_token_hc_tensor(g->mtp_embed,
-                                                  base_model->map,
-                                                  base_model->size,
-                                                  base_weights->token_embd->abs_offset,
-                                                  (uint32_t)base_weights->token_embd->dim[1],
-                                                  (uint32_t)token,
-                                                  DS4_N_EMBD,
-                                                  1) != 0;
-    if (ok) ok = ds4_gpu_rms_norm_weight_tensor(g->mtp_enorm,
-                                                  g->mtp_embed,
+    float *markov_row = NULL;
+    if (mtp->embedded) {
+        const ds4_tensor *markov_w1 = mtp->stage[DS4_MTP_STAGE_COUNT - 1u].markov_w1;
+        markov_row = xmalloc((size_t)markov_w1->dim[0] * sizeof(markov_row[0]));
+        if (!mtp_markov_embed_q8(markov_row, mtp_model, markov_w1, token) ||
+            ds4_gpu_tensor_write(g->mtp_embed,
+                                 0,
+                                 markov_row,
+                                 markov_w1->dim[0] * sizeof(markov_row[0])) == 0) {
+            free(markov_row);
+            markov_row = NULL;
+        }
+    }
+    bool ok = markov_row || !mtp->embedded;
+    if (ok) ok = ds4_gpu_begin_commands() != 0;
+    if (ok && mtp->embedded) {
+        const ds4_mtp_stage_weights *first = &mtp->stage[0];
+        ok = metal_graph_matmul_plain_tensor(g->mtp_eproj,
+                                              mtp_model,
+                                              first->main_proj,
+                                              3ull * DS4_N_EMBD,
+                                              DS4_N_EMBD,
+                                              g->mtp_main_hidden,
+                                              1);
+        if (ok) ok = ds4_gpu_rms_norm_weight_tensor(g->mtp_enorm,
+                                                     g->mtp_eproj,
+                                                     mtp_model->map,
+                                                     mtp_model->size,
+                                                     first->main_norm->abs_offset,
+                                                     DS4_N_EMBD,
+                                                     DS4_RMS_EPS) != 0;
+        if (ok) ok = ds4_gpu_repeat_hc_tensor(g->mtp_input_hc,
+                                               g->mtp_enorm,
+                                               DS4_N_EMBD,
+                                               DS4_N_HC) != 0;
+
+        ds4_gpu_tensor *current = g->mtp_input_hc;
+        ds4_gpu_tensor *next = out_hc;
+        for (uint32_t stage = 0; ok && stage < DS4_MTP_STAGE_COUNT; stage++) {
+            g->cur_hc = current;
+            g->after_ffn_hc = next;
+            ok = metal_graph_encode_decode_layer_mtp(g,
+                                                      mtp_model,
+                                                      &mtp->stage[stage].block,
+                                                      stage,
+                                                      pos,
+                                                      g->mtp_stage_raw_cache[stage],
+                                                      g->raw_cap,
+                                                      raw_row,
+                                                      n_raw,
+                                                      token);
+            if (ok) {
+                g->mtp_stage_exec_count[stage]++;
+                ds4_gpu_tensor *tmp = current;
+                current = next;
+                next = tmp;
+            }
+        }
+        if (ok && current != out_hc) {
+            ok = ds4_gpu_tensor_copy(out_hc, 0, current, 0, hc_dim * sizeof(float)) != 0;
+        }
+        if (ok) g->cur_hc = out_hc;
+    } else {
+        if (ok) ok = ds4_gpu_embed_token_hc_tensor(g->mtp_embed,
+                                                      base_model->map,
+                                                      base_model->size,
+                                                      base_weights->token_embd->abs_offset,
+                                                      (uint32_t)base_weights->token_embd->dim[1],
+                                                      (uint32_t)token,
+                                                      DS4_N_EMBD,
+                                                      1) != 0;
+        if (ok) ok = ds4_gpu_rms_norm_weight_tensor(g->mtp_enorm,
+                                                      g->mtp_embed,
+                                                      mtp_model->map,
+                                                      mtp_model->size,
+                                                      mtp->enorm->abs_offset,
+                                                      DS4_N_EMBD,
+                                                      DS4_RMS_EPS) != 0;
+        if (ok) ok = ds4_gpu_matmul_q8_0_tensor(g->mtp_eproj,
                                                   mtp_model->map,
                                                   mtp_model->size,
-                                                  mtp->enorm->abs_offset,
+                                                  mtp->e_proj->abs_offset,
                                                   DS4_N_EMBD,
-                                                  DS4_RMS_EPS) != 0;
-    if (ok) ok = ds4_gpu_matmul_q8_0_tensor(g->mtp_eproj,
-                                              mtp_model->map,
-                                              mtp_model->size,
-                                              mtp->e_proj->abs_offset,
-                                              DS4_N_EMBD,
-                                              DS4_N_EMBD,
-                                              g->mtp_enorm,
-                                              1) != 0;
-    if (ok) ok = ds4_gpu_repeat_hc_tensor(g->mtp_eproj_hc,
-                                            g->mtp_eproj,
-                                            DS4_N_EMBD,
-                                            DS4_N_HC) != 0;
-    if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->mtp_hnorm_hc,
-                                                       prev_hc,
-                                                       mtp_model->map,
-                                                       mtp_model->size,
-                                                       mtp->hnorm->abs_offset,
-                                                       DS4_N_EMBD,
-                                                       DS4_N_HC,
-                                                       DS4_RMS_EPS) != 0;
-    if (ok) ok = ds4_gpu_matmul_q8_0_tensor(g->mtp_hproj_hc,
-                                              mtp_model->map,
-                                              mtp_model->size,
-                                              mtp->h_proj->abs_offset,
-                                              DS4_N_EMBD,
-                                              DS4_N_EMBD,
-                                              g->mtp_hnorm_hc,
-                                              DS4_N_HC) != 0;
-    if (ok) ok = ds4_gpu_add_tensor(g->mtp_input_hc,
-                                      g->mtp_eproj_hc,
-                                      g->mtp_hproj_hc,
-                                      (uint32_t)hc_dim) != 0;
-    if (ok) {
-        g->cur_hc = g->mtp_input_hc;
-        g->after_ffn_hc = out_hc;
-        ok = metal_graph_encode_decode_layer(g,
-                                             mtp_model,
-                                             &mtp->block,
-                                             1,
-                                             pos,
-                                             g->mtp_raw_cache,
-                                             g->raw_cap,
-                                             raw_row,
-                                             n_raw,
-                                             token);
+                                                  DS4_N_EMBD,
+                                                  g->mtp_enorm,
+                                                  1) != 0;
+        if (ok) ok = ds4_gpu_repeat_hc_tensor(g->mtp_eproj_hc,
+                                                g->mtp_eproj,
+                                                DS4_N_EMBD,
+                                                DS4_N_HC) != 0;
+        if (ok) ok = ds4_gpu_rms_norm_weight_rows_tensor(g->mtp_hnorm_hc,
+                                                           prev_hc,
+                                                           mtp_model->map,
+                                                           mtp_model->size,
+                                                           mtp->hnorm->abs_offset,
+                                                           DS4_N_EMBD,
+                                                           DS4_N_HC,
+                                                           DS4_RMS_EPS) != 0;
+        if (ok) ok = ds4_gpu_matmul_q8_0_tensor(g->mtp_hproj_hc,
+                                                  mtp_model->map,
+                                                  mtp_model->size,
+                                                  mtp->h_proj->abs_offset,
+                                                  DS4_N_EMBD,
+                                                  DS4_N_EMBD,
+                                                  g->mtp_hnorm_hc,
+                                                  DS4_N_HC) != 0;
+        if (ok) ok = ds4_gpu_add_tensor(g->mtp_input_hc,
+                                          g->mtp_eproj_hc,
+                                          g->mtp_hproj_hc,
+                                          (uint32_t)hc_dim) != 0;
+        if (ok) {
+            g->cur_hc = g->mtp_input_hc;
+            g->after_ffn_hc = out_hc;
+            ok = metal_graph_encode_decode_layer(g,
+                                                 mtp_model,
+                                                 &mtp->block,
+                                                 1,
+                                                 pos,
+                                                 g->mtp_raw_cache,
+                                                 g->raw_cap,
+                                                 raw_row,
+                                                 n_raw,
+                                                 token);
+        }
+        if (ok) g->cur_hc = out_hc;
     }
-    if (ok) g->cur_hc = out_hc;
     if (ok) ok = metal_graph_encode_output_head_mtp(g,
                                                     base_model,
                                                     base_weights,
                                                     mtp_model,
                                                     mtp,
                                                     base_weights->output->dim[1]);
+    if (ok && mtp->embedded) {
+        const ds4_mtp_stage_weights *final = &mtp->stage[DS4_MTP_STAGE_COUNT - 1u];
+        const uint64_t rank = final->markov_w1->dim[0];
+        ok = ds4_gpu_matmul_q8_0_tensor(g->spec_logits,
+                                         mtp_model->map,
+                                         mtp_model->size,
+                                         final->markov_w2->abs_offset,
+                                         rank,
+                                         DS4_N_VOCAB,
+                                         g->mtp_embed,
+                                         1) != 0;
+        if (ok) ok = ds4_gpu_add_tensor(g->logits,
+                                        g->logits,
+                                        g->spec_logits,
+                                        DS4_N_VOCAB) != 0;
+    }
     if (ok && top_id) {
         ok = ds4_gpu_argmax_tensor(g->comp_selected,
                                    g->logits,
@@ -20028,6 +20515,13 @@ static bool metal_graph_eval_mtp_draft_from_hc(
         ok = ds4_gpu_tensor_read(g->comp_selected, 0, top_id, sizeof(*top_id)) != 0;
     }
     if (ok && g->mtp_n_raw < g->raw_window) g->mtp_n_raw++;
+    free(markov_row);
+    if (ok && mtp->embedded) {
+        fprintf(stderr, "ds4: embedded_mtp stages_executed=0:%u,1:%u,2:%u\n",
+                g->mtp_stage_exec_count[0],
+                g->mtp_stage_exec_count[1],
+                g->mtp_stage_exec_count[2]);
+    }
     if (!ok) {
         (void)ds4_gpu_synchronize();
         g->cur_hc = saved_cur;
@@ -20376,6 +20870,7 @@ static bool metal_graph_prefill_layer_major(
             if (!ok) {
                 fprintf(stderr, "ds4: gpu whole-prefill layer %u encode failed\n", il);
             }
+            if (ok) ok = metal_graph_capture_mtp_source_batch(g, il, n_tokens - 1u);
             if (show_progress) {
                 fprintf(stderr, "ds4: gpu prefill layer %u/%u\r", il + 1, (uint32_t)DS4_N_LAYER);
                 fflush(stderr);
@@ -20743,6 +21238,7 @@ static bool metal_graph_prefill_layer_major(
                         (t_done - t_encoded) * 1000.0);
             }
         }
+        if (ok) ok = metal_graph_capture_mtp_source_batch(g, il, n_tokens - 1u);
         if (ok &&
             g->ssd_streaming &&
             layer_prepare &&
@@ -25670,7 +26166,31 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
                 (double)per_expert_bytes / 1048576.0,
                 budget);
     }
+    if (opt->distributed.role == DS4_DISTRIBUTED_NONE &&
+        !load_slice && model_has_embedded_mtp_tensors(&e->model)) {
+        if (e->ssd_streaming) {
+            fprintf(stderr,
+                    "ds4: --ssd-streaming is not compatible with embedded MTP yet\n");
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
+        mtp_weights_bind_embedded(&e->mtp_weights, &e->model, &e->weights);
+        e->mtp_ready = true;
+        if (e->mtp_draft_tokens <= 1) e->mtp_draft_tokens = DS4_MTP_DEFAULT_DRAFT;
+        fprintf(stderr,
+                "ds4: embedded_mtp stages=3 bound_stages=3 source=main_model block_size=%u draft=%d\n",
+                DS4_MTP_BLOCK_SIZE,
+                e->mtp_draft_tokens);
+    }
     if (opt->inspect_only) {
+        if (opt->mtp_path && opt->mtp_path[0] && e->mtp_ready) {
+            fprintf(stderr,
+                    "ds4: embedded MTP and explicit --mtp sidecar cannot be combined\n");
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
         *out = e;
         return 0;
     }
@@ -25681,6 +26201,13 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
     }
     if (opt->mtp_path && opt->mtp_path[0] &&
         opt->distributed.role == DS4_DISTRIBUTED_NONE) {
+        if (e->mtp_ready) {
+            fprintf(stderr,
+                    "ds4: embedded MTP and explicit --mtp sidecar cannot be combined\n");
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
         if (e->ssd_streaming) {
             fprintf(stderr, "ds4: --ssd-streaming is not compatible with --mtp yet\n");
             ds4_engine_close(e);
@@ -25688,7 +26215,14 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             return 1;
         }
         model_open(&e->mtp_model, opt->mtp_path, graph_backend, true);
-        mtp_weights_bind(&e->mtp_weights, &e->mtp_model);
+        if (model_has_embedded_mtp_tensors(&e->mtp_model)) {
+            fprintf(stderr,
+                    "ds4: --mtp points to an embedded three-stage GGUF; explicit --mtp accepts only the legacy one-stage sidecar contract\n");
+            ds4_engine_close(e);
+            *out = NULL;
+            return 1;
+        }
+        mtp_weights_bind_legacy(&e->mtp_weights, &e->mtp_model);
         e->mtp_ready = true;
         fprintf(stderr, "ds4: MTP support model loaded: %s (draft=%d)\n",
                 opt->mtp_path,
@@ -25902,7 +26436,7 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
             *out = NULL;
             return 1;
         }
-        if (e->mtp_ready &&
+        if (e->mtp_ready && !e->mtp_weights.embedded &&
             !ds4_gpu_set_model_map_range(e->mtp_model.map,
                                            e->mtp_model.size,
                                            e->mtp_model.tensor_data_pos,
@@ -25945,7 +26479,7 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         free(load_sizes);
         /* Also apply explicit optional Q8 preload settings to the MTP support
          * model when loaded. */
-        if (e->mtp_ready) {
+        if (e->mtp_ready && !e->mtp_weights.embedded) {
             (void)ds4_gpu_set_model_fd_for_map(e->mtp_model.fd, e->mtp_model.map);
             if (!accelerator_cache_model_tensors(e->backend, &e->mtp_model,
                                                  NULL, NULL, 0)) {
@@ -26024,7 +26558,7 @@ void ds4_engine_close(ds4_engine *e) {
     weights_free(&e->weights);
     vocab_free(&e->vocab);
     ds4_threads_shutdown();
-    if (e->mtp_ready) model_close(&e->mtp_model);
+    if (e->mtp_ready && !e->mtp_weights.embedded) model_close(&e->mtp_model);
     model_close(&e->model);
 #ifndef DS4_NO_GPU
     ds4_gpu_cleanup();
@@ -27137,7 +27671,7 @@ static int ds4_session_eval_internal(ds4_session *s, int token, bool probe_mtp,
         if (metal_graph_eval_mtp_draft(&s->graph,
                                        &e->model,
                                        &e->weights,
-                                       &e->mtp_model,
+                                       e->mtp_weights.embedded ? &e->model : &e->mtp_model,
                                        &e->mtp_weights,
                                        token,
                                        (uint32_t)(s->checkpoint.len - 1),
@@ -27268,7 +27802,7 @@ int ds4_session_eval_speculative_argmax(ds4_session *s, int first_token,
         if (!metal_graph_eval_mtp_draft_from_hc(&s->graph,
                                                 &e->model,
                                                 &e->weights,
-                                                &e->mtp_model,
+                                                e->mtp_weights.embedded ? &e->model : &e->mtp_model,
                                                 &e->mtp_weights,
                                                 prev_hc,
                                                 out_hc,
