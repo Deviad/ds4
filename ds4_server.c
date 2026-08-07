@@ -11183,6 +11183,20 @@ static void generate_job(server *s, server_slot *slot, job *j) {
                                                     ds4_token_assistant(s->engine));
         cold_store_len = anchor >= s->kv.opt.min_tokens ?
                          anchor : kv_cache_store_len(&s->kv, prompt_for_sync->len);
+    } else if (cached == 0 &&
+               s->kv.enabled &&
+               prompt_for_sync->len >= s->kv.opt.min_tokens &&
+               s->kv.opt.cold_max_tokens > 0 &&
+               prompt_for_sync->len > s->kv.opt.cold_max_tokens)
+    {
+        /* Without this the cap is invisible: the request simply runs slower,
+         * falling back to whatever continued frontier exists, with nothing in
+         * the log to explain why the cold checkpoint never appeared. */
+        server_log(DS4_LOG_KVCACHE,
+                   "ds4-server: kv cache skipped tokens=%d reason=cold because prompt exceeds "
+                   "--kv-cache-cold-max-tokens %d",
+                   prompt_for_sync->len,
+                   s->kv.opt.cold_max_tokens);
     }
     int suppressed_continued_last = -1;
     if (cold_store_len >= s->kv.opt.min_tokens) {
