@@ -33,3 +33,10 @@ __pycache__/
 /misc/
 .*.swp
 .DS_Store
+
+# role-pipeline runtime markers
+.cmux-status/
+# role-pipeline personal settings (per-user: notify sinks, ntfy topic, mux)
+.pi/agents/pipeline.conf
+# role-pipeline private routing/revision/gate/capsule state (matches at any depth)
+.pipeline-private/
