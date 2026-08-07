@@ -1394,7 +1394,10 @@ static cli_config parse_options(int argc, char **argv) {
         .engine = {
             .model_path = "ds4flash.gguf",
             .backend = default_backend(),
-            .mtp_draft_tokens = 1,
+            /* 0 means unset: ds4_engine_open() normalises it to 1, and embedded
+             * three-stage MTP models raise it to their own default.  Keeping the
+             * sentinel distinct lets an explicit --mtp-draft 1 survive. */
+            .mtp_draft_tokens = 0,
             .mtp_margin = 3.0f,
         },
         .gen = {

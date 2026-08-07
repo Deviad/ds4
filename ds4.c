@@ -26190,7 +26190,11 @@ int ds4_engine_open(ds4_engine **out, const ds4_engine_options *opt) {
         }
         mtp_weights_bind_embedded(&e->mtp_weights, &e->model, &e->weights);
         e->mtp_ready = true;
-        if (e->mtp_draft_tokens <= 1) e->mtp_draft_tokens = DS4_MTP_DEFAULT_DRAFT;
+        /* Raise the draft depth only when the caller left it unset.  The option
+         * defaults to 1 in every front end, so testing e->mtp_draft_tokens
+         * cannot distinguish "unset" from an explicit --mtp-draft 1, and the
+         * request for non-speculative decoding would be silently overridden. */
+        if (opt->mtp_draft_tokens <= 0) e->mtp_draft_tokens = DS4_MTP_DEFAULT_DRAFT;
         fprintf(stderr,
                 "ds4: embedded_mtp stages=3 bound_stages=3 source=main_model block_size=%u draft=%d\n",
                 DS4_MTP_BLOCK_SIZE,
