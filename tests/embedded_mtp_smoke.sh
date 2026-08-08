@@ -37,8 +37,10 @@ inspect=$(env -u DS4_MTP_PROBE -u DS4_MTP_FULL_LOGITS -u DS4_MTP_MIN_MARGIN \
 printf '%s\n' "$inspect" | grep -F \
     'embedded_mtp stages=3 bound_stages=3 source=main_model block_size=5 draft=2' >/dev/null
 
+# -n 2: the speculative driver skips draft preparation when max_tokens == 1,
+# so a second token is needed to make the embedded stages run.
 generation=$(env -u DS4_MTP_PROBE -u DS4_MTP_FULL_LOGITS -u DS4_MTP_MIN_MARGIN \
-    ./ds4 --metal --model "$model" -p x -n 1 --ctx 64 2>&1)
+    ./ds4 --metal --model "$model" -p x -n 2 --ctx 64 2>&1)
 printf '%s\n' "$generation" | grep -F 'embedded_mtp stages_executed=0:1,1:1,2:1' >/dev/null
 if printf '%s\n' "$generation" | grep -Eiq '(^|[^[:alpha:]])(nan|inf)([^[:alpha:]]|$)'; then
     echo 'embedded MTP generation produced a non-finite diagnostic' >&2
@@ -54,8 +56,10 @@ if [ "$legacy_rc" -eq 0 ]; then
     echo 'legacy guard regression unexpectedly succeeded with an incomplete sidecar' >&2
     exit 1
 fi
+# An incomplete legacy sidecar must be rejected at support-model detection,
+# before any binding is attempted.
 printf '%s\n' "$legacy_output" | grep -F \
-    'required tensor is missing: mtp.0.hc_head_fn.weight' >/dev/null
+    'unsupported --mtp support model' >/dev/null
 if printf '%s\n' "$legacy_output" | grep -Fq 'embedded three-stage GGUF'; then
     echo 'legacy guard regression was rejected as embedded MTP' >&2
     exit 1
