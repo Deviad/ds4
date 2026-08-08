@@ -35,12 +35,13 @@ PY
 inspect=$(env -u DS4_MTP_PROBE -u DS4_MTP_FULL_LOGITS -u DS4_MTP_MIN_MARGIN \
     ./ds4 --inspect --metal --model "$model" 2>&1)
 printf '%s\n' "$inspect" | grep -F \
-    'embedded_mtp stages=3 bound_stages=3 source=main_model block_size=5 draft=2' >/dev/null
+    'embedded_mtp stages=3 bound_stages=3 source=main_model block_size=5 draft=1' >/dev/null
 
-# -n 2: the speculative driver skips draft preparation when max_tokens == 1,
-# so a second token is needed to make the embedded stages run.
+# Drafting is off by default (draft=1), so pass --mtp-draft 2 to exercise the
+# embedded stages.  -n 2: the speculative driver skips draft preparation when
+# max_tokens == 1, so a second token is needed to make the stages run.
 generation=$(env -u DS4_MTP_PROBE -u DS4_MTP_FULL_LOGITS -u DS4_MTP_MIN_MARGIN \
-    ./ds4 --metal --model "$model" -p x -n 2 --ctx 64 2>&1)
+    ./ds4 --metal --model "$model" --mtp-draft 2 -p x -n 2 --ctx 64 2>&1)
 printf '%s\n' "$generation" | grep -F 'embedded_mtp stages_executed=0:1,1:1,2:1' >/dev/null
 if printf '%s\n' "$generation" | grep -Eiq '(^|[^[:alpha:]])(nan|inf)([^[:alpha:]]|$)'; then
     echo 'embedded MTP generation produced a non-finite diagnostic' >&2
@@ -65,4 +66,4 @@ if printf '%s\n' "$legacy_output" | grep -Fq 'embedded three-stage GGUF'; then
     exit 1
 fi
 
-printf '%s\n' 'embedded MTP smoke: default draft=2; stages 0,1,2 executed; finite output; legacy guard passed'
+printf '%s\n' 'embedded MTP smoke: default draft=1; stages 0,1,2 executed under --mtp-draft 2; finite output; legacy guard passed'

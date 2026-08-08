@@ -4107,12 +4107,13 @@ typedef struct {
 #define DS4_MTP_STAGE_COUNT 3u
 #define DS4_MTP_BLOCK_SIZE 5u
 /*
- * Default draft depth for embedded MTP.  Measured on the mixed-quant Flash
- * model the batched verify pass costs ~1.6x one decode step while drafting is
- * nearly free, so deeper drafts lose more on verification than they win on
- * acceptance; draft 2 with the default margin 3 is the break-even optimum.
+ * Default draft depth for embedded MTP.  Default to 1 (plain decoding).
+ * Measured on the mixed-quant Flash model the draft-2 speculative path runs
+ * ~16% slower than plain decoding (31 vs 37 t/s at 13k, byte-identical
+ * output): the verify pass costs more than the accepted drafts save.  Drafting
+ * stays available behind --mtp-draft N for when acceptance improves.
  */
-#define DS4_MTP_DEFAULT_DRAFT 2
+#define DS4_MTP_DEFAULT_DRAFT 1
 
 typedef struct {
     ds4_tensor *main_proj;
