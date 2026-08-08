@@ -1110,6 +1110,44 @@ static int ds4_gpu_wait_pending_command_buffers(const char *label) {
     return ok;
 }
 
+/*
+ * Optional per-stage GPU timing (DS4_METAL_GPU_STAGE_TIMING).  The wall-clock
+ * stage profilers split the command buffer at every boundary, and their numbers
+ * mix GPU work with CPU encode/sync latency.  With this switch on, the same
+ * split segments additionally report the command buffer's own GPUStartTime /
+ * GPUEndTime, which is the true GPU duration of that segment regardless of how
+ * long the CPU waited around it.  Segments are serialized, so this measures
+ * where GPU cycles go, not native pipelined overlap.  Counter sampling would be
+ * the finer tool but this GPU family rejects sampleCountersInBuffer on compute
+ * encoders despite advertising support.  Diagnostic only, fails soft.
+ */
+static bool g_stage_timing_on;
+static char g_stage_cb_label[64];
+
+static void ds4_gpu_stage_timing_setup(void) {
+    g_stage_timing_on = getenv("DS4_METAL_GPU_STAGE_TIMING") != NULL;
+}
+
+int ds4_gpu_stage_timing_active(void) {
+    return g_stage_timing_on;
+}
+
+/* Labels the command buffer about to be committed by the next end_commands. */
+int ds4_gpu_stage_mark(const char *label) {
+    if (!g_stage_timing_on) return 1;
+    snprintf(g_stage_cb_label, sizeof(g_stage_cb_label), "%s", label ? label : "?");
+    return 1;
+}
+
+static void ds4_gpu_stage_timing_report(id<MTLCommandBuffer> cb) {
+    if (!g_stage_timing_on || !g_stage_cb_label[0]) return;
+    const double gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
+    if (cb.GPUStartTime > 0 && cb.GPUEndTime > cb.GPUStartTime) {
+        fprintf(stderr, "ds4: gpu stage %s=%.3f ms\n", g_stage_cb_label, gpu_ms);
+    }
+    g_stage_cb_label[0] = '\0';
+}
+
 static int ds4_gpu_finish_command_buffer(id<MTLCommandBuffer> cb, int owned, const char *label) {
     if (!owned) return 1;
 
@@ -1119,6 +1157,7 @@ static int ds4_gpu_finish_command_buffer(id<MTLCommandBuffer> cb, int owned, con
         ok = 0;
         ds4_gpu_invalidate_zero_prefix_prefill_block_maps();
     }
+    if (ok) ds4_gpu_stage_timing_report(cb);
     ds4_gpu_stream_expert_cache_note_owned_completed();
     [g_transient_buffers removeAllObjects];
     ds4_gpu_model_buffer_cache_maybe_evict(label);
@@ -7859,6 +7898,7 @@ int ds4_gpu_init(void) {
             return 0;
         }
 
+        ds4_gpu_stage_timing_setup();
         g_initialized = 1;
     }
 
@@ -8166,6 +8206,8 @@ int ds4_gpu_flush_commands(void) {
     id<MTLCommandBuffer> cb = g_batch_cb;
     g_batch_cb = nil;
     g_batch_has_work = NO;
+    /* Flush bypasses the finish-time report; do not leak the label. */
+    g_stage_cb_label[0] = '\0';
     [cb commit];
     [g_pending_cbs addObject:cb];
     ds4_gpu_stream_expert_cache_note_batch_committed();
