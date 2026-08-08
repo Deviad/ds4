@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -30,16 +31,68 @@ from deepseek_flash_joint_mtp.stages import STAGE_BY_NAME  # noqa: E402
 
 COMPONENT = Path("/Users/spotted/projects/ds4-finetuning")
 PINNED_INTERPRETER = Path("/Volumes/Data NVME/mlx-ft/ds4/.venv/bin/python")
-PINNED_PYTHON = PINNED_INTERPRETER.resolve()
 SOURCE_IDENTITY = {
     "source_mode": "release",
     "mlx": "0.31.2",
     "mlx_lm": "0.31.3",
     "mlx_lm_module": "/Volumes/Data NVME/mlx-ft/ds4/.venv/lib/python3.13/site-packages/mlx_lm/__init__.py",
 }
-STAGED_HASH = "30635b80ae2632ec6baa421b4ce58914342c5e43c5d12130d1ae699334b8e072"
+TRAINER_ENTRYPOINT = COMPONENT / "python-envs/mlx/src/ds4_ft_mlx/joint_train.py"
+MLX_LM_MODULE = Path(SOURCE_IDENTITY["mlx_lm_module"])
 
 
+def _component_branch() -> str | None:
+    try:
+        completed = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=str(COMPONENT),
+            stdin=subprocess.DEVNULL, capture_output=True, check=False,
+        )
+    except OSError:
+        return None
+    return completed.stdout.decode().strip() if completed.returncode == 0 else None
+
+
+def _component_staged_hash() -> str | None:
+    """The adapter pins this, so the expectation has to be read from the
+    component as it is now.  A literal would encode one machine's working tree
+    and fail everywhere else, including here once anything is staged."""
+    try:
+        completed = subprocess.run(
+            ["git", "diff", "--cached", "--binary"], cwd=str(COMPONENT),
+            stdin=subprocess.DEVNULL, capture_output=True, check=False,
+        )
+    except OSError:
+        return None
+    if completed.returncode != 0:
+        return None
+    import hashlib
+    return hashlib.sha256(completed.stdout).hexdigest()
+
+
+def _unavailable() -> str | None:
+    """These cases rehearse against the real fine-tuning component, so they can
+    only run where it is installed.  Report the first missing piece rather than
+    failing later inside an identity check."""
+    for label, path in (
+        ("component repo", COMPONENT),
+        ("trainer entrypoint", TRAINER_ENTRYPOINT),
+        ("pinned interpreter", PINNED_INTERPRETER),
+        ("mlx_lm module", MLX_LM_MODULE),
+    ):
+        if not path.exists():
+            return f"{label} not present at {path}"
+    if _component_branch() is None:
+        return f"component at {COMPONENT} is not a readable git work tree"
+    return None
+
+
+UNAVAILABLE = _unavailable()
+PINNED_PYTHON = PINNED_INTERPRETER.resolve() if UNAVAILABLE is None else PINNED_INTERPRETER
+COMPONENT_BRANCH = _component_branch() if UNAVAILABLE is None else ""
+STAGED_HASH = _component_staged_hash() if UNAVAILABLE is None else ""
+
+
+@unittest.skipIf(UNAVAILABLE is not None, f"real fine-tuning component unavailable: {UNAVAILABLE}")
 class AdapterFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="deepseek-flash-mlx-adapter-")
@@ -118,7 +171,7 @@ class AdapterFixture(unittest.TestCase):
             "output_dir": str(self.component_output),
             "report_path": str(self.component_report),
             "report_schema_version": 1,
-            "expected_branch": "ds4-finetuning",
+            "expected_branch": COMPONENT_BRANCH,
             "expected_staged_diff_sha256": STAGED_HASH,
             "source_mode": "release",
             "expected_source_identity": SOURCE_IDENTITY,
