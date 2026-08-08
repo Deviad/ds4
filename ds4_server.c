@@ -14750,8 +14750,16 @@ static void test_canonical_rewrite_rebuilds_when_live_tail_changes(void) {
 static void test_kv_cache_store_len_uses_configured_boundary(void) {
     kv_disk_cache kc = {0};
     kc.opt = kv_cache_default_options();
+    /* Alignment is off by default, so set it explicitly here: this case covers
+     * the floor-to-boundary behaviour, not whatever the default happens to be. */
+    kc.opt.boundary_align_tokens = 2048;
     TEST_ASSERT(kv_cache_store_len(&kc, 11011) == 10240);
     TEST_ASSERT(kv_cache_store_len(&kc, 1695) == 1695);
+
+    kc.opt.boundary_align_tokens = 0;
+    TEST_ASSERT(kv_cache_store_len(&kc, 11011) == 10979);
+    TEST_ASSERT(kv_cache_store_len(&kc, 1695) == 1663);
+    kc.opt.boundary_align_tokens = 2048;
 
     kc.opt.boundary_trim_tokens = 0;
     kc.opt.boundary_align_tokens = 1000;
@@ -14824,6 +14832,10 @@ static void test_kv_cache_continued_uses_aligned_frontiers(void) {
     kv_disk_cache kc = {0};
     kc.enabled = true;
     kc.opt = kv_cache_default_options();
+    /* The continued step is the interval rounded up to the alignment, so these
+     * frontiers only exist when alignment is on.  Set it explicitly rather than
+     * inheriting the default. */
+    kc.opt.boundary_align_tokens = 2048;
 
     TEST_ASSERT(kv_cache_continued_store_target(&kc, 10239) == 0);
     TEST_ASSERT(kv_cache_continued_store_target(&kc, 10240) == 10240);
@@ -14848,6 +14860,8 @@ static void test_kv_cache_cold_store_suppresses_duplicate_continued_boundary(voi
     kv_disk_cache kc = {0};
     kc.enabled = true;
     kc.opt = kv_cache_default_options();
+    /* 10240 is a continued frontier only under 2048 alignment. */
+    kc.opt.boundary_align_tokens = 2048;
 
     int old = kv_cache_suppress_continued_store(&kc, 10240);
     TEST_ASSERT(old == 0);
