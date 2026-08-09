@@ -69,6 +69,9 @@ next sections.
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): correctness and speed regression testing
   guide for contributors. **Read this before sending a pull request**.
+- [REPRODUCTION_GUIDE.md](REPRODUCTION_GUIDE.md): DeepSeek V4 Flash 0731 MTP
+  finetune + mixed-quant GGUF + speed research — what improved, what didn't,
+  and how to reproduce it.
 - [QA_BEFORE_RELEASES.md](QA_BEFORE_RELEASES.md): the complete release test
   matrix, including the remote Metal, CUDA, and ROCm machines.
 - [gguf-tools/README.md](gguf-tools/README.md): offline GGUF generation,
