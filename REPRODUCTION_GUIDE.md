@@ -62,6 +62,34 @@ Summary of the stages:
 **Opus 4.8**, and **Opus 4.7**, together with coding repositories from
 **GitHub**.
 
+### MLX LoRA finetune command
+
+The joint main + MTP LoRA finetune runs in the separate `ds4-finetuning`
+worktree via `scripts/finetune_e2e.py` (an end-to-end pipeline: train → fuse →
+MLX→HF → hybrid → quantize → verify). Proven parameters from the 2026-07-25
+run:
+
+```bash
+cd /Users/spotted/projects/ds4-finetuning
+python scripts/finetune_e2e.py \
+  --mlx-work "/Volumes/Data NVME/mlx-ft/ds4" \
+  --iters 400 --lr 5e-5 --rank 8
+```
+
+Key arguments (defaults shown):
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--iters` | 400 | overfitting starts after ~400 at lr 5e-5 |
+| `--lr` | 5e-5 | learning rate |
+| `--rank` | 8 | LoRA rank (scale 20) |
+| `--targets` | `self_attn.q_a_proj self_attn.q_b_proj self_attn.kv_proj` | LoRA target modules (scale = rank × 2.5 = 20) |
+| `--batch` | 1 | batch size |
+| `--seq-len` | 4096 | max sequence length |
+| `--dataset-root` | `/Volumes/Data NVME/datasets/anthropomorphic-frankenmerge` | dataset root |
+| `--stop-after` | (all) | stop after `train`/`fuse`/`mlx-to-hf`/`hybrid`/`quantize`/`verify` |
+| `--dry-run` | off | preview without running |
+
 ## 5. Reproduce the speed research
 
 Build the engine and run the benchmarks that produced the numbers above:
